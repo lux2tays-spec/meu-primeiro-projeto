@@ -1,0 +1,70 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: agendabot
+      POSTGRES_PASSWORD: agendabot
+      POSTGRES_DB: agendabot
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U agendabot -d agendabot"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+
+  evolution:
+    image: atendai/evolution-api:latest
+    ports:
+      - "8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      SERVER_URL: "http://localhost:8080"
+      # Auth
+      AUTHENTICATION_TYPE: apikey
+      AUTHENTICATION_API_KEY: agendabot_evolution_key
+      AUTHENTICATION_EXPOSE_IN_FETCH_INSTANCES: "true"
+      # Database (uses existing Postgres — separate schema)
+      DATABASE_ENABLED: "true"
+      DATABASE_PROVIDER: postgresql
+      DATABASE_CONNECTION_URI: "postgresql://agendabot:agendabot@postgres:5432/agendabot?schema=evolution"
+      DATABASE_CONNECTION_CLIENT_NAME: evolution
+      DATABASE_SAVE_DATA_INSTANCE: "true"
+      DATABASE_SAVE_DATA_NEW_MESSAGE: "false"
+      DATABASE_SAVE_MESSAGE_UPDATE: "false"
+      DATABASE_SAVE_DATA_CONTACTS: "false"
+      DATABASE_SAVE_DATA_CHATS: "false"
+      DATABASE_SAVE_DATA_LABELS: "false"
+      DATABASE_SAVE_DATA_HISTORIC: "false"
+      # Redis cache for WhatsApp sessions
+      CACHE_REDIS_ENABLED: "true"
+      CACHE_REDIS_URI: "redis://redis:6379/1"
+      CACHE_REDIS_PREFIX_KEY: "evolution"
+      CACHE_REDIS_SAVE_INSTANCES: "false"
+      CACHE_LOCAL_ENABLED: "false"
+      # Logging
+      LOG_LEVEL: ERROR
+      LOG_COLOR: "false"
+      LOG_BAILEYS: "debug"
+      # QR code
+      QRCODE_LIMIT: "30"
+      QRCODE_COLOR: "#000000"
+    volumes:
+      - evolution_instances:/evolution/instances
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  redis_data:
+  evolution_instances:

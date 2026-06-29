@@ -1,0 +1,25 @@
+{
+  "name": "agendabot",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "turbo run dev",
+    "build": "turbo run build",
+    "typecheck": "turbo run typecheck",
+    "lint": "turbo run lint",
+    "migrate": "node apps/backend/scripts/migrate.js",
+    "setup": "bash scripts/setup.sh",
+    "start": "bash start.sh"
+  },
+  "devDependencies": {
+    "turbo": "^2.0.0",
+    "typescript": "^5.4.0"
+  },
+  "overrides": {
+    "react": "18.2.0",
+    "react-native": "0.74.0"
+  }
+}

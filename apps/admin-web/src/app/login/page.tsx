@@ -1,0 +1,82 @@
+'use client'
+import { useState, FormEvent } from 'react'
+import { useRouter } from 'next/navigation'
+import { rootApi, setToken } from '@/lib/api'
+import { isRootToken } from '@/lib/auth'
+
+export default function LoginPage() {
+  const router = useRouter()
+  const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
+  const [error, setError] = useState('')
+  const [loading, setLoading] = useState(false)
+
+  async function handleSubmit(e: FormEvent) {
+    e.preventDefault()
+    setError('')
+    setLoading(true)
+    try {
+      const { token } = await rootApi.login(email, password)
+      if (!isRootToken(token)) {
+        setError('Acesso negado. Esta área é exclusiva para administradores root.')
+        return
+      }
+      setToken(token)
+      router.replace('/dashboard')
+    } catch (err: any) {
+      setError(err.message ?? 'Credenciais inválidas')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  return (
+    <div className="min-h-screen bg-sidebar flex items-center justify-center p-4">
+      <div className="w-full max-w-sm">
+        {/* Logo */}
+        <div className="text-center mb-8">
+          <div className="inline-flex w-16 h-16 rounded-2xl bg-primary items-center justify-center mb-4">
+            <span className="text-white text-2xl font-black">AB</span>
+          </div>
+          <h1 className="text-white text-2xl font-bold">AgendaBot</h1>
+          <p className="text-gray-400 text-sm mt-1">Painel Root — Acesso restrito</p>
+        </div>
+
+        <form onSubmit={handleSubmit} className="bg-white rounded-2xl p-8 shadow-xl space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">E-mail</label>
+            <input
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              className="w-full h-11 px-4 rounded-xl border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
+              placeholder="admin@agendabot.com.br"
+              required
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Senha</label>
+            <input
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              className="w-full h-11 px-4 rounded-xl border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
+              placeholder="••••••••"
+              required
+            />
+          </div>
+          {error && (
+            <div className="bg-red-50 text-red-600 text-sm rounded-lg px-4 py-3">{error}</div>
+          )}
+          <button
+            type="submit"
+            disabled={loading}
+            className="w-full h-11 bg-primary hover:bg-primary-dark text-white font-semibold rounded-xl transition-colors disabled:opacity-50"
+          >
+            {loading ? 'Entrando...' : 'Entrar'}
+          </button>
+        </form>
+      </div>
+    </div>
+  )
+}

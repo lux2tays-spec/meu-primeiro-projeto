@@ -1,0 +1,19 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(PGPASSWORD=agendabot psql -h localhost -U agendabot -d agendabot -c \"\\\\dt\")",
+      "Bash(docker exec infra-postgres-1 *)",
+      "Bash(xcode-select -p)",
+      "Bash(xcrun simctl *)",
+      "Bash(~/Library/Android/sdk/emulator/emulator *)",
+      "Bash(node *)",
+      "Bash(npm install *)",
+      "Bash(npm run *)",
+      "Bash(curl *)",
+      "Bash(open *)",
+      "Bash(docker info *)",
+      "Bash(docker compose *)",
+      "Bash(psql *)"
+    ]
+  }
+}

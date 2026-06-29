@@ -1,0 +1,9 @@
+{
+  "framework": "nextjs",
+  "buildCommand": "cd ../.. && npm run build --workspace=apps/admin-web",
+  "outputDirectory": "apps/admin-web/.next",
+  "installCommand": "cd ../.. && npm install",
+  "env": {
+    "NEXT_PUBLIC_API_URL": "@agendabot_api_url"
+  }
+}
