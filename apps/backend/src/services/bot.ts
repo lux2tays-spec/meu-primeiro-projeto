@@ -191,8 +191,16 @@ function buildSystemPrompt(ctx: any, live: any, customerHistory: any[], customer
   const tenantPrompt = ctx.system_prompt || ''
   const tenantInstructions = ctx.custom_instructions || ''
 
-  return `
-Você é o assistente virtual de WhatsApp do(a) "${ctx.business_name}"${ctx.business_type ? ` (${ctx.business_type})` : ''}.
+  const continuationWarning = hasHistory
+    ? `=== INSTRUÇÃO OBRIGATÓRIA ===
+Esta conversa JÁ está em andamento. Você JÁ se apresentou anteriormente.
+NÃO se apresente novamente. NÃO diga "Olá", "Bem-vindo" ou "Sou o [nome]" de novo.
+${nameIsKnown ? `O cliente JÁ informou o nome: "${customerName}". NÃO pergunte o nome.` : 'Verifique o histórico — se o cliente já disse o nome, NÃO pergunte novamente.'}
+Responda DIRETAMENTE à última mensagem do cliente.
+=============================\n\n`
+    : ''
+
+  return `${continuationWarning}Você é o assistente virtual de WhatsApp do(a) "${ctx.business_name}"${ctx.business_type ? ` (${ctx.business_type})` : ''}.
 Tom de voz: ${effectiveTone}. Idioma: ${ctx.language || 'Português'}.
 Hoje é ${todayFmt}.
 
