@@ -52,11 +52,11 @@ async function getLiveBusinessContext(tenantId: string) {
       [tenantId]
     ),
     db.query(
-      `SELECT p.name AS professional_name, wh.day_of_week, wh.start_time, wh.end_time
+      `SELECT COALESCE(p.name, 'Geral') AS professional_name, wh.day_of_week, wh.start_time, wh.end_time
        FROM working_hours wh
-       JOIN professionals p ON p.id = wh.professional_id
+       LEFT JOIN professionals p ON p.id = wh.professional_id
        WHERE wh.tenant_id = $1
-       ORDER BY p.name, wh.day_of_week`,
+       ORDER BY p.name NULLS FIRST, wh.day_of_week`,
       [tenantId]
     ),
     db.query(
