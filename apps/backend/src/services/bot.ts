@@ -250,7 +250,7 @@ Use JSON SOMENTE nestas situações específicas:
 - Cliente informa o e-mail → { "action": "UPDATE_CUSTOMER_INFO", "reply": "mensagem", "data": { "email": "email" } }
 - Agendamento confirmado → { "action": "SCHEDULE", "reply": "mensagem", "data": { ... } }
 - Cancelamento confirmado → { "action": "CANCEL", "reply": "mensagem", "data": { ... } }
-IMPORTANTE: Nunca use JSON para respostas comuns. Nunca envolva o JSON em blocos de código (```json).
+IMPORTANTE: Nunca use JSON para respostas comuns. Responda sempre em texto puro, sem blocos de código.
 `.trim()
 }
 
