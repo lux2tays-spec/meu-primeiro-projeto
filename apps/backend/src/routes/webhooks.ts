@@ -104,25 +104,48 @@ export const webhookRoutes: FastifyPluginAsync = async (app) => {
         customerPhone: customer.phone,
       })
 
-      // Parse structured action or plain reply (strip markdown code blocks if present)
+      // Extract JSON action from AI reply (handles pure JSON, markdown-wrapped, or JSON appended after text)
       let replyText = aiReply
-      try {
-        const cleaned = aiReply.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim()
-        const parsed = JSON.parse(cleaned)
-        if (parsed.reply) replyText = parsed.reply
-        if (parsed.action === 'UPDATE_CUSTOMER_INFO' && parsed.data) {
-          const { name, email } = parsed.data
+      let parsedAction: any = null
+
+      const tryParse = (str: string) => {
+        try { return JSON.parse(str.trim()) } catch { return null }
+      }
+
+      // 1. Pure JSON or markdown-wrapped JSON
+      const stripped = aiReply.replace(/^```(?:json)?\s*/im, '').replace(/\s*```\s*$/m, '').trim()
+      parsedAction = tryParse(stripped)
+
+      // 2. JSON block embedded after plain text (model appended JSON at end)
+      if (!parsedAction) {
+        const jsonBlockMatch = aiReply.match(/\n\s*(?:json\s*\n)?\{[\s\S]*"action"[\s\S]*\}\s*$/)
+        if (jsonBlockMatch) {
+          const jsonPart = jsonBlockMatch[0].replace(/^\s*(?:json\s*)?\n?/, '').trim()
+          parsedAction = tryParse(jsonPart)
+          if (parsedAction) {
+            // Use text before the JSON block as fallback reply
+            replyText = aiReply.slice(0, aiReply.length - jsonBlockMatch[0].length).trim()
+          }
+        }
+      }
+
+      // Apply parsed action
+      if (parsedAction) {
+        if (parsedAction.reply) replyText = parsedAction.reply
+        if (parsedAction.action === 'UPDATE_CUSTOMER_INFO') {
+          const name = parsedAction.data?.name || parsedAction.name || null
+          const email = parsedAction.data?.email || parsedAction.email || null
           if (name || email) {
             await db.query(
               `UPDATE customers SET
                  name  = COALESCE($1, name),
                  email = COALESCE($2, email)
                WHERE id = $3`,
-              [name || null, email || null, customer.id]
+              [name, email, customer.id]
             )
           }
         }
-      } catch { /* plain text reply */ }
+      }
 
       // Persist both messages only after successful AI response
       await db.query(
