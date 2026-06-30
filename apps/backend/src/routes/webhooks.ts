@@ -104,10 +104,11 @@ export const webhookRoutes: FastifyPluginAsync = async (app) => {
         customerPhone: customer.phone,
       })
 
-      // Parse structured action or plain reply
+      // Parse structured action or plain reply (strip markdown code blocks if present)
       let replyText = aiReply
       try {
-        const parsed = JSON.parse(aiReply)
+        const cleaned = aiReply.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim()
+        const parsed = JSON.parse(cleaned)
         if (parsed.reply) replyText = parsed.reply
         if (parsed.action === 'UPDATE_CUSTOMER_INFO' && parsed.data) {
           const { name, email } = parsed.data
