@@ -1,5 +1,5 @@
 'use client'
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useParams } from 'next/navigation'
 import Link from 'next/link'
@@ -31,8 +31,19 @@ export default function TenantDetailPage() {
   const { data: tenant, isLoading } = useQuery({
     queryKey: ['root-tenant', id],
     queryFn: () => rootApi.tenant(id),
-    onSuccess: (d: any) => setForm({ plan: d.plan, status: d.status, max_agendas: d.max_agendas, max_users: d.max_users }),
-  } as any)
+  })
+
+  useEffect(() => {
+    if (tenant && !form) {
+      setForm({
+        plan: tenant.plan,
+        status: tenant.status,
+        max_agendas: tenant.max_agendas,
+        max_users: tenant.max_users,
+        trial_ends_at: tenant.trial_ends_at ? tenant.trial_ends_at.slice(0, 10) : '',
+      })
+    }
+  }, [tenant])
 
   const showSuccess = (msg: string) => { setSuccessMsg(msg); setTimeout(() => setSuccessMsg(''), 3000) }
 
@@ -99,7 +110,13 @@ export default function TenantDetailPage() {
           <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100">
             <div className="flex items-center justify-between mb-4">
               <h2 className="font-semibold text-gray-900">Configuração da conta</h2>
-              <button onClick={() => setEditing(!editing)} className="text-sm text-primary hover:text-primary-dark font-medium">
+              <button onClick={() => {
+                if (editing) {
+                  // Reset form on cancel
+                  setForm({ plan: tenant.plan, status: tenant.status, max_agendas: tenant.max_agendas, max_users: tenant.max_users, trial_ends_at: tenant.trial_ends_at ? tenant.trial_ends_at.slice(0, 10) : '' })
+                }
+                setEditing(!editing)
+              }} className="text-sm text-primary hover:text-primary-dark font-medium">
                 {editing ? 'Cancelar' : 'Editar'}
               </button>
             </div>
@@ -135,6 +152,11 @@ export default function TenantDetailPage() {
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">Máx. usuários</label>
                     <input type="number" value={form.max_users} onChange={(e) => setForm((f: any) => ({ ...f, max_users: Number(e.target.value) }))}
+                      className="w-full h-10 px-3 rounded-xl border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary" />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Trial expira em</label>
+                    <input type="date" value={form.trial_ends_at ?? ''} onChange={(e) => setForm((f: any) => ({ ...f, trial_ends_at: e.target.value || null }))}
                       className="w-full h-10 px-3 rounded-xl border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary" />
                   </div>
                 </div>
