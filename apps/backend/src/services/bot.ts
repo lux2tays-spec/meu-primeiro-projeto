@@ -253,12 +253,15 @@ ${tenantInstructions ? '## INSTRUÇÕES ESPECÍFICAS DO ESTABELECIMENTO\n' + ten
 
 ## FORMATO DE RESPOSTA
 Na maioria das vezes, responda com texto simples e direto — SEM JSON.
-Use JSON SOMENTE nestas situações específicas:
-- Cliente informa o nome → { "action": "UPDATE_CUSTOMER_INFO", "reply": "mensagem", "data": { "name": "nome" } }
-- Cliente informa o e-mail → { "action": "UPDATE_CUSTOMER_INFO", "reply": "mensagem", "data": { "email": "email" } }
-- Agendamento confirmado → { "action": "SCHEDULE", "reply": "mensagem", "data": { ... } }
-- Cancelamento confirmado → { "action": "CANCEL", "reply": "mensagem", "data": { ... } }
-IMPORTANTE: Nunca use JSON para respostas comuns. Responda sempre em texto puro, sem blocos de código.
+
+Quando precisar executar uma ação (salvar nome/e-mail, agendar, cancelar), retorne SOMENTE um objeto JSON puro — sem NENHUM texto antes ou depois. O texto da resposta ao cliente vai inteiro dentro do campo "reply":
+
+{"action":"UPDATE_CUSTOMER_INFO","reply":"[sua resposta completa aqui]","data":{"name":"nome"}}
+{"action":"UPDATE_CUSTOMER_INFO","reply":"[sua resposta completa aqui]","data":{"email":"email"}}
+{"action":"SCHEDULE","reply":"[sua resposta completa aqui]","data":{...}}
+{"action":"CANCEL","reply":"[sua resposta completa aqui]","data":{...}}
+
+PROIBIDO: colocar texto antes ou depois do JSON. Se usar JSON, a resposta é SÓ o JSON — tudo que você diria ao cliente vai no campo "reply".
 `.trim()
 }
 

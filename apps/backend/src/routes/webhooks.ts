@@ -104,7 +104,7 @@ export const webhookRoutes: FastifyPluginAsync = async (app) => {
         customerPhone: customer.phone,
       })
 
-      // Extract JSON action from AI reply (handles pure JSON, markdown-wrapped, or JSON appended after text)
+      // Extract JSON action from AI reply — handles pure JSON, markdown-wrapped, or JSON appended after text
       let replyText = aiReply
       let parsedAction: any = null
 
@@ -112,19 +112,30 @@ export const webhookRoutes: FastifyPluginAsync = async (app) => {
         try { return JSON.parse(str.trim()) } catch { return null }
       }
 
-      // 1. Pure JSON or markdown-wrapped JSON
-      const stripped = aiReply.replace(/^```(?:json)?\s*/im, '').replace(/\s*```\s*$/m, '').trim()
-      parsedAction = tryParse(stripped)
+      // 1. Pure JSON (entire reply is JSON)
+      parsedAction = tryParse(aiReply)
 
-      // 2. JSON block embedded after plain text (model appended JSON at end)
+      // 2. Markdown-wrapped: ```json {...} ```
       if (!parsedAction) {
-        const jsonBlockMatch = aiReply.match(/\n\s*(?:json\s*\n)?\{[\s\S]*"action"[\s\S]*\}\s*$/)
-        if (jsonBlockMatch) {
-          const jsonPart = jsonBlockMatch[0].replace(/^\s*(?:json\s*)?\n?/, '').trim()
-          parsedAction = tryParse(jsonPart)
-          if (parsedAction) {
-            // Use text before the JSON block as fallback reply
-            replyText = aiReply.slice(0, aiReply.length - jsonBlockMatch[0].length).trim()
+        const noFences = aiReply.replace(/^```(?:json)?\s*/im, '').replace(/\s*```\s*$/m, '').trim()
+        parsedAction = tryParse(noFences)
+      }
+
+      // 3. JSON block anywhere in reply — find last complete {...} block with "action" key
+      if (!parsedAction) {
+        const lastBrace = aiReply.lastIndexOf('}')
+        if (lastBrace !== -1) {
+          for (let i = lastBrace - 1; i >= 0; i--) {
+            if (aiReply[i] === '{') {
+              const candidate = aiReply.slice(i, lastBrace + 1)
+              const parsed = tryParse(candidate)
+              if (parsed?.action) {
+                parsedAction = parsed
+                // text before the JSON block (strip trailing 'json' label if present)
+                replyText = aiReply.slice(0, i).replace(/\s*\bjson\b\s*$/i, '').trim()
+                break
+              }
+            }
           }
         }
       }
