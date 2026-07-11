@@ -2,6 +2,12 @@ import nodemailer from 'nodemailer'
 
 let _transporter: nodemailer.Transporter | null = null
 
+function escapeHtml(s: string): string {
+  return s.replace(/[&<>"']/g, (c) =>
+    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c] as string)
+  )
+}
+
 async function getTransporter(): Promise<nodemailer.Transporter> {
   if (_transporter) return _transporter
 
@@ -38,7 +44,7 @@ export async function sendVerificationEmail(to: string, name: string, token: str
     subject: 'Confirme seu e-mail — AgendaBot',
     html: `
       <div style="font-family:sans-serif;max-width:480px;margin:0 auto">
-        <h2 style="color:#111">Olá, ${name}!</h2>
+        <h2 style="color:#111">Olá, ${escapeHtml(name)}!</h2>
         <p>Obrigado por criar sua conta no <strong>AgendaBot</strong>.</p>
         <p>Clique no botão abaixo para confirmar seu e-mail e ativar sua conta:</p>
         <a href="${link}"

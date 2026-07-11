@@ -26,14 +26,15 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
     },
   })
 
-  if (res.status === 401) {
-    clearToken()
-    window.location.href = '/login'
-    throw new Error('Sessão expirada')
-  }
-
   if (!res.ok) {
     const err = await res.json().catch(() => ({ error: 'Erro desconhecido' }))
+    // Only bounce to /login for expired sessions on protected calls — never on the
+    // login/register/google endpoints, where 401 means "wrong credentials".
+    if (res.status === 401 && !path.startsWith('/auth/')) {
+      clearToken()
+      window.location.href = '/login'
+      throw new Error('Sessão expirada')
+    }
     throw new Error(err.error ?? `Erro ${res.status}`)
   }
 
@@ -60,6 +61,7 @@ export const authApi = {
     api.get<{ token: string; verified: boolean }>(`/auth/verify-email?token=${encodeURIComponent(token)}`),
   googleAuth: (data: { id_token: string; business_name?: string; phone?: string; referral_code?: string }) =>
     api.post<{ token: string; tenant_id: string; is_new: boolean }>('/auth/google', data),
+  deleteAccount: () => api.delete<{ deleted: boolean }>('/auth/account'),
 }
 
 export const tenantApi = {
@@ -135,6 +137,7 @@ export const whatsappApi = {
   connect: () => api.post<any>('/whatsapp/connect'),
   getQR: () => api.get<any>('/whatsapp/qr'),
   getStatus: () => api.get<any>('/whatsapp/status'),
+  disconnect: () => api.post<any>('/whatsapp/disconnect'),
 }
 
 export const affiliateApi = {

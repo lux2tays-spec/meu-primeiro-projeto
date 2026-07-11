@@ -1,0 +1,23 @@
+# Caddy reverse proxy — automatic HTTPS (Let's Encrypt) in front of the backend.
+# Set API_DOMAIN in the environment (e.g. api.agendabot.com.br). Caddy obtains and
+# renews the TLS certificate automatically and terminates HTTPS here; the backend
+# is never exposed directly to the internet.
+
+{$API_DOMAIN} {
+	encode gzip
+
+	# Forward real client IP + proto so the backend (trustProxy) rate-limits per IP
+	reverse_proxy backend:3000 {
+		header_up X-Forwarded-For {remote_host}
+		header_up X-Forwarded-Proto {scheme}
+	}
+
+	# Belt-and-suspenders security headers (backend also sets these)
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "no-referrer"
+		-Server
+	}
+}

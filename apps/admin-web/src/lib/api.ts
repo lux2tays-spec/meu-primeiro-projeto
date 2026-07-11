@@ -24,14 +24,13 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
     },
   })
 
-  if (res.status === 401) {
-    clearToken()
-    window.location.href = '/login'
-    throw new Error('Sessão expirada')
-  }
-
   if (!res.ok) {
     const err = await res.json().catch(() => ({ error: 'Erro desconhecido' }))
+    if (res.status === 401 && !path.includes('/auth/login')) {
+      clearToken()
+      window.location.href = '/login'
+      throw new Error('Sessão expirada')
+    }
     throw new Error(err.error ?? `Erro ${res.status}`)
   }
 

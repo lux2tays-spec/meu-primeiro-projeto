@@ -2,6 +2,7 @@ import { FastifyPluginAsync } from 'fastify'
 import { z, ZodError } from 'zod'
 import { db } from '../lib/db'
 import { sendVerificationEmail } from '../lib/email'
+import { hashPassword, verifyPassword } from '../lib/password'
 import crypto from 'node:crypto'
 
 const registerSchema = z.object({
@@ -18,10 +19,6 @@ const loginSchema = z.object({
   password: z.string(),
 })
 
-function hashPassword(password: string) {
-  return crypto.createHash('sha256').update(password + process.env.JWT_SECRET).digest('hex')
-}
-
 function zodErrorMessage(err: ZodError): string {
   const fieldMessages: Record<string, string> = {
     password: 'A senha deve ter pelo menos 8 caracteres',
@@ -35,7 +32,9 @@ function zodErrorMessage(err: ZodError): string {
 }
 
 export const authRoutes: FastifyPluginAsync = async (app) => {
-  app.post('/register', async (request, reply) => {
+  app.post('/register', {
+    config: { rateLimit: { max: 3, timeWindow: '1 hour' } },
+  }, async (request, reply) => {
     let body: z.infer<typeof registerSchema>
     try {
       body = registerSchema.parse(request.body)
@@ -145,7 +144,9 @@ export const authRoutes: FastifyPluginAsync = async (app) => {
     return reply.send({ token: jwtToken, verified: true })
   })
 
-  app.post('/login', async (request, reply) => {
+  app.post('/login', {
+    config: { rateLimit: { max: 10, timeWindow: '15 minutes' } },
+  }, async (request, reply) => {
     let body: z.infer<typeof loginSchema>
     try {
       body = loginSchema.parse(request.body)
@@ -161,12 +162,20 @@ export const authRoutes: FastifyPluginAsync = async (app) => {
       [body.email]
     )
 
-    if (!user || user.password_hash !== hashPassword(body.password)) {
+    const check = user
+      ? verifyPassword(body.password, user.password_hash)
+      : { valid: false, needsRehash: false }
+    if (!user || !check.valid) {
       return reply.status(401).send({ error: 'E-mail ou senha incorretos' })
     }
 
+    // Transparently upgrade legacy sha256 hashes to scrypt on successful login
+    if (check.needsRehash) {
+      await db.query('UPDATE users SET password_hash = $1 WHERE id = $2', [hashPassword(body.password), user.id])
+    }
+
     if (!user.email_verified) {
-      return reply.status(403).send({ error: 'email_not_verified' })
+      return reply.status(401).send({ error: 'email_not_verified' })
     }
 
     const { rows: [userRole] } = await db.query(
@@ -180,5 +189,47 @@ export const authRoutes: FastifyPluginAsync = async (app) => {
     )
 
     return reply.send({ token })
+  })
+
+  // ── Account deletion (required by Apple 5.1.1(v) and Google Play) ────────────
+  // Owner deletes the whole business (cascades customers, appointments, messages,
+  // conversations, WhatsApp instance, tokens, subscription). Staff removes only
+  // their own membership + user record.
+  app.delete('/account', {
+    preHandler: [(app as any).authenticate],
+  }, async (request, reply) => {
+    const { user_id, tenant_id, role } = request.user
+
+    const client = await db.connect()
+    try {
+      await client.query('BEGIN')
+
+      if ((role === 'owner' || role === 'root') && tenant_id) {
+        // Deleting the tenant cascades all tenant-scoped data via FK ON DELETE CASCADE
+        await client.query('DELETE FROM tenants WHERE id = $1', [tenant_id])
+      } else {
+        // Non-owner: just remove this user's membership in the tenant
+        await client.query('DELETE FROM user_roles WHERE user_id = $1 AND tenant_id = $2', [user_id, tenant_id])
+      }
+
+      // Remove the user account itself if it no longer belongs to any tenant
+      const { rows: remaining } = await client.query(
+        'SELECT 1 FROM user_roles WHERE user_id = $1 LIMIT 1', [user_id]
+      )
+      if (remaining.length === 0) {
+        await client.query('DELETE FROM users WHERE id = $1', [user_id])
+      }
+
+      await client.query('COMMIT')
+    } catch (err) {
+      await client.query('ROLLBACK')
+      throw err
+    } finally {
+      client.release()
+    }
+
+    // NOTE: any active Mercado Pago subscription must be cancelled out-of-band
+    // (MP has no auto-cancel on our side). Tracked as a follow-up.
+    return reply.send({ deleted: true })
   })
 }

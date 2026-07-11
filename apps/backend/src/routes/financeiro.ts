@@ -1,6 +1,7 @@
 import { FastifyPluginAsync } from 'fastify'
 import { z } from 'zod'
 import { db } from '../lib/db'
+import { decrypt } from '../lib/crypto'
 
 const paymentLinkSchema = z.object({
   title: z.string().min(1),
@@ -10,6 +11,7 @@ const paymentLinkSchema = z.object({
 
 export const financeiroRoutes: FastifyPluginAsync = async (app) => {
   app.addHook('preHandler', (app as any).authenticate)
+  app.addHook('preHandler', (app as any).planGuard)
 
   // ── Resumo financeiro ─────────────────────────────────────────────────────
   app.get('/resumo', async (request, reply) => {
@@ -110,7 +112,7 @@ export const financeiroRoutes: FastifyPluginAsync = async (app) => {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            Authorization: `Bearer ${tenant.mp_access_token}`,
+            Authorization: `Bearer ${decrypt(tenant.mp_access_token)}`,
           },
           body: JSON.stringify({
             items: [{

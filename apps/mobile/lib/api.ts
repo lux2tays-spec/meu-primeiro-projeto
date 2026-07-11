@@ -4,14 +4,24 @@ const BASE_URL = process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:3000'
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const token = await getToken()
-  const res = await fetch(`${BASE_URL}${path}`, {
-    ...options,
-    headers: {
-      'Content-Type': 'application/json',
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      ...options?.headers,
-    },
-  })
+  let res: Response
+  try {
+    res = await fetch(`${BASE_URL}${path}`, {
+      ...options,
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        ...options?.headers,
+      },
+      // Abort hung requests so the UI never freezes waiting on the network
+      signal: AbortSignal.timeout(15000),
+    })
+  } catch (e: any) {
+    if (e?.name === 'TimeoutError' || e?.name === 'AbortError') {
+      throw new Error('Tempo de conexão esgotado. Verifique sua internet e tente novamente.')
+    }
+    throw new Error('Falha de conexão. Verifique sua internet.')
+  }
 
   if (!res.ok) {
     const err = await res.json().catch(() => ({ error: 'Erro desconhecido' }))
@@ -43,6 +53,7 @@ export const authApi = {
     business_name: string
     referral_code?: string
   }) => api.post<{ token: string; tenant_id: string }>('/auth/register', data),
+  deleteAccount: () => api.delete<{ deleted: boolean }>('/auth/account'),
 }
 
 // Tenant
@@ -97,6 +108,7 @@ export const whatsappApi = {
   connect: () => api.post<any>('/whatsapp/connect', {}),
   getQR: () => api.get<any>('/whatsapp/qr'),
   getStatus: () => api.get<any>('/whatsapp/status'),
+  disconnect: () => api.post<any>('/whatsapp/disconnect', {}),
 }
 
 // Google

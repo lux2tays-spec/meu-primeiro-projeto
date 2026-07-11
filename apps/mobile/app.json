@@ -13,7 +13,10 @@
     },
     "ios": {
       "supportsTablet": false,
-      "bundleIdentifier": "com.agendabot.app"
+      "bundleIdentifier": "com.agendabot.app",
+      "config": {
+        "usesNonExemptEncryption": false
+      }
     },
     "android": {
       "adaptiveIcon": {
@@ -24,11 +27,7 @@
     },
     "plugins": [
       "expo-router",
-      "expo-secure-store",
-      [
-        "expo-camera",
-        { "cameraPermission": "Necessário para escanear QR codes." }
-      ]
+      "expo-secure-store"
     ],
     "scheme": "agendabot",
     "experiments": {

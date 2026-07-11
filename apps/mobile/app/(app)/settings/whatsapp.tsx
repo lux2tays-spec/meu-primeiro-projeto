@@ -39,6 +39,17 @@ export default function WhatsAppScreen() {
     onError: (err: any) => toast.show(err.message ?? 'Não foi possível iniciar a conexão.', 'error'),
   })
 
+  const disconnectMutation = useMutation({
+    mutationFn: whatsappApi.disconnect,
+    onSuccess: () => {
+      setIsConnecting(false)
+      queryClient.invalidateQueries({ queryKey: ['whatsapp-status'] })
+      refetchStatus()
+      toast.show('WhatsApp desconectado.', 'info')
+    },
+    onError: (err: any) => toast.show(err.message ?? 'Não foi possível desconectar.', 'error'),
+  })
+
   useEffect(() => {
     if (status?.status === 'connected') {
       setIsConnecting(false)
@@ -140,7 +151,7 @@ export default function WhatsAppScreen() {
         confirmLabel="Desconectar"
         onConfirm={() => {
           setConfirmDisconnect(false)
-          toast.show('WhatsApp desconectado.', 'info')
+          disconnectMutation.mutate()
         }}
         onCancel={() => setConfirmDisconnect(false)}
       />

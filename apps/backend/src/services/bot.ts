@@ -60,11 +60,12 @@ async function getLiveBusinessContext(tenantId: string) {
       [tenantId]
     ),
     db.query(
-      `SELECT a.starts_at, a.ends_at, a.status, s.name AS service, p.name AS professional, c.name AS customer_name
+      // Do NOT expose other customers' names here — this context is sent to the
+      // customer currently chatting. Only occupied time slots are needed.
+      `SELECT a.starts_at, a.ends_at, a.status, s.name AS service, p.name AS professional
        FROM appointments a
        JOIN services s ON s.id = a.service_id
        JOIN professionals p ON p.id = a.professional_id
-       JOIN customers c ON c.id = a.customer_id
        WHERE a.tenant_id = $1 AND a.starts_at BETWEEN $2 AND $3 AND a.status != 'cancelled'
        ORDER BY a.starts_at`,
       [tenantId, todayStart.toISOString(), todayEnd.toISOString()]
@@ -155,7 +156,7 @@ function formatTodayAppointments(rows: any[]): string {
   return rows
     .map((a) => {
       const time = new Date(a.starts_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
-      return `• ${time} — ${a.service} com ${a.professional} (${a.customer_name})`
+      return `• ${time} — ${a.service} com ${a.professional} (horário ocupado)`
     })
     .join('\n')
 }

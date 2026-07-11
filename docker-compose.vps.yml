@@ -1,3 +1,19 @@
+# Production stack for the VPS (safe/incremental — used by the auto-deploy).
+#
+# This file keeps the backend published on :3000 and does NOT require new env
+# vars, so `docker compose ... up -d --no-deps backend` never breaks.
+# Only non-breaking hardening is applied here: log rotation + Redis AOF.
+#
+# For the FULL hardening (Caddy auto-HTTPS, backend internal-only, Redis auth,
+# mandatory Postgres/Redis passwords) see docker-compose.vps.hardened.yml and
+# roll it out in a planned maintenance window with DNS + env configured.
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
 services:
   backend:
     build:
@@ -16,6 +32,7 @@ services:
       - uploads:/app/apps/backend/uploads
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    logging: *default-logging
 
   postgres:
     image: postgres:16-alpine
@@ -31,9 +48,11 @@ services:
       timeout: 5s
       retries: 10
     restart: unless-stopped
+    logging: *default-logging
 
   redis:
     image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]
     volumes:
       - redis_data:/data
     healthcheck:
@@ -42,6 +61,7 @@ services:
       timeout: 5s
       retries: 10
     restart: unless-stopped
+    logging: *default-logging
 
 volumes:
   postgres_data:

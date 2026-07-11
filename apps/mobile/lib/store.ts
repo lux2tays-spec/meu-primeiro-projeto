@@ -52,7 +52,7 @@ export const useAuthStore = create<AuthState>((set) => ({
         if (payload?.exp && payload.exp * 1000 > Date.now()) {
           set({ token, tenantId: payload.tenant_id, userId: payload.user_id, role: payload.role })
         } else {
-          await SecureStore.deleteItemAsync('token')
+          await deleteToken()
         }
       }
     } catch (e) {

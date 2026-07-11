@@ -42,6 +42,7 @@ async function canEditAppointment(
 
 export const appointmentRoutes: FastifyPluginAsync = async (app) => {
   app.addHook('preHandler', (app as any).authenticate)
+  app.addHook('preHandler', (app as any).planGuard)
 
   // ── List ────────────────────────────────────────────────────────────────────
   app.get('/', async (request, reply) => {
@@ -111,14 +112,27 @@ export const appointmentRoutes: FastifyPluginAsync = async (app) => {
     )
     if (!service) return reply.status(404).send({ error: 'Service not found' })
 
+    // Ensure customer and professional belong to this tenant
+    const { rows: [customer] } = await db.query(
+      'SELECT id FROM customers WHERE id = $1 AND tenant_id = $2',
+      [body.customer_id, tenant_id]
+    )
+    if (!customer) return reply.status(404).send({ error: 'Customer not found' })
+
+    const { rows: [professional] } = await db.query(
+      'SELECT id FROM professionals WHERE id = $1 AND tenant_id = $2',
+      [body.professional_id, tenant_id]
+    )
+    if (!professional) return reply.status(404).send({ error: 'Professional not found' })
+
     const startsAt = new Date(body.starts_at)
     const endsAt = new Date(startsAt.getTime() + service.duration_minutes * 60000)
 
     const { rows: conflicts } = await db.query(
       `SELECT id FROM appointments
-       WHERE professional_id = $1 AND status NOT IN ('cancelled')
-       AND tsrange(starts_at, ends_at) && tsrange($2::timestamptz, $3::timestamptz)`,
-      [body.professional_id, startsAt.toISOString(), endsAt.toISOString()]
+       WHERE professional_id = $1 AND tenant_id = $2 AND status NOT IN ('cancelled')
+       AND tsrange(starts_at, ends_at) && tsrange($3::timestamptz, $4::timestamptz)`,
+      [body.professional_id, tenant_id, startsAt.toISOString(), endsAt.toISOString()]
     )
     if (conflicts.length > 0) {
       return reply.status(409).send({ error: 'Time slot not available' })
@@ -147,26 +161,46 @@ export const appointmentRoutes: FastifyPluginAsync = async (app) => {
 
     const body = updateSchema.parse(request.body)
 
+    // Ensure any referenced professional/service belongs to this tenant (prevent cross-tenant references)
+    if (body.professional_id) {
+      const { rows: [prof] } = await db.query(
+        'SELECT id FROM professionals WHERE id = $1 AND tenant_id = $2',
+        [body.professional_id, tenant_id]
+      )
+      if (!prof) return reply.status(404).send({ error: 'Professional not found' })
+    }
+    if (body.service_id) {
+      const { rows: [svc] } = await db.query(
+        'SELECT id FROM services WHERE id = $1 AND tenant_id = $2',
+        [body.service_id, tenant_id]
+      )
+      if (!svc) return reply.status(404).send({ error: 'Service not found' })
+    }
+
     // If changing time/service, recompute ends_at and check conflicts
     let endsAt: string | undefined
     if (body.starts_at) {
       const serviceId = body.service_id ?? (
-        await db.query('SELECT service_id FROM appointments WHERE id = $1', [appointmentId])
+        await db.query('SELECT service_id FROM appointments WHERE id = $1 AND tenant_id = $2', [appointmentId, tenant_id])
       ).rows[0]?.service_id
 
-      const { rows: [service] } = await db.query('SELECT duration_minutes FROM services WHERE id = $1', [serviceId])
+      const { rows: [service] } = await db.query(
+        'SELECT duration_minutes FROM services WHERE id = $1 AND tenant_id = $2', [serviceId, tenant_id]
+      )
       if (service) {
         const startsAt = new Date(body.starts_at)
         endsAt = new Date(startsAt.getTime() + service.duration_minutes * 60000).toISOString()
 
-        const { rows: [appt] } = await db.query('SELECT professional_id FROM appointments WHERE id=$1', [appointmentId])
+        const { rows: [appt] } = await db.query(
+          'SELECT professional_id FROM appointments WHERE id=$1 AND tenant_id=$2', [appointmentId, tenant_id]
+        )
         const professionalId = body.professional_id ?? appt?.professional_id
 
         const { rows: conflicts } = await db.query(
           `SELECT id FROM appointments
-           WHERE professional_id = $1 AND status NOT IN ('cancelled') AND id != $2
-           AND tsrange(starts_at, ends_at) && tsrange($3::timestamptz, $4::timestamptz)`,
-          [professionalId, appointmentId, body.starts_at, endsAt]
+           WHERE professional_id = $1 AND tenant_id = $2 AND status NOT IN ('cancelled') AND id != $3
+           AND tsrange(starts_at, ends_at) && tsrange($4::timestamptz, $5::timestamptz)`,
+          [professionalId, tenant_id, appointmentId, body.starts_at, endsAt]
         )
         if (conflicts.length > 0) {
           return reply.status(409).send({ error: 'Time slot not available' })
@@ -208,7 +242,9 @@ export const appointmentRoutes: FastifyPluginAsync = async (app) => {
   // ── Status shortcut (kept for bot use) ─────────────────────────────────────
   app.patch<{ Params: { id: string } }>('/:id/status', async (request, reply) => {
     const { tenant_id, user_id, role } = request.user
-    const { status } = request.body as { status: string }
+    const { status } = z.object({
+      status: z.enum(['pending', 'confirmed', 'completed', 'cancelled']),
+    }).parse(request.body)
 
     const allowed = await canEditAppointment(user_id, tenant_id!, role, request.params.id)
     if (!allowed) return reply.status(403).send({ error: 'Sem permissão' })
@@ -234,13 +270,13 @@ export const appointmentRoutes: FastifyPluginAsync = async (app) => {
       db.query('SELECT duration_minutes FROM services WHERE id=$1 AND tenant_id=$2', [service_id, tenant_id]),
       db.query(
         `SELECT start_time, end_time FROM working_hours
-         WHERE professional_id=$1 AND day_of_week=EXTRACT(DOW FROM $2::date)`,
-        [professional_id, date]
+         WHERE professional_id=$1 AND tenant_id=$3 AND day_of_week=EXTRACT(DOW FROM $2::date)`,
+        [professional_id, date, tenant_id]
       ),
       db.query(
         `SELECT starts_at, ends_at FROM appointments
-         WHERE professional_id=$1 AND status NOT IN ('cancelled') AND DATE(starts_at)=$2`,
-        [professional_id, date]
+         WHERE professional_id=$1 AND tenant_id=$3 AND status NOT IN ('cancelled') AND DATE(starts_at)=$2`,
+        [professional_id, date, tenant_id]
       ),
     ])
 

@@ -1,10 +1,7 @@
 import { FastifyPluginAsync } from 'fastify'
-import { createHash } from 'crypto'
+import { randomBytes } from 'crypto'
 import { db } from '../lib/db'
-
-function hashPassword(password: string) {
-  return createHash('sha256').update(password + process.env.JWT_SECRET).digest('hex')
-}
+import { hashPassword } from '../lib/password'
 
 export const rootRoutes: FastifyPluginAsync = async (app) => {
   app.addHook('preHandler', (app as any).requireRoot)
@@ -227,7 +224,7 @@ export const rootRoutes: FastifyPluginAsync = async (app) => {
   // Create user
   app.post('/users', async (request, reply) => {
     const { name, email, phone, password } = request.body as any
-    const password_hash = hashPassword(password ?? Math.random().toString(36).slice(2))
+    const password_hash = hashPassword(password ?? randomBytes(24).toString('hex'))
     try {
       const { rows: [user] } = await db.query(
         `INSERT INTO users (name, email, phone, password_hash) VALUES ($1, $2, $3, $4)

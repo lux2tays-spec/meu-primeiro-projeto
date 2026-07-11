@@ -19,7 +19,7 @@ export const affiliateRoutes: FastifyPluginAsync = async (app) => {
     )
 
     if (!affiliate) {
-      const code = Math.random().toString(36).substring(2, 8).toUpperCase()
+      const code = require('node:crypto').randomBytes(3).toString('hex').toUpperCase()
       const { rows: [created] } = await db.query(
         'INSERT INTO affiliates (user_id, referral_code) VALUES ($1, $2) RETURNING *',
         [user_id, code]

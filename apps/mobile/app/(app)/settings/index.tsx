@@ -1,4 +1,4 @@
-import { View, Text, StyleSheet, ScrollView, Alert } from 'react-native'
+import { View, Text, StyleSheet, ScrollView, Alert, Linking } from 'react-native'
 import { router } from 'expo-router'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useQuery } from '@tanstack/react-query'
@@ -6,17 +6,49 @@ import { SettingsRow } from '@/components/ui/SettingsRow'
 import { Card } from '@/components/ui/Card'
 import { Badge } from '@/components/ui/Badge'
 import { useAuthStore } from '@/lib/store'
-import { tenantApi } from '@/lib/api'
+import { tenantApi, authApi } from '@/lib/api'
 import { colors, font, spacing } from '@/lib/theme'
+
+const WEB_URL = process.env.EXPO_PUBLIC_WEB_URL ?? 'https://agendabot.com.br'
 
 export default function SettingsScreen() {
   const clearAuth = useAuthStore((s) => s.clearAuth)
+  const role = useAuthStore((s) => s.role)
   const { data: tenant } = useQuery({ queryKey: ['tenant'], queryFn: tenantApi.me })
 
   function handleLogout() {
     Alert.alert('Sair', 'Deseja sair da conta?', [
       { text: 'Cancelar', style: 'cancel' },
       { text: 'Sair', style: 'destructive', onPress: () => { clearAuth(); router.replace('/(auth)/login') } },
+    ])
+  }
+
+  async function performDelete() {
+    try {
+      await authApi.deleteAccount()
+      clearAuth()
+      router.replace('/(auth)/login')
+    } catch (e: any) {
+      Alert.alert('Erro', e?.message ?? 'Não foi possível excluir a conta. Tente novamente.')
+    }
+  }
+
+  function handleDeleteAccount() {
+    const isOwner = role === 'owner' || role === 'root'
+    const message = isOwner
+      ? 'Isso apaga permanentemente sua conta e TODOS os dados do negócio (clientes, agendamentos, conversas, configurações). Esta ação não pode ser desfeita.'
+      : 'Isso remove permanentemente seu acesso e sua conta. Esta ação não pode ser desfeita.'
+    Alert.alert('Excluir conta', message, [
+      { text: 'Cancelar', style: 'cancel' },
+      {
+        text: 'Excluir',
+        style: 'destructive',
+        onPress: () =>
+          Alert.alert('Tem certeza?', 'Confirme para excluir definitivamente.', [
+            { text: 'Cancelar', style: 'cancel' },
+            { text: 'Excluir definitivamente', style: 'destructive', onPress: performDelete },
+          ]),
+      },
     ])
   }
 
@@ -83,11 +115,18 @@ export default function SettingsScreen() {
         <Text style={styles.section}>Ajuda</Text>
         <Card style={styles.group}>
           <SettingsRow icon="headset-outline" iconColor={colors.warning} label="Suporte" subtitle="Fale com nossa equipe" onPress={() => router.push('/(app)/settings/support')} />
+          <View style={styles.divider} />
+          <SettingsRow icon="shield-checkmark-outline" label="Política de Privacidade" onPress={() => Linking.openURL(`${WEB_URL}/privacidade`)} />
+          <View style={styles.divider} />
+          <SettingsRow icon="document-text-outline" label="Termos de Uso" onPress={() => Linking.openURL(`${WEB_URL}/termos`)} />
         </Card>
 
-        {/* Logout */}
+        {/* Conta */}
+        <Text style={styles.section}>Conta</Text>
         <Card style={styles.group}>
           <SettingsRow icon="log-out-outline" iconColor={colors.danger} label="Sair" showChevron={false} onPress={handleLogout} />
+          <View style={styles.divider} />
+          <SettingsRow icon="trash-outline" iconColor={colors.danger} label="Excluir conta" subtitle="Apagar permanentemente sua conta e dados" showChevron={false} onPress={handleDeleteAccount} />
         </Card>
 
         <Text style={styles.version}>AgendaBot v1.0.0</Text>

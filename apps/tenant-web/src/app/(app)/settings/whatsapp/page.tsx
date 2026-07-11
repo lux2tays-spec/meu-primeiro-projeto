@@ -11,7 +11,7 @@ export default function WhatsAppPage() {
   const { data: status, refetch: refetchStatus } = useQuery({
     queryKey: ['whatsapp-status'],
     queryFn: whatsappApi.getStatus,
-    refetchInterval: (connecting || status?.status === 'qr_pending') ? 3000 : false,
+    refetchInterval: connecting ? 3000 : false,
   })
 
   const { data: qrData } = useQuery({
@@ -24,6 +24,15 @@ export default function WhatsAppPage() {
   const connectMutation = useMutation({
     mutationFn: whatsappApi.connect,
     onSuccess: () => { setConnecting(true); refetchStatus() },
+  })
+
+  const disconnectMutation = useMutation({
+    mutationFn: whatsappApi.disconnect,
+    onSuccess: () => {
+      setConnecting(false)
+      qc.invalidateQueries({ queryKey: ['whatsapp-status'] })
+      refetchStatus()
+    },
   })
 
   useEffect(() => {
@@ -123,10 +132,11 @@ export default function WhatsAppPage() {
         )}
         {isConnected && (
           <button
-            onClick={() => { if (confirm('Tem certeza? O bot parará de responder.')) {} }}
-            className="w-full h-12 border-2 border-gray-200 text-gray-600 hover:bg-gray-50 font-semibold rounded-xl transition-colors"
+            onClick={() => { if (confirm('Tem certeza? O bot parará de responder.')) disconnectMutation.mutate() }}
+            disabled={disconnectMutation.isPending}
+            className="w-full h-12 border-2 border-gray-200 text-gray-600 hover:bg-gray-50 font-semibold rounded-xl transition-colors disabled:opacity-50"
           >
-            Desconectar
+            {disconnectMutation.isPending ? 'Desconectando...' : 'Desconectar'}
           </button>
         )}
       </div>

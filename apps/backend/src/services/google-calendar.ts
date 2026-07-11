@@ -1,4 +1,5 @@
 import { db } from '../lib/db'
+import { encrypt, decrypt } from '../lib/crypto'
 
 const GOOGLE_TOKEN_URL = 'https://oauth2.googleapis.com/token'
 const GOOGLE_CALENDAR_API = 'https://www.googleapis.com/calendar/v3'
@@ -26,12 +27,12 @@ async function getValidToken(userId: string): Promise<{ accessToken: string; cal
   )
   if (!token) return null
 
-  let accessToken = token.access_token
+  let accessToken = decrypt(token.access_token)
   if (!token.token_expiry || new Date(token.token_expiry) <= new Date()) {
-    accessToken = await refreshAccessToken(token.refresh_token)
+    accessToken = await refreshAccessToken(decrypt(token.refresh_token))
     await db.query(
       'UPDATE google_calendar_tokens SET access_token = $1, token_expiry = $2, updated_at = NOW() WHERE user_id = $3',
-      [accessToken, new Date(Date.now() + 3600_000).toISOString(), userId]
+      [encrypt(accessToken), new Date(Date.now() + 3600_000).toISOString(), userId]
     )
   }
 
@@ -146,7 +147,22 @@ export async function deleteCalendarEvent(appointmentId: string) {
 export async function verifyGoogleIdToken(idToken: string) {
   const res = await fetch(`https://oauth2.googleapis.com/tokeninfo?id_token=${idToken}`)
   if (!res.ok) throw new Error('Invalid Google token')
-  return res.json() as Promise<{ sub: string; email: string; name: string; picture: string }>
+  const data = (await res.json()) as {
+    sub: string; email: string; name: string; picture: string
+    aud: string; iss: string; email_verified?: string
+  }
+
+  // Verify the token was issued FOR this application, not any Google OAuth app.
+  const allowed = (process.env.GOOGLE_CLIENT_IDS ?? process.env.GOOGLE_CLIENT_ID ?? '')
+    .split(',').map((s) => s.trim()).filter(Boolean)
+  if (allowed.length && !allowed.includes(data.aud)) {
+    throw new Error('Google token audience mismatch')
+  }
+  if (data.iss !== 'accounts.google.com' && data.iss !== 'https://accounts.google.com') {
+    throw new Error('Invalid Google token issuer')
+  }
+
+  return data
 }
 
 export async function exchangeCodeForTokens(code: string, redirectUri: string) {

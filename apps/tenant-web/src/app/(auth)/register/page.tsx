@@ -343,6 +343,12 @@ export default function RegisterPage() {
             {loading ? 'Criando conta...' : 'Começar gratuitamente'}
           </button>
 
+          <p className="text-center text-xs text-gray-400">
+            Ao criar sua conta você concorda com os{' '}
+            <Link href="/termos" className="text-primary hover:underline">Termos de Uso</Link>{' '}e a{' '}
+            <Link href="/privacidade" className="text-primary hover:underline">Política de Privacidade</Link>.
+          </p>
+
           <p className="text-center text-sm text-gray-500">
             Já tem conta?{' '}
             <Link href="/login" className="text-primary font-semibold hover:underline">Entrar</Link>

@@ -2,11 +2,9 @@ import { FastifyPluginAsync } from 'fastify'
 import { z } from 'zod'
 import { db } from '../lib/db'
 import { verifyGoogleIdToken, exchangeCodeForTokens } from '../services/google-calendar'
+import { hashPassword } from '../lib/password'
+import { encrypt } from '../lib/crypto'
 import crypto from 'node:crypto'
-
-function hashPassword(password: string) {
-  return crypto.createHash('sha256').update(password + process.env.JWT_SECRET).digest('hex')
-}
 
 export const googleRoutes: FastifyPluginAsync = async (app) => {
   // ── Auth: login/register via Google ID token ────────────────────────────────
@@ -123,7 +121,7 @@ export const googleRoutes: FastifyPluginAsync = async (app) => {
        VALUES ($1, $2, $3, $4, $5, TRUE)
        ON CONFLICT (user_id) DO UPDATE SET
          access_token = $3, refresh_token = $4, token_expiry = $5, sync_enabled = TRUE, updated_at = NOW()`,
-      [user_id, tenant_id, tokens.access_token, tokens.refresh_token, expiry]
+      [user_id, tenant_id, encrypt(tokens.access_token), encrypt(tokens.refresh_token), expiry]
     )
 
     return reply.send({ connected: true })

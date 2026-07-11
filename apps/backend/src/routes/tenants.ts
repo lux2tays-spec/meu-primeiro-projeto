@@ -1,11 +1,8 @@
 import { FastifyPluginAsync } from 'fastify'
 import { z } from 'zod'
-import crypto from 'node:crypto'
 import { db } from '../lib/db'
-
-function hashPassword(password: string) {
-  return crypto.createHash('sha256').update(password + process.env.JWT_SECRET).digest('hex')
-}
+import { hashPassword } from '../lib/password'
+import { encrypt, decrypt, maskSecret } from '../lib/crypto'
 
 const serviceSchema = z.object({
   name: z.string().min(1),
@@ -32,6 +29,7 @@ const staffCreateSchema = z.object({
 
 export const tenantRoutes: FastifyPluginAsync = async (app) => {
   app.addHook('preHandler', (app as any).authenticate)
+  app.addHook('preHandler', (app as any).planGuard)
 
   // ── Tenant info ──────────────────────────────────────────────────────────
 
@@ -96,7 +94,7 @@ export const tenantRoutes: FastifyPluginAsync = async (app) => {
         [tenant_id, body.name, body.description ?? null, body.duration_minutes, body.price, body.reminder_days ?? null]
       )
       if (body.professional_ids?.length) {
-        await syncServiceProfessionals(client, service.id, tenant_id, body.professional_ids)
+        await syncServiceProfessionals(client, service.id, tenant_id!, body.professional_ids)
       }
       await client.query('COMMIT')
       return reply.status(201).send(service)
@@ -142,7 +140,7 @@ export const tenantRoutes: FastifyPluginAsync = async (app) => {
       }
 
       if (professional_ids !== undefined) {
-        await syncServiceProfessionals(client, request.params.id, tenant_id, professional_ids)
+        await syncServiceProfessionals(client, request.params.id, tenant_id!, professional_ids)
       }
 
       await client.query('COMMIT')
@@ -230,7 +228,7 @@ export const tenantRoutes: FastifyPluginAsync = async (app) => {
       [tenant_id]
     )
     return reply.send({
-      mp_access_token: tenant?.mp_access_token ? '***' + tenant.mp_access_token.slice(-4) : null,
+      mp_access_token: tenant?.mp_access_token ? maskSecret(decrypt(tenant.mp_access_token)) : null,
       mp_public_key: tenant?.mp_public_key ?? null,
       configured: !!tenant?.mp_access_token,
     })
@@ -240,12 +238,16 @@ export const tenantRoutes: FastifyPluginAsync = async (app) => {
     const { tenant_id, role } = request.user
     if (!['owner'].includes(role)) return reply.status(403).send({ error: 'Apenas o proprietário pode alterar configurações de pagamento' })
 
-    const { mp_access_token, mp_public_key } = request.body as any
+    const { mp_access_token, mp_public_key } = z.object({
+      mp_access_token: z.string().min(10).optional().or(z.literal('')),
+      mp_public_key: z.string().min(10).optional().or(z.literal('')),
+    }).parse(request.body)
 
     const sets: string[] = []
     const values: unknown[] = []
     let i = 1
-    if (mp_access_token !== undefined) { sets.push(`mp_access_token = $${i++}`); values.push(mp_access_token || null) }
+    // Encrypt the access token at rest (mp_public_key is public by design)
+    if (mp_access_token !== undefined) { sets.push(`mp_access_token = $${i++}`); values.push(mp_access_token ? encrypt(mp_access_token) : null) }
     if (mp_public_key  !== undefined) { sets.push(`mp_public_key = $${i++}`);  values.push(mp_public_key  || null) }
 
     if (sets.length === 0) return reply.status(400).send({ error: 'Nenhum campo' })
@@ -345,6 +347,15 @@ export const tenantRoutes: FastifyPluginAsync = async (app) => {
 
     const { rows: body_rows, professional_id } = request.body as any
     const rows = z.array(hoursRowSchema).parse(body_rows)
+
+    // Ensure the professional belongs to this tenant (prevent polluting another tenant's grid)
+    if (professional_id) {
+      const { rows: [prof] } = await db.query(
+        'SELECT id FROM professionals WHERE id = $1 AND tenant_id = $2',
+        [professional_id, tenant_id]
+      )
+      if (!prof) return reply.status(404).send({ error: 'Profissional não encontrado' })
+    }
 
     const client = await db.connect()
     try {

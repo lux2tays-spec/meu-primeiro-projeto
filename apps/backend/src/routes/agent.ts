@@ -30,6 +30,7 @@ const updateSchema = z.object({
 
 export const agentRoutes: FastifyPluginAsync = async (app) => {
   app.addHook('preHandler', (app as any).authenticate)
+  app.addHook('preHandler', (app as any).planGuard)
 
   app.get('/config', async (request, reply) => {
     const { tenant_id } = request.user
@@ -72,7 +73,7 @@ export const agentRoutes: FastifyPluginAsync = async (app) => {
   app.post('/config/upload', async (request, reply) => {
     const { tenant_id } = request.user
 
-    const tenantDir = path.join(UPLOADS_DIR, tenant_id)
+    const tenantDir = path.join(UPLOADS_DIR, tenant_id!)
     if (!fs.existsSync(tenantDir)) fs.mkdirSync(tenantDir, { recursive: true })
 
     const data = await request.file()

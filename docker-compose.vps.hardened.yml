@@ -1,0 +1,94 @@
+# HARDENED production stack — apply as a PLANNED maintenance step, NOT via the
+# auto-deploy (which only recreates `backend`). This version:
+#   - Puts Caddy (auto-HTTPS) in front; backend is internal-only (not public).
+#   - Requires POSTGRES_PASSWORD, REDIS_PASSWORD, API_DOMAIN (fail fast if unset).
+#   - Enables Redis auth + AOF and log rotation on all services.
+#
+# BEFORE switching to this file you MUST, in a maintenance window:
+#   1. Point DNS A record (API_DOMAIN → VPS IP).
+#   2. On the host, export API_DOMAIN, POSTGRES_PASSWORD, REDIS_PASSWORD.
+#   3. Ensure backend .env.vps REDIS_URL includes the password
+#      (redis://:<REDIS_PASSWORD>@redis:6379) and set ALLOWED_ORIGINS.
+#   4. NOTE: POSTGRES_PASSWORD only sets the password on FIRST volume init.
+#      If the postgres volume already exists, keep the ORIGINAL password in
+#      DATABASE_URL (or rotate it inside Postgres first) — otherwise auth fails.
+#   5. Deploy with: docker compose -f docker-compose.vps.hardened.yml up -d
+#      (full recreate, not --no-deps).
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+services:
+  caddy:
+    image: caddy:2-alpine
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      API_DOMAIN: ${API_DOMAIN:?set API_DOMAIN}
+    volumes:
+      - ./infra/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - backend
+    restart: unless-stopped
+    logging: *default-logging
+
+  backend:
+    build:
+      context: .
+      dockerfile: apps/backend/Dockerfile
+    expose:
+      - "3000"          # internal only — reachable by Caddy, not the public internet
+    env_file: apps/backend/.env.vps
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    volumes:
+      - uploads:/app/apps/backend/uploads
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    logging: *default-logging
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: agendabot
+      POSTGRES_USER: agendabot
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U agendabot"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+    logging: *default-logging
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--requirepass", "${REDIS_PASSWORD:?set REDIS_PASSWORD}", "--appendonly", "yes"]
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+    logging: *default-logging
+
+volumes:
+  postgres_data:
+  redis_data:
+  uploads:
+  caddy_data:
+  caddy_config:

@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import {
   View, Text, StyleSheet, ScrollView, KeyboardAvoidingView,
-  Platform, TouchableOpacity,
+  Platform, TouchableOpacity, Linking,
 } from 'react-native'
 import { router, useLocalSearchParams } from 'expo-router'
 import { Input } from '@/components/ui/Input'
@@ -10,6 +10,8 @@ import { useAuthStore } from '@/lib/store'
 import { authApi, googleApi } from '@/lib/api'
 import { useToast } from '@/lib/toast'
 import { colors, font, spacing } from '@/lib/theme'
+
+const WEB_URL = process.env.EXPO_PUBLIC_WEB_URL ?? 'https://agendabot.com.br'
 
 function validateEmail(v: string) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v)
@@ -168,7 +170,13 @@ export default function RegisterScreen() {
           <Button label="Criar conta grátis" onPress={handleRegister} loading={loading} />
 
           <Text style={styles.terms}>
-            Ao criar sua conta você concorda com nossos Termos de Uso e Política de Privacidade.
+            Ao criar sua conta você concorda com nossos{' '}
+            <Text style={styles.termsLink} onPress={() => Linking.openURL(`${WEB_URL}/termos`)}>
+              Termos de Uso
+            </Text>{' '}e a{' '}
+            <Text style={styles.termsLink} onPress={() => Linking.openURL(`${WEB_URL}/privacidade`)}>
+              Política de Privacidade
+            </Text>.
           </Text>
         </View>
       </ScrollView>
@@ -186,6 +194,7 @@ const styles = StyleSheet.create({
   subtitle: { fontSize: font.md, color: colors.textSecondary },
   form: { gap: spacing.md },
   terms: { fontSize: font.sm, color: colors.textSecondary, textAlign: 'center', lineHeight: 18 },
+  termsLink: { color: colors.primary, fontWeight: '600' },
   googleBadge: { backgroundColor: '#DCFCE7', borderRadius: 10, padding: spacing.md },
   googleBadgeText: { fontSize: font.sm, color: '#166534', lineHeight: 20 },
 })

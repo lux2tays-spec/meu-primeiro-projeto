@@ -9,6 +9,7 @@ async function evolutionRequest(path: string, body?: unknown, method = body ? 'P
       apikey: EVOLUTION_KEY,
     },
     body: body ? JSON.stringify(body) : undefined,
+    signal: AbortSignal.timeout(15_000),
   })
 
   const text = await res.text()

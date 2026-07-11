@@ -2,7 +2,7 @@
 import { useEffect, useState } from 'react'
 import { useRouter, usePathname } from 'next/navigation'
 import Link from 'next/link'
-import { getToken, clearToken, tenantApi } from '@/lib/api'
+import { getToken, clearToken, tenantApi, authApi } from '@/lib/api'
 import { isTenantToken, getTokenPayload } from '@/lib/auth'
 import { useQuery } from '@tanstack/react-query'
 
@@ -42,6 +42,23 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   function logout() {
     clearToken()
     router.replace('/login')
+  }
+
+  async function deleteAccount() {
+    const currentRole = getTokenPayload(getToken())?.role
+    const isOwner = currentRole === 'owner' || currentRole === 'root'
+    const msg = isOwner
+      ? 'Isso apaga permanentemente sua conta e TODOS os dados do negócio (clientes, agendamentos, conversas). Não pode ser desfeito. Continuar?'
+      : 'Isso remove permanentemente seu acesso e sua conta. Não pode ser desfeito. Continuar?'
+    if (!window.confirm(msg)) return
+    if (!window.confirm('Tem certeza? Esta ação é definitiva.')) return
+    try {
+      await authApi.deleteAccount()
+      clearToken()
+      router.replace('/login')
+    } catch (e: any) {
+      alert(e?.message ?? 'Não foi possível excluir a conta.')
+    }
   }
 
   if (!ready) return null
@@ -122,6 +139,12 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
             className="w-full text-left text-gray-400 hover:text-white text-sm px-3 py-2 rounded-xl hover:bg-sidebar-hover transition-colors"
           >
             ← Sair
+          </button>
+          <button
+            onClick={deleteAccount}
+            className="w-full text-left text-red-400/80 hover:text-red-300 text-sm px-3 py-2 rounded-xl hover:bg-sidebar-hover transition-colors"
+          >
+            🗑️ Excluir conta
           </button>
         </div>
       </aside>
