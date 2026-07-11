@@ -14,8 +14,12 @@ const csp = [
   "form-action 'self'",
 ].join('; ')
 
+const isProd = process.env.NODE_ENV === 'production'
+
 const securityHeaders = [
-  { key: 'Content-Security-Policy', value: csp },
+  // CSP apenas em produção — em dev a CSP estrita bloquearia o HMR (ws://) e as
+  // chamadas à API em http://localhost:3000.
+  ...(isProd ? [{ key: 'Content-Security-Policy', value: csp }] : []),
   { key: 'Strict-Transport-Security', value: 'max-age=31536000; includeSubDomains' },
   { key: 'X-Frame-Options', value: 'DENY' },
   { key: 'X-Content-Type-Options', value: 'nosniff' },
