@@ -1,11 +1,18 @@
 import Anthropic from '@anthropic-ai/sdk'
 import { db } from '../lib/db'
-import { redis, BOT_CONTEXT_TTL, TENANT_CONFIG_TTL } from '../lib/redis'
+import { redis, TENANT_CONFIG_TTL } from '../lib/redis'
 import type { BotMessage } from '@agendabot/shared'
+import {
+  resolveService, resolveProfessional, findAvailableSlots,
+  bookAppointment, cancelUpcomingAppointment,
+} from './scheduling'
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
+const BOT_MODEL = process.env.BOT_MODEL || 'claude-haiku-4-5'
+const TZ = 'America/Sao_Paulo'
+const MAX_TOOL_TURNS = 6
 
-const DAY_NAMES = ['Domingo', 'Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado']
+// ── Context loaders ─────────────────────────────────────────────────────────
 
 async function getTenantContext(tenantId: string) {
   const cacheKey = `tenant:config:${tenantId}`
@@ -29,23 +36,12 @@ async function getTenantContext(tenantId: string) {
     [tenantId]
   )
   if (!rows[0]) return null
-
   await redis.setex(cacheKey, TENANT_CONFIG_TTL, JSON.stringify(rows[0]))
   return rows[0]
 }
 
 async function getLiveBusinessContext(tenantId: string) {
-  const now = new Date()
-  const todayStart = new Date(now)
-  todayStart.setHours(0, 0, 0, 0)
-  const todayEnd = new Date(now)
-  todayEnd.setHours(23, 59, 59, 999)
-  const tomorrowStart = new Date(todayStart)
-  tomorrowStart.setDate(tomorrowStart.getDate() + 1)
-  const tomorrowEnd = new Date(todayEnd)
-  tomorrowEnd.setDate(tomorrowEnd.getDate() + 1)
-
-  const [servicesRes, hoursRes, todayAppsRes, tomorrowAppsRes] = await Promise.all([
+  const [servicesRes, hoursRes] = await Promise.all([
     db.query(
       `SELECT name, description, duration_minutes, price
        FROM services WHERE tenant_id = $1 AND active = TRUE ORDER BY name`,
@@ -59,153 +55,115 @@ async function getLiveBusinessContext(tenantId: string) {
        ORDER BY p.name NULLS FIRST, wh.day_of_week`,
       [tenantId]
     ),
-    db.query(
-      // Do NOT expose other customers' names here — this context is sent to the
-      // customer currently chatting. Only occupied time slots are needed.
-      `SELECT a.starts_at, a.ends_at, a.status, s.name AS service, p.name AS professional
-       FROM appointments a
-       JOIN services s ON s.id = a.service_id
-       JOIN professionals p ON p.id = a.professional_id
-       WHERE a.tenant_id = $1 AND a.starts_at BETWEEN $2 AND $3 AND a.status != 'cancelled'
-       ORDER BY a.starts_at`,
-      [tenantId, todayStart.toISOString(), todayEnd.toISOString()]
-    ),
-    db.query(
-      `SELECT a.starts_at, a.ends_at, s.name AS service, p.name AS professional
-       FROM appointments a
-       JOIN services s ON s.id = a.service_id
-       JOIN professionals p ON p.id = a.professional_id
-       WHERE a.tenant_id = $1 AND a.starts_at BETWEEN $2 AND $3 AND a.status != 'cancelled'
-       ORDER BY a.starts_at`,
-      [tenantId, tomorrowStart.toISOString(), tomorrowEnd.toISOString()]
-    ),
   ])
-
-  return {
-    services: servicesRes.rows,
-    workingHours: hoursRes.rows,
-    todayAppointments: todayAppsRes.rows,
-    tomorrowAppointments: tomorrowAppsRes.rows,
-  }
+  return { services: servicesRes.rows, workingHours: hoursRes.rows }
 }
 
-async function getCustomerContext(tenantId: string, customerId: string) {
-  const { rows } = await db.query(
-    `SELECT a.starts_at, a.status, s.name AS service, p.name AS professional
+async function getCustomerProfile(tenantId: string, customerId: string) {
+  const histRes = await db.query(
+    `SELECT to_char(a.starts_at AT TIME ZONE $3, 'DD/MM/YYYY') AS date,
+            a.status, s.name AS service, p.name AS professional
      FROM appointments a
      JOIN services s ON s.id = a.service_id
      JOIN professionals p ON p.id = a.professional_id
      WHERE a.tenant_id = $1 AND a.customer_id = $2
-     ORDER BY a.starts_at DESC
-     LIMIT 10`,
-    [tenantId, customerId]
+     ORDER BY a.starts_at DESC LIMIT 10`,
+    [tenantId, customerId, TZ]
   )
-  return rows
+  // interested_services/last_interest_at come from migration 013 — tolerate its absence
+  let interest: any = {}
+  try {
+    const { rows } = await db.query(
+      "SELECT interested_services, to_char(last_interest_at AT TIME ZONE $3, 'DD/MM/YYYY') AS last_interest FROM customers WHERE id = $1 AND tenant_id = $2",
+      [customerId, tenantId, TZ]
+    )
+    interest = rows[0] ?? {}
+  } catch { /* column not present until migration 013 is applied */ }
+  return { history: histRes.rows, interest }
 }
 
 async function getConversationHistory(conversationId: string): Promise<BotMessage[]> {
-  const cacheKey = `bot:context:${conversationId}`
-  const cached = await redis.get(cacheKey)
-  if (cached) return JSON.parse(cached)
-
   const { rows } = await db.query(
     `SELECT role, content, created_at AS timestamp
      FROM messages
      WHERE conversation_id = $1 AND archived_at IS NULL
-     ORDER BY created_at DESC
-     LIMIT 20`,
+     ORDER BY created_at DESC LIMIT 20`,
     [conversationId]
   )
-
-  const history = rows.reverse() as BotMessage[]
-  await redis.setex(cacheKey, BOT_CONTEXT_TTL, JSON.stringify(history))
-  return history
+  return rows.reverse() as BotMessage[]
 }
 
-async function appendToHistory(conversationId: string, message: BotMessage) {
-  const cacheKey = `bot:context:${conversationId}`
-  const history = await getConversationHistory(conversationId)
-  const trimmed = [...history, message].slice(-20)
-  await redis.setex(cacheKey, BOT_CONTEXT_TTL, JSON.stringify(trimmed))
-}
+// ── Formatting helpers ──────────────────────────────────────────────────────
+
+const DAY_NAMES = ['Domingo', 'Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado']
 
 function formatWorkingHours(rows: any[]): string {
   const byProfessional: Record<string, string[]> = {}
   for (const r of rows) {
     if (!byProfessional[r.professional_name]) byProfessional[r.professional_name] = []
-    byProfessional[r.professional_name].push(
-      `${DAY_NAMES[r.day_of_week]}: ${r.start_time.slice(0, 5)}–${r.end_time.slice(0, 5)}`
-    )
+    byProfessional[r.professional_name].push(`${DAY_NAMES[r.day_of_week]}: ${r.start_time.slice(0, 5)}–${r.end_time.slice(0, 5)}`)
   }
-  return Object.entries(byProfessional)
-    .map(([name, days]) => `• ${name}: ${days.join(', ')}`)
-    .join('\n')
+  return Object.entries(byProfessional).map(([name, days]) => `• ${name}: ${days.join(', ')}`).join('\n')
 }
 
 function formatServices(rows: any[]): string {
-  return rows
-    .map((s) => {
-      const desc = s.description ? ` — ${s.description}` : ''
-      return `• ${s.name}${desc} | R$ ${Number(s.price).toFixed(2)} | ${s.duration_minutes} min`
-    })
-    .join('\n')
-}
-
-function formatTodayAppointments(rows: any[]): string {
-  if (!rows.length) return 'Sem agendamentos confirmados para hoje.'
-  return rows
-    .map((a) => {
-      const time = new Date(a.starts_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
-      return `• ${time} — ${a.service} com ${a.professional} (horário ocupado)`
-    })
-    .join('\n')
+  return rows.map((s) => {
+    const desc = s.description ? ` — ${s.description}` : ''
+    return `• ${s.name}${desc} | R$ ${Number(s.price).toFixed(2)} | ${s.duration_minutes} min`
+  }).join('\n')
 }
 
 function formatPastAppointments(rows: any[]): string {
-  if (!rows.length) return 'Este cliente não tem histórico de atendimentos.'
-  return rows
-    .map((a) => {
-      const date = new Date(a.starts_at).toLocaleDateString('pt-BR')
-      return `• ${date} — ${a.service} com ${a.professional} (${a.status})`
-    })
-    .join('\n')
+  if (!rows.length) return 'Este cliente ainda não tem histórico de atendimentos.'
+  return rows.map((a) => `• ${a.date} — ${a.service} com ${a.professional} (${a.status})`).join('\n')
 }
 
-function buildSystemPrompt(ctx: any, live: any, customerHistory: any[], customerName: string, customerPhone: string, hasHistory: boolean): string {
+/** Next 7 days as a date reference so the model maps "terça"/"amanhã" reliably. */
+function dateReference(): string {
+  const lines: string[] = []
+  const isoFmt = new Intl.DateTimeFormat('en-CA', { timeZone: TZ })
+  const dayFmt = new Intl.DateTimeFormat('pt-BR', { timeZone: TZ, weekday: 'long', day: '2-digit', month: '2-digit' })
+  const base = Date.now()
+  for (let i = 0; i < 7; i++) {
+    const d = new Date(base + i * 86400000)
+    const label = i === 0 ? 'hoje' : i === 1 ? 'amanhã' : dayFmt.format(d)
+    lines.push(`${isoFmt.format(d)} = ${label}`)
+  }
+  return lines.join('\n')
+}
+
+// ── System prompt (sales-oriented, human-like) ──────────────────────────────
+
+function buildSystemPrompt(ctx: any, live: any, profile: any, customerName: string, customerPhone: string, hasHistory: boolean): string {
   const loc = [ctx.address, ctx.neighborhood, ctx.city, ctx.state].filter(Boolean).join(', ')
   const links: string[] = []
   if (ctx.instagram_url) links.push(`Instagram: ${ctx.instagram_url}`)
   if (ctx.google_maps_url) links.push(`Google Maps: ${ctx.google_maps_url}`)
   if (ctx.website_url) links.push(`Site: ${ctx.website_url}`)
-  if (ctx.whatsapp_number) links.push(`WhatsApp: ${ctx.whatsapp_number}`)
-
-  const now = new Date()
-  const todayName = DAY_NAMES[now.getDay()]
-  const todayFmt = now.toLocaleDateString('pt-BR', { weekday: 'long', day: '2-digit', month: '2-digit', year: 'numeric' })
 
   const nameIsKnown = customerName && customerName !== customerPhone
-  const effectiveTone = ctx.tone || ctx.template_tone || 'amigável e profissional'
-
-  // Merge global template with tenant-specific config
+  const effectiveTone = ctx.tone || ctx.template_tone || 'amigável, caloroso e profissional'
   const templatePrompt = ctx.template_system_prompt || ''
-  const templateInstructions = ctx.template_custom_instructions || ''
   const tenantPrompt = ctx.system_prompt || ''
+  const templateInstructions = ctx.template_custom_instructions || ''
   const tenantInstructions = ctx.custom_instructions || ''
 
-  const continuationWarning = hasHistory
-    ? `REGRA ABSOLUTA — LEIA ANTES DE TUDO:
-Você está no meio de uma conversa em andamento.
-PROIBIDO: saudações ("Olá", "Oi", "Bem-vindo"), apresentações ("Sou o Jackinho", "Me chamo"), boas-vindas.
-${nameIsKnown ? `PROIBIDO: perguntar o nome. O nome do cliente é "${customerName}".` : 'PROIBIDO: perguntar o nome se o cliente já o disse no histórico abaixo.'}
-OBRIGATÓRIO: responda diretamente ao que o cliente disse na última mensagem.
-FIM DA REGRA ABSOLUTA.\n\n`
+  const interestLine = profile.interest?.interested_services
+    ? `\n🎯 INTERESSE ANTERIOR (não fechou): ${profile.interest.interested_services}${profile.interest.last_interest ? ` (em ${profile.interest.last_interest})` : ''} — retome esse gancho com naturalidade.`
     : ''
 
-  return `${continuationWarning}Você é o assistente virtual de WhatsApp do(a) "${ctx.business_name}"${ctx.business_type ? ` (${ctx.business_type})` : ''}.
-Tom de voz: ${effectiveTone}. Idioma: ${ctx.language || 'Português'}.
-Hoje é ${todayFmt}.
+  return `Você é um(a) atendente HUMANO(A) de WhatsApp do(a) "${ctx.business_name}"${ctx.business_type ? ` (${ctx.business_type})` : ''}. NUNCA revele que é uma IA ou robô. Fale como uma pessoa real da equipe.
+Tom: ${effectiveTone}. Idioma: ${ctx.language || 'Português do Brasil'}.
 
 ${templatePrompt ? templatePrompt + '\n' : ''}${tenantPrompt ? tenantPrompt + '\n' : ''}
+## SEU OBJETIVO (VENDA)
+Você é consultivo e conduz a conversa para o FECHAMENTO. Não seja passivo. Sempre que fizer sentido:
+- Entenda a necessidade do cliente e RECOMENDE o serviço ideal (e um complementar/upsell quando couber).
+- Dê 1 dica rápida e útil que gere valor e confiança.
+- Conduza para o agendamento com um convite claro ("Posso já garantir um horário pra você?").
+- Ofereça horários concretos (use a ferramenta de disponibilidade) e crie urgência REAL quando os horários estiverem escassos ("hoje só tenho 14h e 16h").
+- Contorne objeções com empatia (preço → valor/benefício; "vou pensar" → ofereça segurar um horário sem compromisso).
+- Feche de forma proativa: confirme serviço, dia e hora e AGENDE de fato.
 
 ## IDENTIDADE DO NEGÓCIO
 ${ctx.business_info ? ctx.business_info + '\n' : ''}${loc ? `Endereço: ${loc}\n` : ''}${links.length ? links.join('\n') + '\n' : ''}
@@ -213,96 +171,205 @@ ${ctx.business_info ? ctx.business_info + '\n' : ''}${loc ? `Endereço: ${loc}\n
 ## SERVIÇOS E PREÇOS
 ${formatServices(live.services) || 'Sem serviços cadastrados.'}
 
-## HORÁRIOS DE ATENDIMENTO
+## HORÁRIOS DE FUNCIONAMENTO
 ${formatWorkingHours(live.workingHours) || 'Horários não configurados.'}
 
-## AGENDA DE HOJE (${todayName})
-${formatTodayAppointments(live.todayAppointments)}
-
-## AGENDA DE AMANHÃ
-${live.tomorrowAppointments.length
-  ? live.tomorrowAppointments.map((a: any) => {
-      const time = new Date(a.starts_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
-      return `• ${time} — ${a.service} com ${a.professional}`
-    }).join('\n')
-  : 'Sem agendamentos para amanhã.'}
+## CALENDÁRIO (use estas datas ao agendar)
+${dateReference()}
 
 ## CLIENTE ATUAL
 Telefone: ${customerPhone}
-${nameIsKnown ? `Nome: ${customerName} (não pergunte o nome novamente)` : 'Nome: ainda não informado'}
-${formatPastAppointments(customerHistory)}
+${nameIsKnown ? `Nome: ${customerName}` : 'Nome: ainda não informado — pergunte de forma natural em algum momento.'}${interestLine}
+Histórico:
+${formatPastAppointments(profile.history)}
 
-## REGRAS ABSOLUTAS — NUNCA VIOLE ESTAS REGRAS
+## FERRAMENTAS (obrigatório usá-las — nunca invente dados)
+- check_availability: SEMPRE consulte antes de oferecer horários. Nunca invente horários livres.
+- book_appointment: use para AGENDAR DE VERDADE. Só confirme "agendado" ao cliente DEPOIS que a ferramenta retornar sucesso.
+- cancel_appointment: para cancelar o próximo agendamento do cliente.
+- save_customer_info: assim que souber o NOME, o E-MAIL, ou um SERVIÇO DE INTERESSE do cliente, salve na hora (mesmo que ele não feche).
+
+## REGRAS
 ${hasHistory
-  ? '⚠️ CONVERSA EM ANDAMENTO: Você JÁ se apresentou. PROIBIDO se apresentar novamente. Continue a conversa diretamente.'
-  : '✅ PRIMEIRA MENSAGEM: Apresente-se brevemente uma única vez.'}
-- ${nameIsKnown ? `⚠️ NOME JÁ CONHECIDO: O cliente se chama "${customerName}". NUNCA peça o nome novamente.` : 'Se precisar do nome, pergunte UMA única vez durante toda a conversa.'}
-- NUNCA repita perguntas já feitas nesta conversa.
-- NUNCA envie saudações repetidas ("Olá!", "Bem-vindo!") se já foram enviadas antes.
-- Mantenha total continuidade: lembre de TUDO que foi dito nesta sessão.
-- Se o cliente foi atendido há mais de ${ctx.return_reminder_days ?? 30} dias, sugira proativamente um retorno.
-- Seja conciso: respostas curtas e diretas, sem repetir o que já foi dito.
-
-## SUAS RESPONSABILIDADES
-- Responder dúvidas sobre serviços, preços, horários, localização e redes sociais
-- Ajudar o cliente a agendar, remarcar ou cancelar atendimentos
-- Consultar a agenda antes de sugerir horários — nunca sugira horários já ocupados
-- Enviar localização, Instagram ou Google Maps quando solicitado
-
-${templateInstructions ? '## INSTRUÇÕES DO TIPO DE NEGÓCIO\n' + templateInstructions + '\n' : ''}
-${tenantInstructions ? '## INSTRUÇÕES ESPECÍFICAS DO ESTABELECIMENTO\n' + tenantInstructions + '\n' : ''}
-
-## FORMATO DE RESPOSTA
-Na maioria das vezes, responda com texto simples e direto — SEM JSON.
-
-Quando precisar executar uma ação (salvar nome/e-mail, agendar, cancelar), retorne SOMENTE um objeto JSON puro — sem NENHUM texto antes ou depois. O texto da resposta ao cliente vai inteiro dentro do campo "reply":
-
-{"action":"UPDATE_CUSTOMER_INFO","reply":"[sua resposta completa aqui]","data":{"name":"nome"}}
-{"action":"UPDATE_CUSTOMER_INFO","reply":"[sua resposta completa aqui]","data":{"email":"email"}}
-{"action":"SCHEDULE","reply":"[sua resposta completa aqui]","data":{...}}
-{"action":"CANCEL","reply":"[sua resposta completa aqui]","data":{...}}
-
-PROIBIDO: colocar texto antes ou depois do JSON. Se usar JSON, a resposta é SÓ o JSON — tudo que você diria ao cliente vai no campo "reply".
-`.trim()
+  ? '- CONVERSA EM ANDAMENTO: você JÁ se apresentou. NÃO cumprimente de novo ("Olá", "Bem-vindo") nem se apresente. Continue direto.'
+  : '- PRIMEIRA MENSAGEM: cumprimente de forma calorosa e breve, uma única vez.'}
+${nameIsKnown ? `- O cliente se chama "${customerName}". NUNCA pergunte o nome de novo.` : ''}
+- Estilo WhatsApp: mensagens CURTAS e humanas, no máximo 2-4 linhas. Emojis com moderação. Nunca mande textão.
+- Nunca repita perguntas já respondidas. Lembre de tudo que foi dito.
+- Confirme serviço + dia + hora antes de agendar, e agende de fato com a ferramenta.
+${templateInstructions ? '\n## INSTRUÇÕES DO TIPO DE NEGÓCIO\n' + templateInstructions : ''}${tenantInstructions ? '\n## INSTRUÇÕES DO ESTABELECIMENTO\n' + tenantInstructions : ''}`.trim()
 }
 
-export async function processMessage(params: {
+// ── Tool definitions ────────────────────────────────────────────────────────
+
+const TOOLS: Anthropic.Tool[] = [
+  {
+    name: 'save_customer_info',
+    description: 'Salva nome, e-mail e/ou serviço de interesse do cliente. Use assim que descobrir qualquer um desses dados, mesmo que o cliente não vá fechar agora.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        name: { type: 'string', description: 'Nome do cliente' },
+        email: { type: 'string', description: 'E-mail do cliente' },
+        interested_service: { type: 'string', description: 'Serviço que o cliente demonstrou interesse mas não agendou' },
+      },
+    },
+  },
+  {
+    name: 'check_availability',
+    description: 'Retorna os horários REALMENTE livres para um serviço numa data. Use SEMPRE antes de oferecer horários.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        service: { type: 'string', description: 'Nome do serviço' },
+        date: { type: 'string', description: 'Data no formato YYYY-MM-DD' },
+        professional: { type: 'string', description: 'Nome do profissional (opcional)' },
+      },
+      required: ['service', 'date'],
+    },
+  },
+  {
+    name: 'book_appointment',
+    description: 'Agenda DE VERDADE um horário para o cliente. Só use após confirmar serviço, data e hora com o cliente.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        service: { type: 'string', description: 'Nome do serviço' },
+        date: { type: 'string', description: 'Data YYYY-MM-DD' },
+        time: { type: 'string', description: 'Hora HH:MM (24h)' },
+        professional: { type: 'string', description: 'Nome do profissional (opcional)' },
+      },
+      required: ['service', 'date', 'time'],
+    },
+  },
+  {
+    name: 'cancel_appointment',
+    description: 'Cancela o próximo agendamento do cliente.',
+    input_schema: { type: 'object', properties: {} },
+  },
+]
+
+type ExecCtx = { tenantId: string; customerId?: string }
+
+async function executeTool(name: string, input: any, ctx: ExecCtx): Promise<any> {
+  const { tenantId, customerId } = ctx
+  try {
+    if (name === 'save_customer_info') {
+      if (!customerId) return { ok: false }
+      // name/email — always available
+      const sets: string[] = []
+      const vals: any[] = []
+      let i = 1
+      if (input.name) { sets.push(`name = $${i++}`); vals.push(String(input.name).slice(0, 120)) }
+      if (input.email) { sets.push(`email = $${i++}`); vals.push(String(input.email).slice(0, 200)) }
+      if (sets.length) {
+        vals.push(customerId, tenantId)
+        await db.query(`UPDATE customers SET ${sets.join(', ')} WHERE id = $${i++} AND tenant_id = $${i}`, vals)
+      }
+      // interest — column from migration 013; tolerate its absence
+      if (input.interested_service) {
+        try {
+          await db.query(
+            'UPDATE customers SET interested_services = $1, last_interest_at = now() WHERE id = $2 AND tenant_id = $3',
+            [String(input.interested_service).slice(0, 300), customerId, tenantId]
+          )
+        } catch { /* migration 013 not applied yet */ }
+      }
+      return { ok: true }
+    }
+
+    if (name === 'check_availability') {
+      const service = await resolveService(tenantId, input.service ?? '')
+      if (!service) return { error: 'servico_nao_encontrado' }
+      const prof = await resolveProfessional(tenantId, input.professional)
+      if (prof.ambiguous) return { error: 'escolha_profissional', profissionais: prof.options?.map((p) => p.name) }
+      if (!prof.professional) return { error: 'sem_profissional' }
+      const slots = await findAvailableSlots(tenantId, prof.professional.id, service.id, input.date)
+      return {
+        service: service.name, professional: prof.professional.name, date: input.date,
+        horarios_livres: slots.length ? slots : [], sem_horario: slots.length === 0,
+      }
+    }
+
+    if (name === 'book_appointment') {
+      if (!customerId) return { error: 'sem_cliente' }
+      const service = await resolveService(tenantId, input.service ?? '')
+      if (!service) return { error: 'servico_nao_encontrado' }
+      const prof = await resolveProfessional(tenantId, input.professional)
+      if (prof.ambiguous) return { error: 'escolha_profissional', profissionais: prof.options?.map((p) => p.name) }
+      if (!prof.professional) return { error: 'sem_profissional' }
+      const res = await bookAppointment({
+        tenantId, customerId, serviceId: service.id, professionalId: prof.professional.id,
+        date: input.date, time: input.time,
+      })
+      if (!res.ok) return { error: res.reason === 'unavailable' ? 'horario_indisponivel' : 'dados_invalidos' }
+      return { ok: true, agendado: { service: service.name, professional: prof.professional.name, date: input.date, time: input.time } }
+    }
+
+    if (name === 'cancel_appointment') {
+      if (!customerId) return { error: 'sem_cliente' }
+      const res = await cancelUpcomingAppointment(tenantId, customerId)
+      return res.ok ? { ok: true, cancelado: res.when } : { error: 'sem_agendamento' }
+    }
+
+    return { error: 'ferramenta_desconhecida' }
+  } catch (err) {
+    console.error(`Tool ${name} failed:`, err)
+    return { error: 'falha_interna' }
+  }
+}
+
+// ── Main entry: run the bot with native tool-calling ────────────────────────
+
+export async function runBot(params: {
   tenantId: string
   conversationId: string
   customerMessage: string
   customerId?: string
   customerName?: string
   customerPhone?: string
-}) {
+}): Promise<string> {
   const { tenantId, conversationId, customerMessage, customerId, customerName = '', customerPhone = '' } = params
 
-  const [context, live, history, customerHistory] = await Promise.all([
+  const [context, live, history, profile] = await Promise.all([
     getTenantContext(tenantId),
     getLiveBusinessContext(tenantId),
     getConversationHistory(conversationId),
-    customerId ? getCustomerContext(tenantId, customerId) : Promise.resolve([]),
+    customerId ? getCustomerProfile(tenantId, customerId) : Promise.resolve({ history: [], interest: {} }),
   ])
-
   if (!context) throw new Error('Tenant config not found')
 
-  const systemPrompt = buildSystemPrompt(context, live, customerHistory, customerName, customerPhone, history.length > 0)
+  const systemPrompt = buildSystemPrompt(context, live, profile, customerName, customerPhone, history.length > 0)
 
-  const messages = [
+  const messages: Anthropic.MessageParam[] = [
     ...history.map((m) => ({ role: m.role as 'user' | 'assistant', content: m.content })),
-    { role: 'user' as const, content: customerMessage },
+    { role: 'user', content: customerMessage },
   ]
 
-  const response = await anthropic.messages.create({
-    model: 'claude-haiku-4-5',
-    max_tokens: 1024,
-    system: systemPrompt,
-    messages,
-  })
+  const execCtx: ExecCtx = { tenantId, customerId }
 
-  const assistantContent = response.content[0].type === 'text' ? response.content[0].text : ''
+  for (let turn = 0; turn < MAX_TOOL_TURNS; turn++) {
+    const response = await anthropic.messages.create({
+      model: BOT_MODEL, max_tokens: 1024, system: systemPrompt, tools: TOOLS, messages,
+    })
 
-  await appendToHistory(conversationId, { role: 'user', content: customerMessage, timestamp: new Date().toISOString() })
-  await appendToHistory(conversationId, { role: 'assistant', content: assistantContent, timestamp: new Date().toISOString() })
+    if (response.stop_reason === 'tool_use') {
+      const toolResults: Anthropic.ToolResultBlockParam[] = []
+      for (const block of response.content) {
+        if (block.type === 'tool_use') {
+          const result = await executeTool(block.name, block.input, execCtx)
+          toolResults.push({ type: 'tool_result', tool_use_id: block.id, content: JSON.stringify(result) })
+        }
+      }
+      messages.push({ role: 'assistant', content: response.content })
+      messages.push({ role: 'user', content: toolResults })
+      continue
+    }
 
-  return assistantContent
+    // Final answer — concatenate text blocks
+    const text = response.content.filter((b) => b.type === 'text').map((b: any) => b.text).join('\n').trim()
+    return text || 'Desculpe, pode repetir? 😊'
+  }
+
+  return 'Só um instante, já te respondo!'
 }

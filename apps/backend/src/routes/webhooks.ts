@@ -2,8 +2,7 @@ import { FastifyPluginAsync } from 'fastify'
 import crypto from 'node:crypto'
 import { db } from '../lib/db'
 import { redis, QR_CODE_TTL } from '../lib/redis'
-import { processMessage } from '../services/bot'
-import { evolutionSend } from '../services/evolution'
+import { isDuplicateMessage, scheduleReply } from '../services/botDispatcher'
 
 // Validate the shared secret Evolution must send with every webhook.
 // Enabled only when EVOLUTION_WEBHOOK_SECRET is set — so existing instances keep
@@ -75,7 +74,11 @@ export const webhookRoutes: FastifyPluginAsync = async (app) => {
 
       const customerPhone = body.data?.key?.remoteJid?.replace('@s.whatsapp.net', '')
       const messageText = body.data?.message?.conversation || body.data?.message?.extendedTextMessage?.text
+      const messageId = body.data?.key?.id as string | undefined
       if (!customerPhone || !messageText) return reply.send({ ok: true })
+
+      // De-duplicate — Evolution re-delivers webhooks; never process the same message twice
+      if (await isDuplicateMessage(messageId)) return reply.send({ ok: true, dedup: true })
 
       // Resolve tenant from instance
       const { rows: [instance] } = await db.query(
@@ -83,7 +86,6 @@ export const webhookRoutes: FastifyPluginAsync = async (app) => {
         [instanceId]
       )
       if (!instance) return reply.status(404).send({ error: 'Instance not found' })
-
       const tenantId = instance.tenant_id
 
       // Don't run the bot (and incur AI cost) for suspended/cancelled tenants or expired trials
@@ -127,84 +129,12 @@ export const webhookRoutes: FastifyPluginAsync = async (app) => {
         )
       ).rows[0].id
 
-      // Get AI response — user message is NOT saved to DB yet to avoid duplication
-      // when Redis expires and history is loaded from DB mid-conversation
-      const aiReply = await processMessage({
-        tenantId,
-        conversationId,
-        customerMessage: messageText,
-        customerId: customer.id,
-        customerName: customer.name,
-        customerPhone: customer.phone,
-      })
-
-      // Extract JSON action from AI reply — handles pure JSON, markdown-wrapped, or JSON appended after text
-      let replyText = aiReply
-      let parsedAction: any = null
-
-      const tryParse = (str: string) => {
-        try { return JSON.parse(str.trim()) } catch { return null }
-      }
-
-      // 1. Pure JSON (entire reply is JSON)
-      parsedAction = tryParse(aiReply)
-
-      // 2. Markdown-wrapped: ```json {...} ```
-      if (!parsedAction) {
-        const noFences = aiReply.replace(/^```(?:json)?\s*/im, '').replace(/\s*```\s*$/m, '').trim()
-        parsedAction = tryParse(noFences)
-      }
-
-      // 3. JSON block anywhere in reply — find last complete {...} block with "action" key
-      if (!parsedAction) {
-        const lastBrace = aiReply.lastIndexOf('}')
-        if (lastBrace !== -1) {
-          for (let i = lastBrace - 1; i >= 0; i--) {
-            if (aiReply[i] === '{') {
-              const candidate = aiReply.slice(i, lastBrace + 1)
-              const parsed = tryParse(candidate)
-              if (parsed?.action) {
-                parsedAction = parsed
-                // text before the JSON block (strip trailing 'json' label if present)
-                replyText = aiReply.slice(0, i).replace(/\s*\bjson\b\s*$/i, '').trim()
-                break
-              }
-            }
-          }
-        }
-      }
-
-      // Apply parsed action
-      if (parsedAction) {
-        if (parsedAction.reply) replyText = parsedAction.reply
-        if (parsedAction.action === 'UPDATE_CUSTOMER_INFO') {
-          const name = parsedAction.data?.name || parsedAction.name || null
-          const email = parsedAction.data?.email || parsedAction.email || null
-          if (name || email) {
-            await db.query(
-              `UPDATE customers SET
-                 name  = COALESCE($1, name),
-                 email = COALESCE($2, email)
-               WHERE id = $3`,
-              [name, email, customer.id]
-            )
-          }
-        }
-      }
-
-      // Persist both messages only after successful AI response
-      await db.query(
-        'INSERT INTO messages (tenant_id, conversation_id, role, content) VALUES ($1,$2,$3,$4)',
-        [tenantId, conversationId, 'user', messageText]
+      // Buffer + debounce: reply ONCE after a short quiet window (runs async).
+      // Respond 200 immediately so Evolution never times out and retries.
+      await scheduleReply(
+        { tenantId, conversationId, customerId: customer.id, customerName: customer.name, customerPhone: customer.phone, instanceId },
+        messageText
       )
-      await db.query(
-        'INSERT INTO messages (tenant_id, conversation_id, role, content) VALUES ($1,$2,$3,$4)',
-        [tenantId, conversationId, 'assistant', replyText]
-      )
-
-      // Send via Evolution API
-      await evolutionSend(instanceId, customerPhone, replyText)
-
       return reply.send({ ok: true })
   }
 
