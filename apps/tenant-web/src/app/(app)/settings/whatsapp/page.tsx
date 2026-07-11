@@ -11,13 +11,13 @@ export default function WhatsAppPage() {
   const { data: status, refetch: refetchStatus } = useQuery({
     queryKey: ['whatsapp-status'],
     queryFn: whatsappApi.getStatus,
-    refetchInterval: connecting ? 3000 : false,
+    refetchInterval: (connecting || status?.status === 'qr_pending') ? 3000 : false,
   })
 
   const { data: qrData } = useQuery({
     queryKey: ['whatsapp-qr'],
     queryFn: whatsappApi.getQR,
-    enabled: connecting && status?.status === 'qr_pending',
+    enabled: status?.status === 'qr_pending',
     refetchInterval: 30_000,
   })
 
