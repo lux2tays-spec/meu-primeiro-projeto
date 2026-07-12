@@ -2,6 +2,7 @@
 import { useQuery } from '@tanstack/react-query'
 import Link from 'next/link'
 import { tenantApi, appointmentsApi } from '@/lib/api'
+import { Rocket, ArrowRight } from 'lucide-react'
 
 const today = new Date().toISOString().split('T')[0]
 
@@ -11,6 +12,39 @@ const STATUS_COLOR: Record<string, string> = {
   confirmed: 'bg-green-100 text-green-700',
   completed: 'bg-blue-100 text-blue-700',
   cancelled: 'bg-red-100 text-red-700',
+}
+
+function OnboardingProgressCard() {
+  const { data: onboarding } = useQuery({ queryKey: ['onboarding'], queryFn: tenantApi.onboarding })
+  if (!onboarding || onboarding.completed) return null
+
+  const done = onboarding.progress?.done ?? 0
+  const total = onboarding.progress?.total ?? 7
+  const pct = total > 0 ? Math.round((done / total) * 100) : 0
+
+  return (
+    <div className="bg-white rounded-2xl p-5 border border-primary/20 shadow-sm">
+      <div className="flex flex-wrap items-center gap-4">
+        <div className="w-10 h-10 rounded-xl bg-primary-light flex items-center justify-center shrink-0">
+          <Rocket size={19} strokeWidth={1.75} className="text-primary" />
+        </div>
+        <div className="flex-1 min-w-[180px]">
+          <p className="font-semibold text-gray-900 text-sm">Configuração {done}/{total}</p>
+          <p className="text-gray-500 text-xs mt-0.5">Complete a configuração para o bot começar a atender seus clientes.</p>
+          <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden mt-2">
+            <div className="h-full bg-primary rounded-full transition-all" style={{ width: `${pct}%` }} />
+          </div>
+        </div>
+        <Link
+          href="/onboarding"
+          className="flex items-center gap-1.5 bg-primary hover:bg-primary-dark text-white text-sm font-semibold px-4 py-2.5 rounded-xl transition-colors shrink-0"
+        >
+          Continuar configuração
+          <ArrowRight size={15} strokeWidth={2} />
+        </Link>
+      </div>
+    </div>
+  )
 }
 
 export default function DashboardPage() {
@@ -38,6 +72,9 @@ export default function DashboardPage() {
           + Novo agendamento
         </Link>
       </div>
+
+      {/* Onboarding progress */}
+      <OnboardingProgressCard />
 
       {/* Trial banner */}
       {tenant?.status === 'trial' && (

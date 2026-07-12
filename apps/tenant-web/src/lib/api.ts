@@ -103,6 +103,17 @@ export const tenantApi = {
   removeDayOff: (id: string) => api.delete(`/tenant/days-off/${id}`),
   paymentConfig: () => api.get<any>('/tenant/payment-config'),
   savePaymentConfig: (data: any) => api.put<any>('/tenant/payment-config', data),
+  onboarding: () =>
+    api.get<{
+      completed: boolean
+      steps: { key: 'negocio' | 'equipe' | 'servicos' | 'horarios' | 'agente' | 'pagamentos' | 'whatsapp'; done: boolean }[]
+      progress: { done: number; total: number }
+    }>('/tenant/onboarding'),
+  completeOnboarding: () => api.post<{ completed: true }>('/tenant/onboarding/complete'),
+  businessTypeTemplates: () =>
+    api.get<{ business_type: string; display_name: string }[]>('/tenant/business-type-templates'),
+  applyBusinessTemplate: (business_type: string) =>
+    api.post<any>('/tenant/apply-business-template', { business_type }),
 }
 
 export const financeiroApi = {

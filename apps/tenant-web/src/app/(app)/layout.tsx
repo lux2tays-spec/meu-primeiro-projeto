@@ -1,5 +1,5 @@
 'use client'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useRouter, usePathname } from 'next/navigation'
 import Link from 'next/link'
 import { getToken, clearToken, tenantApi, authApi } from '@/lib/api'
@@ -44,6 +44,18 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
 
   const { data: tenant } = useQuery({ queryKey: ['tenant'], queryFn: tenantApi.me, enabled: ready })
   const { data: me } = useQuery({ queryKey: ['auth-me'], queryFn: authApi.me, enabled: ready })
+
+  // First-login onboarding: send the user to the wizard until it is completed or skipped.
+  const { data: onboarding } = useQuery({ queryKey: ['onboarding'], queryFn: tenantApi.onboarding, enabled: ready })
+  const onboardingRedirected = useRef(false)
+  useEffect(() => {
+    if (!ready || !onboarding || onboardingRedirected.current) return
+    if (pathname?.startsWith('/onboarding')) return // safety: layout doesn't wrap it, but never loop
+    if (!onboarding.completed && sessionStorage.getItem('onboarding_skipped') !== '1') {
+      onboardingRedirected.current = true
+      router.replace('/onboarding')
+    }
+  }, [ready, onboarding, pathname, router])
 
   function logout() {
     clearToken()
