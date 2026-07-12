@@ -115,11 +115,11 @@ export default function SettingsScreen() {
         {/* Automação */}
         <Text style={styles.section}>Automação</Text>
         <Card style={styles.group}>
-          <SettingsRow icon="logo-whatsapp" iconColor={colors.whatsapp} label="WhatsApp" subtitle="Conectar número via QR Code" onPress={() => router.push('/(app)/settings/whatsapp')} />
+          <SettingsRow icon="chatbubbles-outline" label="WhatsApp" subtitle="Conectar número via QR Code" onPress={() => router.push('/(app)/settings/whatsapp')} />
           <View style={styles.divider} />
-          <SettingsRow icon="sparkles-outline" iconColor="#A855F7" label="Agente IA" subtitle="Configurar personalidade e instruções do bot" onPress={() => router.push('/(app)/settings/agent')} />
+          <SettingsRow icon="sparkles-outline" label="Agente IA" subtitle="Configurar personalidade e instruções do bot" onPress={() => router.push('/(app)/settings/agent')} />
           <View style={styles.divider} />
-          <SettingsRow icon="calendar-outline" iconColor={colors.info} label="Google Agenda" subtitle="Sincronizar agendamentos com seu Google Calendar" onPress={() => router.push('/(app)/settings/google-calendar')} />
+          <SettingsRow icon="calendar-outline" label="Google Agenda" subtitle="Sincronizar agendamentos com seu Google Calendar" onPress={() => router.push('/(app)/settings/google-calendar')} />
         </Card>
 
         {/* Negócio */}
@@ -141,17 +141,17 @@ export default function SettingsScreen() {
         {/* Financeiro */}
         <Text style={styles.section}>Financeiro</Text>
         <Card style={styles.group}>
-          <SettingsRow icon="logo-paypal" iconColor="#009EE3" label="Meios de Pagamento" subtitle="Conectar Mercado Pago e gerar links" onPress={() => router.push('/(app)/settings/payments')} />
+          <SettingsRow icon="wallet-outline" label="Meios de Pagamento" subtitle="Conectar Mercado Pago e gerar links" onPress={() => router.push('/(app)/settings/payments')} />
           <View style={styles.divider} />
-          <SettingsRow icon="card-outline" iconColor={colors.success} label="Assinatura" subtitle="Plano atual, faturamento e cartões" onPress={() => router.push('/(app)/settings/subscription')} />
+          <SettingsRow icon="card-outline" label="Assinatura" subtitle="Plano atual, faturamento e cartões" onPress={() => router.push('/(app)/settings/subscription')} />
           <View style={styles.divider} />
-          <SettingsRow icon="share-social-outline" iconColor={colors.info} label="Painel de Afiliado" subtitle="Indique e ganhe por cada indicação" onPress={() => router.push('/(app)/settings/affiliate')} />
+          <SettingsRow icon="share-social-outline" label="Painel de Afiliado" subtitle="Indique e ganhe por cada indicação" onPress={() => router.push('/(app)/settings/affiliate')} />
         </Card>
 
         {/* Ajuda */}
         <Text style={styles.section}>Ajuda</Text>
         <Card style={styles.group}>
-          <SettingsRow icon="headset-outline" iconColor={colors.warning} label="Suporte" subtitle="Fale com nossa equipe" onPress={() => router.push('/(app)/settings/support')} />
+          <SettingsRow icon="headset-outline" label="Suporte" subtitle="Fale com nossa equipe" onPress={() => router.push('/(app)/settings/support')} />
           <View style={styles.divider} />
           <SettingsRow icon="shield-checkmark-outline" label="Política de Privacidade" onPress={() => Linking.openURL(`${WEB_URL}/privacidade`)} />
           <View style={styles.divider} />

@@ -5,21 +5,26 @@ import Link from 'next/link'
 import { getToken, clearToken, tenantApi, authApi } from '@/lib/api'
 import { isTenantToken, getTokenPayload } from '@/lib/auth'
 import { useQuery } from '@tanstack/react-query'
+import {
+  LayoutDashboard, CalendarDays, Users, Wallet, MessageCircle, Bot, Tag,
+  UserCog, Clock, CreditCard, Package, Share2, LifeBuoy, LogOut, Trash2,
+  Menu, Lock, AlarmClock, type LucideIcon,
+} from 'lucide-react'
 
-const NAV = [
-  { href: '/dashboard',             icon: '🏠', label: 'Dashboard' },
-  { href: '/calendar',              icon: '📅', label: 'Agenda' },
-  { href: '/customers',             icon: '👥', label: 'Clientes' },
-  { href: '/financeiro',            icon: '💰', label: 'Financeiro' },
-  { href: '/settings/whatsapp',     icon: '💬', label: 'WhatsApp' },
-  { href: '/settings/agent',        icon: '🤖', label: 'Agente IA' },
-  { href: '/settings/services',     icon: '✂️',  label: 'Serviços' },
-  { href: '/settings/staff',        icon: '👤', label: 'Equipe' },
-  { href: '/settings/hours',        icon: '🕐', label: 'Horários' },
-  { href: '/settings/payments',     icon: '💳', label: 'Pagamentos' },
-  { href: '/settings/subscription', icon: '📦', label: 'Assinatura' },
-  { href: '/settings/affiliate',    icon: '🔗', label: 'Afiliados' },
-  { href: '/settings/support',      icon: '🆘', label: 'Suporte' },
+const NAV: { href: string; icon: LucideIcon; label: string }[] = [
+  { href: '/dashboard',             icon: LayoutDashboard, label: 'Dashboard' },
+  { href: '/calendar',              icon: CalendarDays,    label: 'Agenda' },
+  { href: '/customers',             icon: Users,           label: 'Clientes' },
+  { href: '/financeiro',            icon: Wallet,          label: 'Financeiro' },
+  { href: '/settings/whatsapp',     icon: MessageCircle,   label: 'WhatsApp' },
+  { href: '/settings/agent',        icon: Bot,             label: 'Agente IA' },
+  { href: '/settings/services',     icon: Tag,             label: 'Serviços' },
+  { href: '/settings/staff',        icon: UserCog,         label: 'Equipe' },
+  { href: '/settings/hours',        icon: Clock,           label: 'Horários' },
+  { href: '/settings/payments',     icon: CreditCard,      label: 'Pagamentos' },
+  { href: '/settings/subscription', icon: Package,         label: 'Assinatura' },
+  { href: '/settings/affiliate',    icon: Share2,          label: 'Afiliados' },
+  { href: '/settings/support',      icon: LifeBuoy,        label: 'Suporte' },
 ]
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
@@ -118,7 +123,10 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
             return (
               <Link href="/settings/subscription" onClick={() => setSidebarOpen(false)}
                 className="mx-4 mt-4 block bg-red-500/15 border border-red-500/30 rounded-xl p-3 hover:bg-red-500/25 transition-colors">
-                <p className="text-red-300 text-xs font-semibold">🔒 {tenant?.status === 'cancelled' ? 'Assinatura cancelada' : tenant?.status === 'suspended' ? 'Assinatura suspensa' : 'Período de teste encerrado'}</p>
+                <p className="text-red-300 text-xs font-semibold flex items-center gap-1.5">
+                  <Lock size={13} strokeWidth={2} className="shrink-0" />
+                  {tenant?.status === 'cancelled' ? 'Assinatura cancelada' : tenant?.status === 'suspended' ? 'Assinatura suspensa' : 'Período de teste encerrado'}
+                </p>
                 <p className="text-red-300/80 text-[11px] mt-1">O WhatsApp foi desconectado. Assine para reativar o atendimento →</p>
               </Link>
             )
@@ -126,7 +134,10 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
           if (tenant?.status === 'trial') {
             return (
               <div className="mx-4 mt-4 bg-yellow-500/10 border border-yellow-500/20 rounded-xl p-3">
-                <p className="text-yellow-400 text-xs font-medium">⏰ Período de teste ativo</p>
+                <p className="text-yellow-400 text-xs font-medium flex items-center gap-1.5">
+                  <AlarmClock size={13} strokeWidth={2} className="shrink-0" />
+                  Período de teste ativo
+                </p>
               </div>
             )
           }
@@ -137,6 +148,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         <nav className="flex-1 p-4 space-y-1 overflow-y-auto">
           {NAV.map((item) => {
             const active = pathname === item.href || (item.href !== '/dashboard' && pathname.startsWith(item.href))
+            const Icon = item.icon
             return (
               <Link
                 key={item.href}
@@ -146,7 +158,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
                   active ? 'bg-primary text-white' : 'text-gray-400 hover:bg-sidebar-hover hover:text-white'
                 }`}
               >
-                <span className="text-base">{item.icon}</span>
+                <Icon size={18} strokeWidth={1.75} className="shrink-0" />
                 {item.label}
               </Link>
             )
@@ -166,15 +178,17 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
           </div>
           <button
             onClick={logout}
-            className="w-full text-left text-gray-400 hover:text-white text-sm px-3 py-2 rounded-xl hover:bg-sidebar-hover transition-colors"
+            className="w-full flex items-center gap-2.5 text-left text-gray-400 hover:text-white text-sm px-3 py-2 rounded-xl hover:bg-sidebar-hover transition-colors"
           >
-            ← Sair
+            <LogOut size={16} strokeWidth={1.75} className="shrink-0" />
+            Sair
           </button>
           <button
             onClick={deleteAccount}
-            className="w-full text-left text-red-400/80 hover:text-red-300 text-sm px-3 py-2 rounded-xl hover:bg-sidebar-hover transition-colors"
+            className="w-full flex items-center gap-2.5 text-left text-red-400/80 hover:text-red-300 text-sm px-3 py-2 rounded-xl hover:bg-sidebar-hover transition-colors"
           >
-            🗑️ Excluir conta
+            <Trash2 size={16} strokeWidth={1.75} className="shrink-0" />
+            Excluir conta
           </button>
         </div>
       </aside>
@@ -183,7 +197,9 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
         {/* Mobile header */}
         <header className="lg:hidden bg-white border-b border-gray-100 px-4 h-14 flex items-center gap-3">
-          <button onClick={() => setSidebarOpen(true)} className="text-gray-500 text-xl">☰</button>
+          <button onClick={() => setSidebarOpen(true)} className="text-gray-500" aria-label="Abrir menu">
+            <Menu size={22} strokeWidth={1.75} />
+          </button>
           <span className="font-bold text-gray-900">AgendaBot</span>
         </header>
 

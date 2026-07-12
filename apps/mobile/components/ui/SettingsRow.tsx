@@ -14,7 +14,7 @@ interface Props {
 
 export function SettingsRow({
   icon,
-  iconColor = colors.primary,
+  iconColor = colors.text,
   label,
   subtitle,
   onPress,
