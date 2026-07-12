@@ -3,6 +3,7 @@ import crypto from 'node:crypto'
 import { db } from '../lib/db'
 import { redis, QR_CODE_TTL } from '../lib/redis'
 import { isDuplicateMessage, scheduleReply } from '../services/botDispatcher'
+import { getPaymentConfig } from '../lib/paymentConfig'
 
 // Validate the shared secret Evolution must send with every webhook.
 // Enabled only when EVOLUTION_WEBHOOK_SECRET is set — so existing instances keep
@@ -152,8 +153,11 @@ export const webhookRoutes: FastifyPluginAsync = async (app) => {
     const type = body?.type ?? body?.topic
     const resourceId = body?.data?.id ?? (request.query as any)?.id
 
+    // Platform payment credentials come from the Root Admin panel (payment_config).
+    const payCfg = await getPaymentConfig()
+
     // 1. Verify HMAC signature (skipped only if secret not configured)
-    const secret = process.env.MP_WEBHOOK_SECRET
+    const secret = payCfg.mp_webhook_secret
     if (secret) {
       const sig = String(request.headers['x-signature'] ?? '')
       const requestId = String(request.headers['x-request-id'] ?? '')
@@ -173,7 +177,7 @@ export const webhookRoutes: FastifyPluginAsync = async (app) => {
     if (type !== 'subscription_preapproval' && type !== 'preapproval') {
       return reply.send({ ok: true })
     }
-    const accessToken = process.env.MERCADOPAGO_ACCESS_TOKEN
+    const accessToken = payCfg.mp_access_token
     if (!accessToken || !resourceId) return reply.send({ ok: true })
 
     // 3. Re-fetch the authoritative resource from Mercado Pago

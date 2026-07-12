@@ -20,6 +20,7 @@ import { agentRoutes } from './routes/agent'
 import { rootRoutes } from './routes/root'
 import { affiliateRoutes } from './routes/affiliate'
 import { financeiroRoutes } from './routes/financeiro'
+import { subscriptionRoutes } from './routes/subscription'
 import { startReminderJob } from './jobs/reminders'
 import { startSubscriptionEnforcer } from './jobs/subscriptionEnforcer'
 
@@ -88,6 +89,9 @@ async function start() {
 
   // Financial routes (tenant-scoped)
   await app.register(financeiroRoutes, { prefix: '/financeiro' })
+
+  // Subscription/checkout (authenticated, NOT plan-guarded — expired tenants must subscribe)
+  await app.register(subscriptionRoutes, { prefix: '/subscription' })
 
   // Root admin routes (require role=root)
   await app.register(rootRoutes, { prefix: '/root' })

@@ -147,3 +147,9 @@ export const whatsappApi = {
 export const affiliateApi = {
   me: () => api.get<any>('/affiliate/me'),
 }
+
+export const subscriptionApi = {
+  plans: () => api.get<any[]>('/subscription/plans'),
+  checkout: (plan: string) => api.post<{ init_point: string }>('/subscription/checkout', { plan }),
+  me: () => api.get<any>('/subscription/me'),
+}

@@ -3,6 +3,7 @@ import { randomBytes } from 'crypto'
 import { db } from '../lib/db'
 import { hashPassword } from '../lib/password'
 import { invalidateAiConfig } from '../lib/botConfig'
+import { invalidatePaymentConfig } from '../lib/paymentConfig'
 
 export const rootRoutes: FastifyPluginAsync = async (app) => {
   app.addHook('preHandler', (app as any).requireRoot)
@@ -291,6 +292,7 @@ export const rootRoutes: FastifyPluginAsync = async (app) => {
       [request.params.key, JSON.stringify(request.body)]
     )
     if (request.params.key === 'ai_config') await invalidateAiConfig()
+    if (request.params.key === 'payment_config') await invalidatePaymentConfig()
     return reply.send({ ok: true })
   })
 
