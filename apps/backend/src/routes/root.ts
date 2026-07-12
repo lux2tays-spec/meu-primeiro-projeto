@@ -2,6 +2,7 @@ import { FastifyPluginAsync } from 'fastify'
 import { randomBytes } from 'crypto'
 import { db } from '../lib/db'
 import { hashPassword } from '../lib/password'
+import { invalidateAiConfig } from '../lib/botConfig'
 
 export const rootRoutes: FastifyPluginAsync = async (app) => {
   app.addHook('preHandler', (app as any).requireRoot)
@@ -289,7 +290,62 @@ export const rootRoutes: FastifyPluginAsync = async (app) => {
        ON CONFLICT (key) DO UPDATE SET value = $2, updated_at = NOW()`,
       [request.params.key, JSON.stringify(request.body)]
     )
+    if (request.params.key === 'ai_config') await invalidateAiConfig()
     return reply.send({ ok: true })
+  })
+
+  // ── AI usage & cost dashboard ─────────────────────────────────────────────
+  app.get('/ai-usage', async (request, reply) => {
+    const days = Math.min(Math.max(Number((request.query as any)?.days) || 30, 1), 365)
+    const TOK = 'input_tokens + output_tokens + cache_read_tokens + cache_write_tokens'
+
+    // usd→brl rate from ai_config (for display)
+    const { rows: [cfg] } = await db.query("SELECT value FROM platform_settings WHERE key = 'ai_config'")
+    const usdBrl = Number(cfg?.value?.usd_brl_rate ?? 6)
+
+    try {
+      const [totals, monthTotal, byDay, byTenant, byModel] = await Promise.all([
+        db.query(
+          `SELECT COALESCE(SUM(cost_usd),0)::float AS cost, COALESCE(SUM(${TOK}),0)::bigint AS tokens, COUNT(*)::int AS calls
+           FROM ai_usage WHERE created_at >= now() - ($1::int * interval '1 day')`, [days]),
+        db.query(
+          `SELECT COALESCE(SUM(cost_usd),0)::float AS cost
+           FROM ai_usage
+           WHERE date_trunc('month', created_at AT TIME ZONE 'America/Sao_Paulo')
+               = date_trunc('month', now() AT TIME ZONE 'America/Sao_Paulo')`),
+        db.query(
+          `SELECT to_char(created_at AT TIME ZONE 'America/Sao_Paulo', 'YYYY-MM-DD') AS day,
+                  SUM(cost_usd)::float AS cost, SUM(${TOK})::bigint AS tokens
+           FROM ai_usage WHERE created_at >= now() - ($1::int * interval '1 day')
+           GROUP BY day ORDER BY day`, [days]),
+        db.query(
+          `SELECT COALESCE(t.name, '(desconhecido)') AS tenant, u.tenant_id,
+                  SUM(u.cost_usd)::float AS cost, SUM(${TOK})::bigint AS tokens, COUNT(*)::int AS calls
+           FROM ai_usage u LEFT JOIN tenants t ON t.id = u.tenant_id
+           WHERE u.created_at >= now() - ($1::int * interval '1 day')
+           GROUP BY u.tenant_id, t.name ORDER BY cost DESC LIMIT 20`, [days]),
+        db.query(
+          `SELECT model, SUM(cost_usd)::float AS cost, SUM(${TOK})::bigint AS tokens, COUNT(*)::int AS calls
+           FROM ai_usage WHERE created_at >= now() - ($1::int * interval '1 day')
+           GROUP BY model ORDER BY cost DESC`, [days]),
+      ])
+      return reply.send({
+        days,
+        usd_brl_rate: usdBrl,
+        totals: totals.rows[0],
+        month_cost: monthTotal.rows[0].cost,
+        by_day: byDay.rows,
+        by_tenant: byTenant.rows,
+        by_model: byModel.rows,
+      })
+    } catch {
+      // ai_usage table not created yet (migration 014 pending) — return empty shape
+      return reply.send({
+        days, usd_brl_rate: usdBrl,
+        totals: { cost: 0, tokens: 0, calls: 0 }, month_cost: 0,
+        by_day: [], by_tenant: [], by_model: [], pending_migration: true,
+      })
+    }
   })
 
   // ── Platform Plans ───────────────────────────────────────────────────────────

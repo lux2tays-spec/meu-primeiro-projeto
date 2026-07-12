@@ -88,6 +88,9 @@ export const rootApi = {
   settings: () => api.get<any>('/root/settings'),
   updateSettings: (key: string, value: any) => api.patch(`/root/settings/${key}`, value),
 
+  // AI usage & cost
+  aiUsage: (days = 30) => api.get<any>(`/root/ai-usage?days=${days}`),
+
   // Plans
   plans: () => api.get<any[]>('/root/plans'),
   createPlan: (data: any) => api.post<any>('/root/plans', data),

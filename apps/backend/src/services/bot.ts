@@ -6,9 +6,10 @@ import {
   resolveService, resolveProfessional, findAvailableSlots,
   bookAppointment, cancelUpcomingAppointment,
 } from './scheduling'
+import { getAiConfig, resolveModel } from '../lib/botConfig'
+import { recordUsage, monthlySpend } from '../lib/aiUsage'
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
-const BOT_MODEL = process.env.BOT_MODEL || 'claude-haiku-4-5'
 const TZ = 'America/Sao_Paulo'
 const MAX_TOOL_TURNS = 6
 
@@ -134,7 +135,7 @@ function dateReference(): string {
 
 // ── System prompt (sales-oriented, human-like) ──────────────────────────────
 
-function buildSystemPrompt(ctx: any, live: any, profile: any, customerName: string, customerPhone: string, hasHistory: boolean): string {
+function buildSystemPrompt(ctx: any, live: any, profile: any, customerName: string, customerPhone: string, hasHistory: boolean): { stable: string; volatile: string } {
   const loc = [ctx.address, ctx.neighborhood, ctx.city, ctx.state].filter(Boolean).join(', ')
   const links: string[] = []
   if (ctx.instagram_url) links.push(`Instagram: ${ctx.instagram_url}`)
@@ -152,7 +153,8 @@ function buildSystemPrompt(ctx: any, live: any, profile: any, customerName: stri
     ? `\n🎯 INTERESSE ANTERIOR (não fechou): ${profile.interest.interested_services}${profile.interest.last_interest ? ` (em ${profile.interest.last_interest})` : ''} — retome esse gancho com naturalidade.`
     : ''
 
-  return `Você é um(a) atendente HUMANO(A) de WhatsApp do(a) "${ctx.business_name}"${ctx.business_type ? ` (${ctx.business_type})` : ''}. NUNCA revele que é uma IA ou robô. Fale como uma pessoa real da equipe.
+  // STABLE part — same for every customer of this tenant (cacheable prefix).
+  const stable = `Você é um(a) atendente HUMANO(A) de WhatsApp do(a) "${ctx.business_name}"${ctx.business_type ? ` (${ctx.business_type})` : ''}. NUNCA revele que é uma IA ou robô. Fale como uma pessoa real da equipe.
 Tom: ${effectiveTone}. Idioma: ${ctx.language || 'Português do Brasil'}.
 
 ${templatePrompt ? templatePrompt + '\n' : ''}${tenantPrompt ? tenantPrompt + '\n' : ''}
@@ -177,27 +179,32 @@ ${formatWorkingHours(live.workingHours) || 'Horários não configurados.'}
 ## CALENDÁRIO (use estas datas ao agendar)
 ${dateReference()}
 
-## CLIENTE ATUAL
-Telefone: ${customerPhone}
-${nameIsKnown ? `Nome: ${customerName}` : 'Nome: ainda não informado — pergunte de forma natural em algum momento.'}${interestLine}
-Histórico:
-${formatPastAppointments(profile.history)}
-
 ## FERRAMENTAS (obrigatório usá-las — nunca invente dados)
 - check_availability: SEMPRE consulte antes de oferecer horários. Nunca invente horários livres.
 - book_appointment: use para AGENDAR DE VERDADE. Só confirme "agendado" ao cliente DEPOIS que a ferramenta retornar sucesso.
 - cancel_appointment: para cancelar o próximo agendamento do cliente.
 - save_customer_info: assim que souber o NOME, o E-MAIL, ou um SERVIÇO DE INTERESSE do cliente, salve na hora (mesmo que ele não feche).
 
-## REGRAS
-${hasHistory
-  ? '- CONVERSA EM ANDAMENTO: você JÁ se apresentou. NÃO cumprimente de novo ("Olá", "Bem-vindo") nem se apresente. Continue direto.'
-  : '- PRIMEIRA MENSAGEM: cumprimente de forma calorosa e breve, uma única vez.'}
-${nameIsKnown ? `- O cliente se chama "${customerName}". NUNCA pergunte o nome de novo.` : ''}
+## REGRAS GERAIS
 - Estilo WhatsApp: mensagens CURTAS e humanas, no máximo 2-4 linhas. Emojis com moderação. Nunca mande textão.
 - Nunca repita perguntas já respondidas. Lembre de tudo que foi dito.
 - Confirme serviço + dia + hora antes de agendar, e agende de fato com a ferramenta.
 ${templateInstructions ? '\n## INSTRUÇÕES DO TIPO DE NEGÓCIO\n' + templateInstructions : ''}${tenantInstructions ? '\n## INSTRUÇÕES DO ESTABELECIMENTO\n' + tenantInstructions : ''}`.trim()
+
+  // VOLATILE part — customer-specific, changes per conversation (not cached).
+  const volatile = `## CLIENTE ATUAL
+Telefone: ${customerPhone}
+${nameIsKnown ? `Nome: ${customerName}` : 'Nome: ainda não informado — pergunte de forma natural em algum momento.'}${interestLine}
+Histórico:
+${formatPastAppointments(profile.history)}
+
+## SITUAÇÃO DA CONVERSA
+${hasHistory
+  ? '- CONVERSA EM ANDAMENTO: você JÁ se apresentou. NÃO cumprimente de novo ("Olá", "Bem-vindo") nem se apresente. Continue direto.'
+  : '- PRIMEIRA MENSAGEM: cumprimente de forma calorosa e breve, uma única vez.'}
+${nameIsKnown ? `- O cliente se chama "${customerName}". NUNCA pergunte o nome de novo.` : ''}`.trim()
+
+  return { stable, volatile }
 }
 
 // ── Tool definitions ────────────────────────────────────────────────────────
@@ -339,7 +346,23 @@ export async function runBot(params: {
   ])
   if (!context) throw new Error('Tenant config not found')
 
-  const systemPrompt = buildSystemPrompt(context, live, profile, customerName, customerPhone, history.length > 0)
+  // Resolve the model from the Root Admin config (single/hybrid) for this message.
+  const aiConfig = await getAiConfig()
+  let model = resolveModel(aiConfig, customerMessage)
+  // Monthly cost cap per plan (0 = unlimited): downgrade to the cheapest model when over.
+  const cap = Number(aiConfig.caps?.[context.plan] ?? 0)
+  if (cap > 0 && (await monthlySpend(tenantId)) >= cap) {
+    model = 'claude-haiku-4-5'
+  }
+  // Keep the bot fast/cheap: no extended thinking (haiku has none; disable it on others).
+  const thinkingOff = !model.startsWith('claude-haiku')
+
+  const { stable, volatile } = buildSystemPrompt(context, live, profile, customerName, customerPhone, history.length > 0)
+  // Prompt caching: the stable per-tenant prefix is cached; the volatile block is not.
+  const system: any = [
+    { type: 'text', text: stable, cache_control: { type: 'ephemeral' } },
+    { type: 'text', text: volatile },
+  ]
 
   const messages: Anthropic.MessageParam[] = [
     ...history.map((m) => ({ role: m.role as 'user' | 'assistant', content: m.content })),
@@ -349,9 +372,11 @@ export async function runBot(params: {
   const execCtx: ExecCtx = { tenantId, customerId }
 
   for (let turn = 0; turn < MAX_TOOL_TURNS; turn++) {
-    const response = await anthropic.messages.create({
-      model: BOT_MODEL, max_tokens: 1024, system: systemPrompt, tools: TOOLS, messages,
-    })
+    const createParams: any = { model, max_tokens: 1024, system, tools: TOOLS, messages }
+    if (thinkingOff) createParams.thinking = { type: 'disabled' }
+    const response: any = await anthropic.messages.create(createParams)
+
+    recordUsage(tenantId, model, response.usage).catch(() => {})
 
     if (response.stop_reason === 'tool_use') {
       const toolResults: Anthropic.ToolResultBlockParam[] = []
@@ -367,7 +392,7 @@ export async function runBot(params: {
     }
 
     // Final answer — concatenate text blocks
-    const text = response.content.filter((b) => b.type === 'text').map((b: any) => b.text).join('\n').trim()
+    const text = response.content.filter((b: any) => b.type === 'text').map((b: any) => b.text).join('\n').trim()
     return text || 'Desculpe, pode repetir? 😊'
   }
 

@@ -11,6 +11,7 @@ const nav = [
   { href: '/dashboard/revenue',     icon: '💰', label: 'Receita' },
   { href: '/dashboard/affiliates',  icon: '🤝', label: 'Afiliados' },
   { href: '/dashboard/ai-templates', icon: '🤖', label: 'Templates IA' },
+  { href: '/dashboard/ai',          icon: '⚡', label: 'IA & Custos' },
   { href: '/dashboard/support',     icon: '🎧', label: 'Suporte' },
   { href: '/dashboard/settings',    icon: '⚙️', label: 'Configurações' },
 ]
