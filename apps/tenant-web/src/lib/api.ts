@@ -91,6 +91,11 @@ export const tenantApi = {
     api.get<any[]>(`/tenant/hours${professionalId ? `?professional_id=${professionalId}` : ''}`),
   saveHours: (rows: any[], professionalId?: string) =>
     api.post<any>('/tenant/hours', { rows, professional_id: professionalId }),
+  daysOff: (professionalId?: string) =>
+    api.get<any[]>(`/tenant/days-off${professionalId ? `?professional_id=${professionalId}` : ''}`),
+  addDayOff: (data: { professional_id?: string | null; date: string; reason?: string | null }) =>
+    api.post<any>('/tenant/days-off', data),
+  removeDayOff: (id: string) => api.delete(`/tenant/days-off/${id}`),
   paymentConfig: () => api.get<any>('/tenant/payment-config'),
   savePaymentConfig: (data: any) => api.put<any>('/tenant/payment-config', data),
 }

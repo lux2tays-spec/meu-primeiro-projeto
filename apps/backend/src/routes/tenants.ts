@@ -393,6 +393,67 @@ export const tenantRoutes: FastifyPluginAsync = async (app) => {
     return reply.send({ saved: true })
   })
 
+  // ── Days off (folgas e bloqueios) ─────────────────────────────────────────
+
+  const dayOffSchema = z.object({
+    professional_id: z.string().uuid().nullable().optional(),
+    date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+    reason: z.string().max(300).nullable().optional(),
+  })
+
+  app.get('/days-off', async (request, reply) => {
+    const { tenant_id } = request.user
+    const { professional_id } = request.query as { professional_id?: string }
+
+    const { rows } = await db.query(
+      `SELECT d.id, d.professional_id, to_char(d.date, 'YYYY-MM-DD') AS date, d.reason,
+              p.name AS professional_name
+       FROM days_off d
+       LEFT JOIN professionals p ON p.id = d.professional_id
+       WHERE d.tenant_id = $1
+         AND d.date >= (now() AT TIME ZONE 'America/Sao_Paulo')::date
+         ${professional_id ? 'AND d.professional_id = $2' : ''}
+       ORDER BY d.date, p.name NULLS FIRST`,
+      professional_id ? [tenant_id, professional_id] : [tenant_id]
+    )
+    return reply.send(rows)
+  })
+
+  app.post('/days-off', async (request, reply) => {
+    const { tenant_id, role } = request.user
+    if (!['owner', 'admin', 'root'].includes(role)) return reply.status(403).send({ error: 'Sem permissão' })
+
+    const body = dayOffSchema.parse(request.body)
+
+    // Ensure the professional belongs to this tenant (same guard as /hours)
+    if (body.professional_id) {
+      const { rows: [prof] } = await db.query(
+        'SELECT id FROM professionals WHERE id = $1 AND tenant_id = $2',
+        [body.professional_id, tenant_id]
+      )
+      if (!prof) return reply.status(404).send({ error: 'Profissional não encontrado' })
+    }
+
+    const { rows: [dayOff] } = await db.query(
+      `INSERT INTO days_off (tenant_id, professional_id, date, reason)
+       VALUES ($1, $2, $3, $4) RETURNING id, professional_id, to_char(date, 'YYYY-MM-DD') AS date, reason`,
+      [tenant_id, body.professional_id ?? null, body.date, body.reason ?? null]
+    )
+    return reply.status(201).send(dayOff)
+  })
+
+  app.delete<{ Params: { id: string } }>('/days-off/:id', async (request, reply) => {
+    const { tenant_id, role } = request.user
+    if (!['owner', 'admin', 'root'].includes(role)) return reply.status(403).send({ error: 'Sem permissão' })
+
+    const { rows } = await db.query(
+      'DELETE FROM days_off WHERE id = $1 AND tenant_id = $2 RETURNING id',
+      [request.params.id, tenant_id]
+    )
+    if (rows.length === 0) return reply.status(404).send({ error: 'Folga não encontrada' })
+    return reply.send({ deleted: true })
+  })
+
   // ── Customers ─────────────────────────────────────────────────────────────
 
   app.get('/customers', async (request, reply) => {

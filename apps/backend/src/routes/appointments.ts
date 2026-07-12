@@ -2,6 +2,7 @@ import { FastifyPluginAsync } from 'fastify'
 import { z } from 'zod'
 import { db } from '../lib/db'
 import { syncAppointmentToCalendar, deleteCalendarEvent } from '../services/google-calendar'
+import { findAvailableSlots } from '../services/scheduling'
 
 const createSchema = z.object({
   customer_id: z.string().uuid(),
@@ -262,53 +263,21 @@ export const appointmentRoutes: FastifyPluginAsync = async (app) => {
   })
 
   // ── Available slots for a professional+service+date ─────────────────────────
+  // Delegates to findAvailableSlots (scheduling.ts) — the SAME engine the bot
+  // uses — so general working hours (professional_id IS NULL), multiple windows,
+  // São Paulo timezone, past-time filtering and days_off are all honored here too.
   app.get('/slots', async (request, reply) => {
-    const { professional_id, service_id, date } = request.query as Record<string, string>
+    const { professional_id, service_id, date } = z.object({
+      professional_id: z.string().uuid(),
+      service_id: z.string().uuid(),
+      date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+    }).parse(request.query)
     const { tenant_id } = request.user
 
-    const [serviceRes, hoursRes, apptRes] = await Promise.all([
-      db.query('SELECT duration_minutes FROM services WHERE id=$1 AND tenant_id=$2', [service_id, tenant_id]),
-      db.query(
-        `SELECT start_time, end_time FROM working_hours
-         WHERE professional_id=$1 AND tenant_id=$3 AND day_of_week=EXTRACT(DOW FROM $2::date)`,
-        [professional_id, date, tenant_id]
-      ),
-      db.query(
-        `SELECT starts_at, ends_at FROM appointments
-         WHERE professional_id=$1 AND tenant_id=$3 AND status NOT IN ('cancelled') AND DATE(starts_at)=$2`,
-        [professional_id, date, tenant_id]
-      ),
-    ])
+    const result = await findAvailableSlots(tenant_id!, professional_id, service_id, date)
+    if (!result.ok) return reply.send([])
 
-    const service = serviceRes.rows[0]
-    const hours = hoursRes.rows[0]
-    if (!service || !hours) return reply.send([])
-
-    const duration = service.duration_minutes
-    const slots: string[] = []
-
-    const [sh, sm] = (hours.start_time as string).split(':').map(Number)
-    const [eh, em] = (hours.end_time as string).split(':').map(Number)
-
-    let current = sh * 60 + sm
-    const endMinutes = eh * 60 + em
-
-    const busySlots = apptRes.rows.map((r: any) => ({
-      start: new Date(r.starts_at).getHours() * 60 + new Date(r.starts_at).getMinutes(),
-      end: new Date(r.ends_at).getHours() * 60 + new Date(r.ends_at).getMinutes(),
-    }))
-
-    while (current + duration <= endMinutes) {
-      const slotEnd = current + duration
-      const isBusy = busySlots.some((b) => current < b.end && slotEnd > b.start)
-      if (!isBusy) {
-        const hh = String(Math.floor(current / 60)).padStart(2, '0')
-        const mm = String(current % 60).padStart(2, '0')
-        slots.push(`${date}T${hh}:${mm}:00`)
-      }
-      current += 30 // 30-min grid
-    }
-
-    return reply.send(slots)
+    // Frontend expects `${date}T${HH}:${MM}:00` strings.
+    return reply.send(result.slots.map((hm) => `${date}T${hm}:00`))
   })
 }

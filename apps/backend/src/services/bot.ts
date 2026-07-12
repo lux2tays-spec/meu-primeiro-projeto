@@ -189,7 +189,7 @@ Você NÃO consegue realizar nenhuma ação sozinho(a). Consultar horários, age
 - Só diga "agendado", "confirmado" ou "garantido" DEPOIS que book_appointment retornar "ok": true NESTA conversa. Antes disso, o agendamento NÃO existe.
 - Só diga "dados salvos" / "anotei seus dados" DEPOIS que save_customer_info retornar "ok": true.
 - Se uma ferramenta retornar erro, o resultado é que a ação NÃO FOI FEITA. Seja honesto(a): peça desculpas brevemente e diga que não conseguiu concluir agora e que alguém da equipe vai confirmar com o cliente. É PROIBIDO: dizer que foi um "problema técnico" ou "instabilidade", dizer que "o sistema vai normalizar", prometer "processar depois", ou afirmar que a ação aconteceu.
-- Significado dos erros: "sem_profissional" ou "sem_horario_config" = a agenda deste estabelecimento ainda não está configurada — NÃO ofereça nem confirme horários; diga que vai verificar a agenda e que alguém da equipe confirma o horário em seguida. "horario_indisponivel" = aquele horário foi ocupado — consulte check_availability e ofereça outro. "servico_nao_encontrado" = confirme com o cliente qual serviço ele quer (use os nomes da lista de serviços).
+- Significado dos erros: "sem_profissional" ou "sem_horario_config" = a agenda deste estabelecimento ainda não está configurada — NÃO ofereça nem confirme horários; diga que vai verificar a agenda e que alguém da equipe confirma o horário em seguida. "horario_indisponivel" = aquele horário foi ocupado — consulte check_availability e ofereça outro. "dia_bloqueado" = o estabelecimento/profissional NÃO atende nessa data (folga/bloqueio) — diga honestamente que essa data não está disponível e ofereça outra data. "servico_nao_encontrado" = confirme com o cliente qual serviço ele quer (use os nomes da lista de serviços).
 - Você NÃO tem como gerar link de pagamento, cobrar, dar desconto, parcelar ou enviar boleto/PIX. NUNCA ofereça nem prometa nada disso. Pagamento e valores especiais são tratados diretamente com o estabelecimento.
 - Nunca prometa nenhuma ação futura que você não consegue executar com as ferramentas listadas acima.
 
@@ -314,14 +314,20 @@ async function runTool(name: string, input: any, ctx: ExecCtx): Promise<any> {
     if (name === 'check_availability') {
       const service = await resolveService(tenantId, input.service ?? '')
       if (!service) return { error: 'servico_nao_encontrado' }
-      const prof = await resolveProfessional(tenantId, input.professional)
+      // Resolve the service FIRST and pass its id so only professionals who
+      // actually perform this service (service_professionals) are considered.
+      const prof = await resolveProfessional(tenantId, input.professional, service.id)
       if (prof.ambiguous) return { error: 'escolha_profissional', profissionais: prof.options?.map((p) => p.name) }
       if (!prof.professional) return { error: 'sem_profissional', detalhe: 'Nenhum profissional cadastrado — não ofereça horários; diga que a equipe vai confirmar.' }
       const slotsRes = await findAvailableSlots(tenantId, prof.professional.id, service.id, input.date)
       if (!slotsRes.ok) {
-        return slotsRes.reason === 'sem_horario_config'
-          ? { error: 'sem_horario_config', detalhe: 'Horários de atendimento não configurados para essa data — não ofereça horários; diga que a equipe vai confirmar.' }
-          : { error: 'dados_invalidos' }
+        if (slotsRes.reason === 'sem_horario_config') {
+          return { error: 'sem_horario_config', detalhe: 'Horários de atendimento não configurados para essa data — não ofereça horários; diga que a equipe vai confirmar.' }
+        }
+        if (slotsRes.reason === 'dia_bloqueado') {
+          return { error: 'dia_bloqueado', detalhe: 'O estabelecimento/profissional não atende nessa data (folga ou bloqueio) — informe que essa data não está disponível e ofereça outra data.' }
+        }
+        return { error: 'dados_invalidos' }
       }
       return {
         service: service.name, professional: prof.professional.name, date: input.date,
@@ -333,7 +339,9 @@ async function runTool(name: string, input: any, ctx: ExecCtx): Promise<any> {
       if (!customerId) return { error: 'sem_cliente' }
       const service = await resolveService(tenantId, input.service ?? '')
       if (!service) return { error: 'servico_nao_encontrado' }
-      const prof = await resolveProfessional(tenantId, input.professional)
+      // Resolve the service FIRST and pass its id so the appointment can only be
+      // booked with a professional linked to this service (service_professionals).
+      const prof = await resolveProfessional(tenantId, input.professional, service.id)
       if (prof.ambiguous) return { error: 'escolha_profissional', profissionais: prof.options?.map((p) => p.name) }
       if (!prof.professional) return { error: 'sem_profissional', detalhe: 'Nenhum profissional cadastrado — o agendamento NÃO foi feito; diga que a equipe vai confirmar.' }
       const res = await bookAppointment({
@@ -343,6 +351,7 @@ async function runTool(name: string, input: any, ctx: ExecCtx): Promise<any> {
       if (!res.ok) {
         if (res.reason === 'unavailable') return { error: 'horario_indisponivel' }
         if (res.reason === 'sem_horario_config') return { error: 'sem_horario_config', detalhe: 'Agenda não configurada para essa data — o agendamento NÃO foi feito; diga que a equipe vai confirmar.' }
+        if (res.reason === 'dia_bloqueado') return { error: 'dia_bloqueado', detalhe: 'Essa data está bloqueada (folga) — o agendamento NÃO foi feito; informe que essa data não está disponível e ofereça outra data.' }
         return { error: 'dados_invalidos' }
       }
       return { ok: true, agendado: { service: service.name, professional: prof.professional.name, date: input.date, time: input.time } }

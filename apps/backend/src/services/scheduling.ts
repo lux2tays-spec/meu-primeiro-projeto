@@ -23,36 +23,68 @@ export async function resolveService(tenantId: string, query: string): Promise<S
 }
 
 /**
- * Resolve a professional. If a name is given, fuzzy-match it. If not and the
- * tenant has exactly one active professional, use it. Otherwise return
- * { ambiguous: true, options } so the bot can ask which one.
+ * Resolve a professional. If a serviceId is given, candidates are restricted to
+ * professionals linked to that service via service_professionals (falling back
+ * to ALL active professionals only when the service has no mapping rows, so
+ * tenants that never configured the mapping keep working). If a name is given,
+ * fuzzy-match it within the candidates. If there is exactly one candidate, use
+ * it. Otherwise return { ambiguous: true, options } so the bot can ask which one.
  */
 export async function resolveProfessional(
   tenantId: string,
-  query?: string
+  query?: string,
+  serviceId?: string
 ): Promise<{ professional?: ProfessionalRow; ambiguous?: boolean; options?: ProfessionalRow[] }> {
-  if (query && query.trim()) {
-    const { rows } = await db.query(
-      `SELECT id, name FROM professionals
-       WHERE tenant_id = $1 AND active = TRUE
-         AND (LOWER(name) = LOWER($2) OR LOWER(name) LIKE '%' || LOWER($2) || '%')
-       ORDER BY (LOWER(name) = LOWER($2)) DESC LIMIT 1`,
-      [tenantId, query.trim()]
+  let candidates: ProfessionalRow[] | null = null
+
+  if (serviceId) {
+    const { rows: mapped } = await db.query(
+      `SELECT p.id, p.name FROM professionals p
+       JOIN service_professionals sp ON sp.professional_id = p.id
+       WHERE sp.service_id = $1 AND p.tenant_id = $2 AND p.active = TRUE
+       ORDER BY p.name`,
+      [serviceId, tenantId]
     )
-    if (rows[0]) return { professional: rows[0] }
+    if (mapped.length > 0) candidates = mapped
+    // else: service has no mapping rows — fall back to all active professionals below.
   }
-  const { rows: all } = await db.query(
-    'SELECT id, name FROM professionals WHERE tenant_id = $1 AND active = TRUE ORDER BY name',
-    [tenantId]
-  )
-  if (all.length === 1) return { professional: all[0] }
-  if (all.length === 0) return { ambiguous: false, options: [] }
-  return { ambiguous: true, options: all }
+
+  if (!candidates) {
+    const { rows: all } = await db.query(
+      'SELECT id, name FROM professionals WHERE tenant_id = $1 AND active = TRUE ORDER BY name',
+      [tenantId]
+    )
+    candidates = all
+  }
+
+  if (query && query.trim()) {
+    const q = query.trim().toLowerCase()
+    const match =
+      candidates.find((p) => p.name.toLowerCase() === q) ??
+      candidates.find((p) => p.name.toLowerCase().includes(q))
+    if (match) return { professional: match }
+  }
+
+  if (candidates.length === 1) return { professional: candidates[0] }
+  if (candidates.length === 0) return { ambiguous: false, options: [] }
+  return { ambiguous: true, options: candidates }
 }
 
 export type SlotsResult =
   | { ok: true; slots: string[] }
-  | { ok: false; reason: 'sem_horario_config' | 'servico_invalido' }
+  | { ok: false; reason: 'sem_horario_config' | 'servico_invalido' | 'dia_bloqueado' }
+
+/** True when the date is blocked in days_off for this professional (or tenant-wide). */
+async function isDayOff(tenantId: string, professionalId: string, date: string): Promise<boolean> {
+  const { rows } = await db.query(
+    `SELECT 1 FROM days_off
+     WHERE tenant_id = $1 AND (professional_id = $2 OR professional_id IS NULL)
+       AND date = $3::date
+     LIMIT 1`,
+    [tenantId, professionalId, date]
+  )
+  return rows.length > 0
+}
 
 /**
  * Free 30-minute-grid start times ("HH:MM") for a professional+service on a date.
@@ -67,7 +99,7 @@ export async function findAvailableSlots(
   serviceId: string,
   date: string // YYYY-MM-DD
 ): Promise<SlotsResult> {
-  const [svcRes, hoursRes, apptRes, nowRes] = await Promise.all([
+  const [svcRes, hoursRes, apptRes, nowRes, dayOff] = await Promise.all([
     db.query('SELECT duration_minutes FROM services WHERE id = $1 AND tenant_id = $2', [serviceId, tenantId]),
     db.query(
       `SELECT to_char(start_time, 'HH24:MI') AS start_hm, to_char(end_time, 'HH24:MI') AS end_hm
@@ -90,12 +122,17 @@ export async function findAvailableSlots(
               to_char(now() AT TIME ZONE $1, 'HH24:MI') AS now_hm`,
       [TZ]
     ),
+    isDayOff(tenantId, professionalId, date),
   ])
 
   const service = svcRes.rows[0]
   if (!service) {
     console.error(`[scheduling] findAvailableSlots FALHOU: serviço ${serviceId} não encontrado (tenant=${tenantId})`)
     return { ok: false, reason: 'servico_invalido' }
+  }
+  if (dayOff) {
+    console.warn(`[scheduling] findAvailableSlots BLOQUEADO: ${date} está em days_off para professional=${professionalId} (tenant=${tenantId})`)
+    return { ok: false, reason: 'dia_bloqueado' }
   }
   if (hoursRes.rows.length === 0) {
     console.error(`[scheduling] findAvailableSlots FALHOU: nenhum working_hours para professional=${professionalId} na data ${date} (tenant=${tenantId}) — agenda não configurada para esse dia`)
@@ -135,7 +172,7 @@ function saoPauloTimestamp(date: string, time: string): string {
 
 export type BookResult =
   | { ok: true; appointmentId: string; startsAt: string }
-  | { ok: false; reason: 'unavailable' | 'invalid' | 'sem_horario_config' }
+  | { ok: false; reason: 'unavailable' | 'invalid' | 'sem_horario_config' | 'dia_bloqueado' }
 
 /** Create an appointment for the bot (created_by = NULL). Rechecks conflicts. */
 export async function bookAppointment(params: {
@@ -176,6 +213,12 @@ export async function bookAppointment(params: {
   if (hours.length === 0) {
     console.error(`[scheduling] bookAppointment FALHOU: nenhum working_hours para professional=${professionalId} em ${date} (tenant=${tenantId}) — horários de atendimento não configurados`)
     return { ok: false, reason: 'sem_horario_config' }
+  }
+
+  // Guard: the date must not be blocked in days_off (professional-specific or tenant-wide).
+  if (await isDayOff(tenantId, professionalId, date)) {
+    console.error(`[scheduling] bookAppointment FALHOU: ${date} está em days_off para professional=${professionalId} (tenant=${tenantId}) — dia bloqueado/folga`)
+    return { ok: false, reason: 'dia_bloqueado' }
   }
 
   try {
