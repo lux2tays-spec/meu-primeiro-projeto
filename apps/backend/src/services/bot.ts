@@ -9,7 +9,6 @@ import {
 import { getAiConfig, resolveModel } from '../lib/botConfig'
 import { recordUsage, monthlySpend } from '../lib/aiUsage'
 
-const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
 const TZ = 'America/Sao_Paulo'
 const MAX_TOOL_TURNS = 6
 
@@ -385,8 +384,13 @@ export async function runBot(params: {
   ])
   if (!context) throw new Error('Tenant config not found')
 
-  // Resolve the model from the Root Admin config (single/hybrid) for this message.
+  // Resolve the model + API key from the Root Admin config (single/hybrid) for this message.
   const aiConfig = await getAiConfig()
+  // API key comes from the Root Admin panel; fall back to env for existing deployments.
+  const anthropic = new Anthropic({
+    apiKey: aiConfig.api_key || process.env.ANTHROPIC_API_KEY,
+    ...(aiConfig.base_url ? { baseURL: aiConfig.base_url } : {}),
+  })
   let model = resolveModel(aiConfig, customerMessage)
   // Monthly cost cap per plan (0 = unlimited): downgrade to the cheapest model when over.
   const cap = Number(aiConfig.caps?.[context.plan] ?? 0)

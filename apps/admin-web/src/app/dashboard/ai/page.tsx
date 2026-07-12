@@ -47,6 +47,7 @@ function ModelConfig() {
   const [simple, setSimple] = useState('claude-haiku-4-5')
   const [rate, setRate] = useState(6)
   const [caps, setCaps] = useState<Record<string, number>>({})
+  const [apiKey, setApiKey] = useState('')
 
   useEffect(() => {
     const cfg = settings?.ai_config
@@ -55,14 +56,16 @@ function ModelConfig() {
     else setSel(cfg.model || 'claude-sonnet-5')
     setRate(Number(cfg.usd_brl_rate ?? 6))
     setCaps(cfg.caps ?? {})
+    setApiKey(cfg.api_key || '')
   }, [settings])
 
   const mutation = useMutation({
     mutationFn: () => {
       const base = settings?.ai_config ?? {}
+      const common = { api_key: apiKey, usd_brl_rate: rate, caps }
       const value = sel === 'hybrid'
-        ? { ...base, mode: 'hybrid', model: closing, model_simple: simple, usd_brl_rate: rate, caps }
-        : { ...base, mode: 'single', model: sel, usd_brl_rate: rate, caps }
+        ? { ...base, ...common, mode: 'hybrid', model: closing, model_simple: simple }
+        : { ...base, ...common, mode: 'single', model: sel }
       return rootApi.updateSettings('ai_config', value)
     },
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['root-settings'] }); setSuccess('Configuração salva!'); setTimeout(() => setSuccess(''), 3000) },
@@ -75,6 +78,13 @@ function ModelConfig() {
       <div>
         <h2 className="font-semibold text-gray-900">Modelo de IA do chatbot</h2>
         <p className="text-xs text-gray-500 mt-1">Aplica-se a todos os tenants. O modo Híbrido usa Haiku em conversas simples e Sonnet 5 quando detecta intenção de compra/agendamento.</p>
+      </div>
+
+      <div>
+        <label className="block text-sm font-medium text-gray-700 mb-1">Chave da API (Anthropic)</label>
+        <input type="password" value={apiKey} onChange={(e) => setApiKey(e.target.value)} placeholder="sk-ant-..."
+          className="w-full h-10 px-3 rounded-xl border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary" />
+        <p className="text-xs text-gray-400 mt-1">Usada pelo bot para responder. Se ficar vazia, usa a variável de ambiente do servidor (ANTHROPIC_API_KEY).</p>
       </div>
 
       <div>

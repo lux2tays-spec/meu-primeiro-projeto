@@ -6,6 +6,8 @@ import { redis } from './redis'
 
 export type AiConfig = {
   provider: string
+  api_key: string        // Anthropic API key (Root Admin) — falls back to env
+  base_url: string       // optional custom endpoint (proxy / compatible API)
   model: string          // used in single mode; the "closing" model in hybrid mode
   model_simple: string   // cheap model for simple turns in hybrid mode
   mode: 'single' | 'hybrid'
@@ -15,6 +17,8 @@ export type AiConfig = {
 
 const DEFAULTS: AiConfig = {
   provider: 'anthropic',
+  api_key: '',
+  base_url: '',
   model: 'claude-sonnet-5',
   model_simple: 'claude-haiku-4-5',
   mode: 'single',
