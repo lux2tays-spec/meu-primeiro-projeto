@@ -16,6 +16,91 @@ const STATUS_COLOR: Record<string, string> = {
   cancelled: 'bg-red-50 text-red-600',
 }
 
+function NewCustomerModal({ onClose }: { onClose: () => void }) {
+  const qc = useQueryClient()
+  const [form, setForm] = useState({ name: '', phone: '', email: '' })
+  const [error, setError] = useState('')
+
+  const createMutation = useMutation({
+    mutationFn: () =>
+      tenantApi.addCustomer({
+        name: form.name.trim(),
+        phone: form.phone.trim(),
+        email: form.email.trim() || undefined,
+      }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['customers'] })
+      onClose()
+    },
+    onError: (e: any) => setError(e.message),
+  })
+
+  function submit() {
+    setError('')
+    if (!form.name.trim()) return setError('Informe o nome do cliente')
+    if (!form.phone.trim()) return setError('Informe o telefone (WhatsApp)')
+    createMutation.mutate()
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      <div className="absolute inset-0 bg-black/30" onClick={onClose} />
+      <div className="relative w-full max-w-md bg-white rounded-2xl shadow-2xl p-6 space-y-4">
+        <div className="flex items-center justify-between">
+          <h2 className="text-lg font-bold text-gray-900">Novo cliente</h2>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-xl leading-none">✕</button>
+        </div>
+
+        <div>
+          <label className="block text-xs font-medium text-gray-600 mb-1">Nome *</label>
+          <input
+            value={form.name}
+            onChange={e => setForm(f => ({ ...f, name: e.target.value }))}
+            className="w-full h-10 px-3 rounded-xl border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+            placeholder="Nome do cliente"
+          />
+        </div>
+        <div>
+          <label className="block text-xs font-medium text-gray-600 mb-1">Telefone (WhatsApp) *</label>
+          <input
+            type="tel"
+            value={form.phone}
+            onChange={e => setForm(f => ({ ...f, phone: e.target.value }))}
+            className="w-full h-10 px-3 rounded-xl border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+            placeholder="5511999999999"
+          />
+        </div>
+        <div>
+          <label className="block text-xs font-medium text-gray-600 mb-1">E-mail (opcional)</label>
+          <input
+            type="email"
+            value={form.email}
+            onChange={e => setForm(f => ({ ...f, email: e.target.value }))}
+            className="w-full h-10 px-3 rounded-xl border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+            placeholder="email@exemplo.com"
+          />
+        </div>
+
+        {error && <p className="text-red-500 text-xs">{error}</p>}
+
+        <div className="flex gap-2 pt-1">
+          <button
+            onClick={submit}
+            disabled={createMutation.isPending}
+            className="flex-1 h-10 bg-primary text-white text-sm font-semibold rounded-xl disabled:opacity-50"
+          >
+            {createMutation.isPending ? 'Salvando...' : 'Adicionar cliente'}
+          </button>
+          <button onClick={onClose}
+            className="flex-1 h-10 border border-gray-200 text-gray-600 text-sm rounded-xl hover:bg-gray-50">
+            Cancelar
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function CustomerDrawer({ customerId, onClose }: { customerId: string; onClose: () => void }) {
   const qc = useQueryClient()
   const { data: customer, isLoading } = useQuery({
@@ -140,10 +225,23 @@ function CustomerDrawer({ customerId, onClose }: { customerId: string; onClose: 
               )}
             </div>
 
+            {/* Interest (from WhatsApp bot — migration 013, may be absent) */}
+            {customer.interested_services && (
+              <div>
+                <h3 className="text-sm font-semibold text-gray-900 mb-3">Interesse</h3>
+                <div className="bg-blue-50 border border-blue-100 rounded-xl p-3">
+                  <p className="text-sm font-medium text-blue-900">{customer.interested_services}</p>
+                  {customer.last_interest_at && (
+                    <p className="text-xs text-blue-500 mt-1">Último interesse em {customer.last_interest_at}</p>
+                  )}
+                </div>
+              </div>
+            )}
+
             {/* Appointment history */}
             <div>
               <h3 className="text-sm font-semibold text-gray-900 mb-3">
-                Histórico de serviços
+                Serviços realizados
                 <span className="ml-2 text-gray-400 font-normal">({customer.appointments?.length ?? 0})</span>
               </h3>
 
@@ -157,16 +255,16 @@ function CustomerDrawer({ customerId, onClose }: { customerId: string; onClose: 
                     <div key={a.id} className="bg-white border border-gray-100 rounded-xl p-3 shadow-sm">
                       <div className="flex items-start justify-between gap-2">
                         <div className="flex-1 min-w-0">
-                          <p className="text-sm font-semibold text-gray-900 truncate">{a.service}</p>
-                          <p className="text-xs text-gray-500 mt-0.5">com {a.professional}</p>
+                          <p className="text-sm font-semibold text-gray-900 truncate">{a.service_name}</p>
+                          <p className="text-xs text-gray-500 mt-0.5">com {a.professional_name}</p>
                         </div>
                         <span className={`text-xs font-medium px-2 py-0.5 rounded-full shrink-0 ${STATUS_COLOR[a.status] ?? 'bg-gray-50 text-gray-500'}`}>
                           {STATUS_LABEL[a.status] ?? a.status}
                         </span>
                       </div>
                       <div className="flex items-center gap-3 mt-2 text-xs text-gray-400">
-                        <span>{new Date(a.starts_at).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' })}</span>
-                        <span>{new Date(a.starts_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}</span>
+                        <span>{a.date}</span>
+                        <span>{a.time}</span>
                         <span>· {a.duration_minutes} min</span>
                         <span className="ml-auto font-medium text-gray-600">R$ {Number(a.price).toFixed(2)}</span>
                       </div>
@@ -186,6 +284,7 @@ function CustomerDrawer({ customerId, onClose }: { customerId: string; onClose: 
 export default function CustomersPage() {
   const [search, setSearch] = useState('')
   const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [showNew, setShowNew] = useState(false)
 
   const { data: customers = [], isLoading } = useQuery({
     queryKey: ['customers', search],
@@ -194,7 +293,15 @@ export default function CustomersPage() {
 
   return (
     <div className="space-y-6">
-      <h1 className="text-2xl font-bold text-gray-900">Clientes</h1>
+      <div className="flex items-center justify-between">
+        <h1 className="text-2xl font-bold text-gray-900">Clientes</h1>
+        <button
+          onClick={() => setShowNew(true)}
+          className="h-10 px-4 bg-primary text-white text-sm font-semibold rounded-xl hover:opacity-90"
+        >
+          + Novo cliente
+        </button>
+      </div>
 
       <input
         value={search}
@@ -208,7 +315,9 @@ export default function CustomersPage() {
       ) : (customers as any[]).length === 0 ? (
         <div className="bg-white rounded-2xl p-8 text-center border border-gray-100">
           <p className="text-gray-400 text-sm">Nenhum cliente encontrado</p>
-          <p className="text-gray-400 text-xs mt-1">Os clientes são criados automaticamente via WhatsApp</p>
+          <p className="text-gray-400 text-xs mt-1">
+            Os clientes são criados automaticamente via WhatsApp — ou adicione um manualmente em “+ Novo cliente”
+          </p>
         </div>
       ) : (
         <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
@@ -263,6 +372,8 @@ export default function CustomersPage() {
           </table>
         </div>
       )}
+
+      {showNew && <NewCustomerModal onClose={() => setShowNew(false)} />}
 
       {selectedId && (
         <CustomerDrawer customerId={selectedId} onClose={() => setSelectedId(null)} />

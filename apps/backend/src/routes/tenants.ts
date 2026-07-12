@@ -34,6 +34,12 @@ const staffUpdateSchema = z.object({
   role: z.enum(['owner', 'admin', 'staff']).optional(),
 }).refine((d) => Object.values(d).some((v) => v !== undefined), { message: 'Nenhum campo para atualizar' })
 
+const customerCreateSchema = z.object({
+  name: z.string().min(1).max(120),
+  phone: z.string().min(8).max(30),
+  email: z.string().email().or(z.literal('')).nullable().optional(),
+})
+
 const businessSchema = z.object({
   name: z.string().min(1).max(120),
   contact_email: z.string().email().or(z.literal('')).nullable().optional(),
@@ -618,10 +624,26 @@ export const tenantRoutes: FastifyPluginAsync = async (app) => {
     )
     if (!customer) return reply.status(404).send({ error: 'Cliente não encontrado' })
 
+    // interested_services/last_interest_at come from migration 013 — tolerate their absence
+    let interest: { interested_services: string | null; last_interest_at: string | null } =
+      { interested_services: null, last_interest_at: null }
+    try {
+      const { rows: [row] } = await db.query(
+        `SELECT interested_services,
+                to_char(last_interest_at AT TIME ZONE 'America/Sao_Paulo', 'DD/MM/YYYY') AS last_interest_at
+         FROM customers WHERE id = $1 AND tenant_id = $2`,
+        [request.params.id, tenant_id]
+      )
+      if (row) interest = row
+    } catch { /* columns not present until migration 013 is applied */ }
+
     const { rows: appointments } = await db.query(
-      `SELECT a.id, a.starts_at, a.ends_at, a.status, a.notes,
-         s.name AS service, s.price, s.duration_minutes,
-         p.name AS professional
+      `SELECT a.id,
+         to_char(a.starts_at AT TIME ZONE 'America/Sao_Paulo', 'DD/MM/YYYY') AS date,
+         to_char(a.starts_at AT TIME ZONE 'America/Sao_Paulo', 'HH24:MI') AS time,
+         a.status, a.notes,
+         s.name AS service_name, s.price, s.duration_minutes,
+         p.name AS professional_name
        FROM appointments a
        JOIN services s ON s.id = a.service_id
        JOIN professionals p ON p.id = a.professional_id
@@ -631,7 +653,7 @@ export const tenantRoutes: FastifyPluginAsync = async (app) => {
       [request.params.id, tenant_id]
     )
 
-    return reply.send({ ...customer, appointments })
+    return reply.send({ ...customer, ...interest, appointments })
   })
 
   app.put<{ Params: { id: string } }>('/customers/:id', async (request, reply) => {
@@ -653,16 +675,25 @@ export const tenantRoutes: FastifyPluginAsync = async (app) => {
   })
 
   app.post('/customers', async (request, reply) => {
-    const { tenant_id } = request.user
-    const { name, phone, email } = request.body as any
+    const { tenant_id, role } = request.user
+    if (!['owner', 'admin', 'root'].includes(role)) return reply.status(403).send({ error: 'Sem permissão' })
 
-    const { rows: [customer] } = await db.query(
-      `INSERT INTO customers (tenant_id, name, phone, email)
-       VALUES ($1, $2, $3, $4)
-       ON CONFLICT (tenant_id, phone) DO UPDATE SET name = EXCLUDED.name, email = EXCLUDED.email
-       RETURNING *`,
-      [tenant_id, name, phone, email ?? null]
-    )
-    return reply.status(201).send(customer)
+    const body = customerCreateSchema.parse(request.body)
+
+    try {
+      const { rows: [customer] } = await db.query(
+        `INSERT INTO customers (tenant_id, name, phone, email)
+         VALUES ($1, $2, $3, $4)
+         RETURNING id, name, phone, email, created_at`,
+        [tenant_id, body.name.trim(), body.phone.trim(), body.email || null]
+      )
+      return reply.status(201).send(customer)
+    } catch (err: any) {
+      // UNIQUE (tenant_id, phone) from 001_init.sql
+      if (err?.code === '23505') {
+        return reply.status(409).send({ error: 'Já existe um cliente com esse telefone' })
+      }
+      throw err
+    }
   })
 }

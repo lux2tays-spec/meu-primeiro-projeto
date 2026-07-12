@@ -90,7 +90,8 @@ export const tenantApi = {
   customer: (id: string) => api.get<any>(`/tenant/customers/${id}`),
   updateCustomer: (id: string, data: { name?: string; email?: string }) =>
     api.put<any>(`/tenant/customers/${id}`, data),
-  addCustomer: (data: any) => api.post<any>('/tenant/customers', data),
+  addCustomer: (data: { name: string; phone: string; email?: string }) =>
+    api.post<any>('/tenant/customers', data),
   hours: (professionalId?: string) =>
     api.get<any[]>(`/tenant/hours${professionalId ? `?professional_id=${professionalId}` : ''}`),
   saveHours: (rows: any[], professionalId?: string) =>
