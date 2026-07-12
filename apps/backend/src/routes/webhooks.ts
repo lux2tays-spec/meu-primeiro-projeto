@@ -4,6 +4,7 @@ import { db } from '../lib/db'
 import { redis, QR_CODE_TTL } from '../lib/redis'
 import { isDuplicateMessage, scheduleReply } from '../services/botDispatcher'
 import { getPaymentConfig } from '../lib/paymentConfig'
+import { applyPreapproval } from '../lib/subscriptionState'
 
 // Validate the shared secret Evolution must send with every webhook.
 // Enabled only when EVOLUTION_WEBHOOK_SECRET is set — so existing instances keep
@@ -200,25 +201,15 @@ export const webhookRoutes: FastifyPluginAsync = async (app) => {
       return reply.send({ ok: true })
     }
 
-    // MP status → our subscription/tenant status
-    const subStatus = ['authorized', 'paused', 'cancelled', 'pending'].includes(sub.status) ? sub.status : 'pending'
-    const tenantStatus = subStatus === 'authorized' ? 'active'
-      : subStatus === 'cancelled' ? 'cancelled'
-      : subStatus === 'paused' ? 'suspended'
-      : 'trial'
-
-    // 4. Idempotent upsert by mp_subscription_id + reflect on tenant
-    await db.query(
-      `INSERT INTO subscriptions (tenant_id, mp_subscription_id, plan, status, next_billing_date)
-       VALUES ($1, $2, $3, $4, $5)
-       ON CONFLICT (mp_subscription_id) DO UPDATE SET
-         status = EXCLUDED.status, plan = EXCLUDED.plan, next_billing_date = EXCLUDED.next_billing_date`,
-      [tenantId, sub.id, plan, subStatus, sub.next_payment_date?.slice(0, 10) ?? null]
-    )
-    await db.query(
-      `UPDATE tenants SET plan = $1, status = $2 WHERE id = $3`,
-      [subStatus === 'authorized' ? plan : 'free', tenantStatus, tenantId]
-    )
+    // 4. Reflect on subscriptions + tenant (idempotent) — same mapping the
+    // transparent checkout uses, so the two paths never diverge.
+    await applyPreapproval({
+      tenantId,
+      plan,
+      mpSubscriptionId: sub.id,
+      mpStatus: sub.status,
+      nextBillingDate: sub.next_payment_date?.slice(0, 10) ?? null,
+    })
 
     return reply.send({ ok: true })
   })

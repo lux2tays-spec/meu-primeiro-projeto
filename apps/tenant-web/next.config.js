@@ -4,11 +4,15 @@
 // runtime). Tighten script-src further once nonces are wired if desired.
 const csp = [
   "default-src 'self'",
-  "script-src 'self' 'unsafe-inline' 'unsafe-eval'",
+  // Mercado Pago transparent checkout SDK (sdk.mercadopago.com) + its static host.
+  "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://sdk.mercadopago.com https://http2.mlstatic.com",
   "style-src 'self' 'unsafe-inline'",
   "img-src 'self' data: blob: https:",
   "font-src 'self' data:",
+  // connect-src already allows https: for our API and Mercado Pago's API.
   "connect-src 'self' https:",
+  // Mercado Pago renders the secure card fields and 3-D Secure challenge in iframes.
+  "frame-src https://*.mercadopago.com https://*.mercadolibre.com",
   "frame-ancestors 'none'",
   "base-uri 'self'",
   "form-action 'self'",

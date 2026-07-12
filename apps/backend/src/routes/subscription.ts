@@ -2,6 +2,7 @@ import { FastifyPluginAsync } from 'fastify'
 import { db } from '../lib/db'
 import { getPaymentConfig } from '../lib/paymentConfig'
 import { createPreapproval } from '../services/mercadopago'
+import { applyPreapproval } from '../lib/subscriptionState'
 
 // Tenant-facing subscription endpoints. Only `authenticate` (NOT planGuard) —
 // an expired-trial tenant must be able to reach checkout to reactivate.
@@ -18,10 +19,27 @@ export const subscriptionRoutes: FastifyPluginAsync = async (app) => {
     return reply.send(rows)
   })
 
-  // Create a checkout for a paid plan → returns the provider checkout URL
+  // Public info the transparent-checkout card form needs: the platform's MP
+  // public key (safe to expose) and whether subscriptions are available at all.
+  // The public key is only returned when payments are fully configured, so the
+  // client can decide whether to render the card form.
+  app.get('/payment-info', async (_request, reply) => {
+    const cfg = await getPaymentConfig()
+    const backUrlOk = (cfg.back_url ?? '').trim().startsWith('https://')
+    const available = cfg.provider === 'mercadopago' && !!cfg.mp_access_token && backUrlOk && !!cfg.mp_public_key
+    return reply.send({
+      available,
+      public_key: available ? cfg.mp_public_key : null,
+    })
+  })
+
+  // Create a checkout for a paid plan.
+  //  - With `card_token_id` (transparent): charges immediately, activates the
+  //    subscription and returns { status: 'authorized' } — no redirect.
+  //  - Without it (fallback): returns { init_point } for the hosted MP page.
   app.post('/checkout', async (request, reply) => {
     const { tenant_id, user_id } = request.user
-    const { plan } = request.body as { plan?: string }
+    const { plan, card_token_id } = request.body as { plan?: string; card_token_id?: string }
     if (!plan) return reply.status(400).send({ error: 'Plano não informado' })
 
     const { rows: [planRow] } = await db.query(
@@ -59,15 +77,41 @@ export const subscriptionRoutes: FastifyPluginAsync = async (app) => {
       priceBrl: planRow.price_cents / 100,
       payerEmail: user?.email ?? 'sem-email@agendabot.com.br',
       backUrl,
+      cardTokenId: card_token_id,
     })
 
     if (!result.ok) {
       request.log.error({ tenant_id, plan: planRow.slug, reason: result.reason }, 'Mercado Pago checkout failed')
-      return reply.status(502).send({
-        error: 'Não foi possível iniciar o pagamento. Tente novamente.',
-        detail: result.reason, // MP failure reason, for platform-admin diagnosis
+      // Card-specific rejections (declined, invalid data) should nudge the user
+      // to try another card; generic failures get the neutral message.
+      const cardIssue = /card|tarjeta|cartão|payment|token|cvv|security|amount|invalid/i.test(result.reason)
+      return reply.status(cardIssue ? 402 : 502).send({
+        error: cardIssue
+          ? 'Não conseguimos aprovar este cartão. Verifique os dados ou tente outro cartão.'
+          : 'Não foi possível iniciar o pagamento. Tente novamente.',
+        detail: result.reason, // MP failure reason, for platform-admin diagnosis (not shown to user)
       })
     }
+
+    // Transparent flow: the subscription is already authorized — reflect it now
+    // so the UI updates immediately (the webhook will also confirm, idempotently).
+    if (card_token_id) {
+      if (result.status !== 'authorized') {
+        request.log.error({ tenant_id, plan: planRow.slug, status: result.status }, 'transparent checkout not authorized')
+        return reply.status(402).send({
+          error: 'Não conseguimos aprovar este cartão. Verifique os dados ou tente outro cartão.',
+          detail: `status_${result.status}`,
+        })
+      }
+      await applyPreapproval({
+        tenantId: tenant_id!,
+        plan: planRow.slug,
+        mpSubscriptionId: result.id,
+        mpStatus: result.status,
+      })
+      return reply.send({ status: 'authorized' })
+    }
+
     return reply.send({ init_point: result.init_point })
   })
 
