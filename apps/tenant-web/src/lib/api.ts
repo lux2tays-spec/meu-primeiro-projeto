@@ -80,7 +80,11 @@ export const tenantApi = {
   removeProfessional: (id: string) => api.delete(`/tenant/professionals/${id}`),
   staff: () => api.get<any[]>('/tenant/staff'),
   addStaff: (data: any) => api.post<any>('/tenant/staff', data),
+  editStaff: (id: string, data: { name?: string; email?: string; phone?: string | null; role?: 'owner' | 'admin' | 'staff' }) =>
+    api.patch<any>(`/tenant/staff/${id}`, data),
   removeStaff: (id: string) => api.delete(`/tenant/staff/${id}`),
+  updateBusiness: (data: { name: string; contact_email?: string | null; contact_phone?: string | null; responsible_name?: string | null }) =>
+    api.put<any>('/tenant/business', data),
   customers: (search?: string) =>
     api.get<any[]>(`/tenant/customers${search ? `?search=${encodeURIComponent(search)}` : ''}`),
   customer: (id: string) => api.get<any>(`/tenant/customers/${id}`),

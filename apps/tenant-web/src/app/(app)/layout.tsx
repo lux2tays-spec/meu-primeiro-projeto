@@ -65,6 +65,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   if (!ready) return null
 
   const payload = getTokenPayload(getToken())
+  const canEditBusiness = ['owner', 'admin', 'root'].includes(payload?.role)
 
   return (
     <div className="flex h-screen overflow-hidden bg-gray-50">
@@ -85,7 +86,18 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
               <span className="text-white font-black text-sm">AB</span>
             </div>
             <div>
-              <p className="text-white font-bold text-sm leading-tight">{tenant?.name ?? '...'}</p>
+              {canEditBusiness ? (
+                <Link
+                  href="/settings/business"
+                  onClick={() => setSidebarOpen(false)}
+                  title="Editar dados do negócio"
+                  className="block text-white font-bold text-sm leading-tight hover:text-primary hover:underline underline-offset-2 transition-colors"
+                >
+                  {tenant?.name ?? '...'}
+                </Link>
+              ) : (
+                <p className="text-white font-bold text-sm leading-tight">{tenant?.name ?? '...'}</p>
+              )}
               <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
                 tenant?.plan === 'profissional' ? 'bg-green-500/20 text-green-400' :
                 tenant?.plan === 'premium' ? 'bg-blue-500/20 text-blue-400' :

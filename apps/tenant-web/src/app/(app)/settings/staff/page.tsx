@@ -1,7 +1,8 @@
 'use client'
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { tenantApi } from '@/lib/api'
+import { tenantApi, getToken } from '@/lib/api'
+import { getTokenPayload } from '@/lib/auth'
 
 const ROLE_LABEL: Record<string, string> = { owner: 'Proprietário', admin: 'Administrador', staff: 'Colaborador' }
 const ROLE_COLOR: Record<string, string> = {
@@ -18,6 +19,13 @@ export default function StaffPage() {
   const [showForm, setShowForm] = useState(false)
   const [form, setForm] = useState({ name: '', email: '', password: '', role: 'staff' as 'admin' | 'staff', also_professional: false })
   const [error, setError] = useState('')
+
+  const [editingId, setEditingId] = useState<string | null>(null)
+  const [editForm, setEditForm] = useState({ name: '', email: '', phone: '', role: 'staff' as 'owner' | 'admin' | 'staff' })
+  const [editError, setEditError] = useState('')
+
+  const payload = getTokenPayload(getToken())
+  const myUserId: string | undefined = payload?.user_id
 
   const addMutation = useMutation({
     mutationFn: async (data: typeof form) => {
@@ -40,7 +48,30 @@ export default function StaffPage() {
   const removeMutation = useMutation({
     mutationFn: tenantApi.removeStaff,
     onSuccess: () => qc.invalidateQueries({ queryKey: ['staff'] }),
+    onError: (e: any) => alert(e.message),
   })
+
+  const editMutation = useMutation({
+    mutationFn: ({ userId, data }: { userId: string; data: typeof editForm }) =>
+      tenantApi.editStaff(userId, {
+        name: data.name,
+        email: data.email,
+        phone: data.phone || null,
+        role: data.role,
+      }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['staff'] })
+      setEditingId(null)
+      setEditError('')
+    },
+    onError: (e: any) => setEditError(e.message),
+  })
+
+  function startEdit(u: any) {
+    setEditingId(u.id)
+    setEditForm({ name: u.name ?? '', email: u.email ?? '', phone: u.phone ?? '', role: u.role })
+    setEditError('')
+  }
 
   const addAsProfessional = useMutation({
     mutationFn: ({ userId, name }: { userId: string; name: string }) =>
@@ -133,8 +164,9 @@ export default function StaffPage() {
           {(staff as any[]).map((u) => {
             const isProf = isProfessional(u.id)
             const profId = professionalId(u.id)
+            const isEditing = editingId === u.id
             return (
-              <div key={u.id} className="bg-white rounded-2xl p-4 border border-gray-100 shadow-sm">
+              <div key={u.id} className={`bg-white rounded-2xl p-4 border shadow-sm ${isEditing ? 'border-primary/30' : 'border-gray-100'}`}>
                 <div className="flex items-center justify-between gap-3">
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 flex-wrap">
@@ -169,16 +201,65 @@ export default function StaffPage() {
                         − Profissional
                       </button>
                     )}
-                    {u.role !== 'owner' && (
+                    <button
+                      onClick={() => (isEditing ? setEditingId(null) : startEdit(u))}
+                      className="text-gray-400 hover:text-primary text-sm px-2.5 py-1.5 rounded-lg hover:bg-gray-50 transition-colors"
+                    >
+                      Editar
+                    </button>
+                    {u.id !== myUserId && (
                       <button
-                        onClick={() => { if (confirm(`Remover ${u.name} da equipe?`)) removeMutation.mutate(u.id) }}
+                        onClick={() => { if (confirm(`Excluir ${u.name} da equipe?`)) removeMutation.mutate(u.id) }}
                         className="text-gray-400 hover:text-red-500 text-sm px-2.5 py-1.5 rounded-lg hover:bg-red-50 transition-colors"
                       >
-                        Remover
+                        Excluir
                       </button>
                     )}
                   </div>
                 </div>
+
+                {isEditing && (
+                  <div className="mt-4 pt-4 border-t border-gray-100 space-y-3">
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-xs font-medium text-gray-600 mb-1">Nome</label>
+                        <input value={editForm.name} onChange={(e) => setEditForm((f) => ({ ...f, name: e.target.value }))}
+                          className={inputCls} placeholder="Maria Silva" />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-medium text-gray-600 mb-1">E-mail</label>
+                        <input type="email" value={editForm.email} onChange={(e) => setEditForm((f) => ({ ...f, email: e.target.value }))}
+                          className={inputCls} placeholder="maria@email.com" />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-medium text-gray-600 mb-1">Telefone</label>
+                        <input value={editForm.phone} onChange={(e) => setEditForm((f) => ({ ...f, phone: e.target.value }))}
+                          className={inputCls} placeholder="(11) 99999-9999" />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-medium text-gray-600 mb-1">Função</label>
+                        <select value={editForm.role} onChange={(e) => setEditForm((f) => ({ ...f, role: e.target.value as any }))}
+                          className={inputCls + ' bg-white'}>
+                          <option value="staff">Colaborador</option>
+                          <option value="admin">Administrador</option>
+                          <option value="owner">Proprietário</option>
+                        </select>
+                      </div>
+                    </div>
+
+                    {editError && <p className="text-red-500 text-xs">{editError}</p>}
+                    <div className="flex gap-2">
+                      <button onClick={() => editMutation.mutate({ userId: u.id, data: editForm })} disabled={editMutation.isPending}
+                        className="flex-1 h-10 bg-primary text-white text-sm font-semibold rounded-xl disabled:opacity-50">
+                        {editMutation.isPending ? 'Salvando...' : 'Salvar'}
+                      </button>
+                      <button onClick={() => { setEditingId(null); setEditError('') }}
+                        className="flex-1 h-10 border border-gray-200 text-gray-600 text-sm rounded-xl hover:bg-gray-50">
+                        Cancelar
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
             )
           })}

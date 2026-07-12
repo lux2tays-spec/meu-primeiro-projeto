@@ -27,6 +27,20 @@ const staffCreateSchema = z.object({
   role: z.enum(['admin', 'staff']),
 })
 
+const staffUpdateSchema = z.object({
+  name: z.string().min(1).optional(),
+  email: z.string().email().optional(),
+  phone: z.string().max(30).nullable().optional(),
+  role: z.enum(['owner', 'admin', 'staff']).optional(),
+}).refine((d) => Object.values(d).some((v) => v !== undefined), { message: 'Nenhum campo para atualizar' })
+
+const businessSchema = z.object({
+  name: z.string().min(1).max(120),
+  contact_email: z.string().email().or(z.literal('')).nullable().optional(),
+  contact_phone: z.string().max(30).nullable().optional(),
+  responsible_name: z.string().max(120).nullable().optional(),
+})
+
 export const tenantRoutes: FastifyPluginAsync = async (app) => {
   app.addHook('preHandler', (app as any).authenticate)
   app.addHook('preHandler', (app as any).planGuard)
@@ -36,9 +50,36 @@ export const tenantRoutes: FastifyPluginAsync = async (app) => {
   app.get('/me', async (request, reply) => {
     const { tenant_id } = request.user
     const { rows: [tenant] } = await db.query(
-      'SELECT id, name, slug, plan, status, trial_ends_at, max_agendas, max_users FROM tenants WHERE id = $1',
+      `SELECT id, name, slug, plan, status, trial_ends_at, max_agendas, max_users,
+              contact_email, contact_phone, responsible_name
+       FROM tenants WHERE id = $1`,
       [tenant_id]
     )
+    return reply.send(tenant)
+  })
+
+  app.put('/business', async (request, reply) => {
+    const { tenant_id, role } = request.user
+    if (!['owner', 'admin', 'root'].includes(role)) return reply.status(403).send({ error: 'Sem permissão' })
+
+    const body = businessSchema.parse(request.body)
+    const { rows: [tenant] } = await db.query(
+      `UPDATE tenants SET
+         name = $1,
+         contact_email = $2,
+         contact_phone = $3,
+         responsible_name = $4
+       WHERE id = $5
+       RETURNING id, name, slug, plan, status, contact_email, contact_phone, responsible_name`,
+      [
+        body.name,
+        body.contact_email || null,
+        body.contact_phone || null,
+        body.responsible_name || null,
+        tenant_id,
+      ]
+    )
+    if (!tenant) return reply.status(404).send({ error: 'Negócio não encontrado' })
     return reply.send(tenant)
   })
 
@@ -306,18 +347,113 @@ export const tenantRoutes: FastifyPluginAsync = async (app) => {
     return reply.status(201).send({ id: userId, name: body.name, email: body.email, role: body.role })
   })
 
+  async function countOwners(tenantId: string): Promise<number> {
+    const { rows: [{ count }] } = await db.query(
+      "SELECT COUNT(*) FROM user_roles WHERE tenant_id = $1 AND role = 'owner'",
+      [tenantId]
+    )
+    return Number(count)
+  }
+
+  app.patch<{ Params: { id: string } }>('/staff/:id', async (request, reply) => {
+    const { tenant_id, role, user_id } = request.user
+    if (!['owner', 'admin', 'root'].includes(role)) return reply.status(403).send({ error: 'Sem permissão' })
+
+    const body = staffUpdateSchema.parse(request.body)
+    const targetId = request.params.id
+
+    // Target must belong to this tenant
+    const { rows: [target] } = await db.query(
+      'SELECT role FROM user_roles WHERE user_id = $1 AND tenant_id = $2',
+      [targetId, tenant_id]
+    )
+    if (!target) return reply.status(404).send({ error: 'Usuário não encontrado' })
+
+    // Only an owner (or root) can edit another owner or promote someone to owner
+    if (target.role === 'owner' && targetId !== user_id && !['owner', 'root'].includes(role)) {
+      return reply.status(403).send({ error: 'Apenas o proprietário pode editar outro proprietário' })
+    }
+    if (body.role === 'owner' && target.role !== 'owner' && !['owner', 'root'].includes(role)) {
+      return reply.status(403).send({ error: 'Apenas o proprietário pode promover a proprietário' })
+    }
+
+    // Last-owner guard: never demote the tenant's only owner (including yourself)
+    if (body.role && body.role !== 'owner' && target.role === 'owner') {
+      const owners = await countOwners(tenant_id!)
+      if (owners <= 1) {
+        return reply.status(403).send({ error: 'Não é possível remover o último proprietário' })
+      }
+    }
+
+    // E-mail must stay unique across the platform
+    if (body.email) {
+      const { rows: [taken] } = await db.query(
+        'SELECT id FROM users WHERE email = $1 AND id <> $2',
+        [body.email, targetId]
+      )
+      if (taken) return reply.status(409).send({ error: 'E-mail já está em uso por outro usuário' })
+    }
+
+    const client = await db.connect()
+    try {
+      await client.query('BEGIN')
+
+      const sets: string[] = []
+      const values: unknown[] = []
+      let i = 1
+      if (body.name !== undefined) { sets.push(`name = $${i++}`); values.push(body.name) }
+      if (body.email !== undefined) { sets.push(`email = $${i++}`); values.push(body.email) }
+      if (body.phone !== undefined) { sets.push(`phone = $${i++}`); values.push(body.phone || null) }
+      if (sets.length > 0) {
+        values.push(targetId)
+        await client.query(`UPDATE users SET ${sets.join(', ')} WHERE id = $${i}`, values)
+      }
+
+      if (body.role !== undefined && body.role !== target.role) {
+        await client.query(
+          'UPDATE user_roles SET role = $1 WHERE user_id = $2 AND tenant_id = $3',
+          [body.role, targetId, tenant_id]
+        )
+      }
+
+      await client.query('COMMIT')
+    } catch (err) {
+      await client.query('ROLLBACK')
+      throw err
+    } finally {
+      client.release()
+    }
+
+    const { rows: [updated] } = await db.query(
+      `SELECT u.id, u.name, u.email, u.phone, ur.role
+       FROM users u JOIN user_roles ur ON ur.user_id = u.id
+       WHERE u.id = $1 AND ur.tenant_id = $2`,
+      [targetId, tenant_id]
+    )
+    return reply.send(updated)
+  })
+
   app.delete<{ Params: { id: string } }>('/staff/:id', async (request, reply) => {
     const { tenant_id, role, user_id } = request.user
     if (!['owner', 'admin', 'root'].includes(role)) return reply.status(403).send({ error: 'Sem permissão' })
     if (request.params.id === user_id) return reply.status(400).send({ error: 'Não pode remover a si mesmo' })
 
-    // Cannot remove owner
     const { rows: [target] } = await db.query(
       'SELECT role FROM user_roles WHERE user_id = $1 AND tenant_id = $2',
       [request.params.id, tenant_id]
     )
     if (!target) return reply.status(404).send({ error: 'Usuário não encontrado' })
-    if (target.role === 'owner') return reply.status(403).send({ error: 'Não pode remover o proprietário' })
+
+    if (target.role === 'owner') {
+      // Only an owner (or root) can remove another owner, and never the last one
+      if (!['owner', 'root'].includes(role)) {
+        return reply.status(403).send({ error: 'Apenas o proprietário pode remover outro proprietário' })
+      }
+      const owners = await countOwners(tenant_id!)
+      if (owners <= 1) {
+        return reply.status(403).send({ error: 'Não é possível remover o último proprietário' })
+      }
+    }
 
     await db.query(
       'DELETE FROM user_roles WHERE user_id = $1 AND tenant_id = $2',
