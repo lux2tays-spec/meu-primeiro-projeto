@@ -50,17 +50,23 @@ export async function resolveProfessional(
   return { ambiguous: true, options: all }
 }
 
+export type SlotsResult =
+  | { ok: true; slots: string[] }
+  | { ok: false; reason: 'sem_horario_config' | 'servico_invalido' }
+
 /**
  * Free 30-minute-grid start times ("HH:MM") for a professional+service on a date.
  * Considers working hours (per-professional or general), existing appointments,
  * and — when the date is today — the current time.
+ * Returns a distinguishable error when the tenant has no working hours configured
+ * for that day (instead of an empty list that looks like "fully booked").
  */
 export async function findAvailableSlots(
   tenantId: string,
   professionalId: string,
   serviceId: string,
   date: string // YYYY-MM-DD
-): Promise<string[]> {
+): Promise<SlotsResult> {
   const [svcRes, hoursRes, apptRes, nowRes] = await Promise.all([
     db.query('SELECT duration_minutes FROM services WHERE id = $1 AND tenant_id = $2', [serviceId, tenantId]),
     db.query(
@@ -87,7 +93,14 @@ export async function findAvailableSlots(
   ])
 
   const service = svcRes.rows[0]
-  if (!service || hoursRes.rows.length === 0) return []
+  if (!service) {
+    console.error(`[scheduling] findAvailableSlots FALHOU: serviço ${serviceId} não encontrado (tenant=${tenantId})`)
+    return { ok: false, reason: 'servico_invalido' }
+  }
+  if (hoursRes.rows.length === 0) {
+    console.error(`[scheduling] findAvailableSlots FALHOU: nenhum working_hours para professional=${professionalId} na data ${date} (tenant=${tenantId}) — agenda não configurada para esse dia`)
+    return { ok: false, reason: 'sem_horario_config' }
+  }
   const duration = service.duration_minutes as number
 
   const toMin = (hm: string) => {
@@ -112,7 +125,7 @@ export async function findAvailableSlots(
       cur += 30
     }
   }
-  return slots
+  return { ok: true, slots }
 }
 
 /** Build a São Paulo timestamptz string from date + time. */
@@ -122,7 +135,7 @@ function saoPauloTimestamp(date: string, time: string): string {
 
 export type BookResult =
   | { ok: true; appointmentId: string; startsAt: string }
-  | { ok: false; reason: 'unavailable' | 'invalid' }
+  | { ok: false; reason: 'unavailable' | 'invalid' | 'sem_horario_config' }
 
 /** Create an appointment for the bot (created_by = NULL). Rechecks conflicts. */
 export async function bookAppointment(params: {
@@ -139,28 +152,61 @@ export async function bookAppointment(params: {
     'SELECT duration_minutes FROM services WHERE id = $1 AND tenant_id = $2',
     [serviceId, tenantId]
   )
-  if (!service) return { ok: false, reason: 'invalid' }
+  if (!service) {
+    console.error(`[scheduling] bookAppointment FALHOU: serviço ${serviceId} não encontrado (tenant=${tenantId})`)
+    return { ok: false, reason: 'invalid' }
+  }
 
   const startsAt = new Date(saoPauloTimestamp(date, time))
-  if (isNaN(startsAt.getTime())) return { ok: false, reason: 'invalid' }
+  if (isNaN(startsAt.getTime())) {
+    console.error(`[scheduling] bookAppointment FALHOU: data/hora inválida "${date} ${time}" (tenant=${tenantId})`)
+    return { ok: false, reason: 'invalid' }
+  }
   const endsAt = new Date(startsAt.getTime() + service.duration_minutes * 60000)
 
-  const { rows: conflicts } = await db.query(
-    `SELECT id FROM appointments
-     WHERE professional_id = $1 AND tenant_id = $2 AND status <> 'cancelled'
-       AND tsrange(starts_at, ends_at) && tsrange($3::timestamptz, $4::timestamptz)`,
-    [professionalId, tenantId, startsAt.toISOString(), endsAt.toISOString()]
+  // Guard: the tenant must have working hours configured for that weekday —
+  // otherwise the "agenda" simply doesn't exist and the bot must not pretend it does.
+  const { rows: hours } = await db.query(
+    `SELECT 1 FROM working_hours
+     WHERE tenant_id = $1 AND (professional_id = $2 OR professional_id IS NULL)
+       AND day_of_week = EXTRACT(DOW FROM $3::date)
+     LIMIT 1`,
+    [tenantId, professionalId, date]
   )
-  if (conflicts.length > 0) return { ok: false, reason: 'unavailable' }
+  if (hours.length === 0) {
+    console.error(`[scheduling] bookAppointment FALHOU: nenhum working_hours para professional=${professionalId} em ${date} (tenant=${tenantId}) — horários de atendimento não configurados`)
+    return { ok: false, reason: 'sem_horario_config' }
+  }
 
-  const { rows: [appt] } = await db.query(
-    `INSERT INTO appointments (tenant_id, customer_id, professional_id, service_id, starts_at, ends_at, status, created_by)
-     VALUES ($1, $2, $3, $4, $5, $6, 'confirmed', NULL) RETURNING id`,
-    [tenantId, customerId, professionalId, serviceId, startsAt.toISOString(), endsAt.toISOString()]
-  )
+  try {
+    // BUGFIX: columns are TIMESTAMPTZ — tsrange() only accepts timestamp WITHOUT
+    // time zone, so the old tsrange(starts_at, ends_at) threw "function does not
+    // exist" on EVERY booking, the error was swallowed upstream, and the bot
+    // fabricated a confirmation. tstzrange() is the correct range type here.
+    const { rows: conflicts } = await db.query(
+      `SELECT id FROM appointments
+       WHERE professional_id = $1 AND tenant_id = $2 AND status <> 'cancelled'
+         AND tstzrange(starts_at, ends_at) && tstzrange($3::timestamptz, $4::timestamptz)`,
+      [professionalId, tenantId, startsAt.toISOString(), endsAt.toISOString()]
+    )
+    if (conflicts.length > 0) {
+      console.error(`[scheduling] bookAppointment FALHOU: conflito de horário em ${date} ${time} para professional=${professionalId} (tenant=${tenantId})`)
+      return { ok: false, reason: 'unavailable' }
+    }
 
-  syncAppointmentToCalendar(appt.id).catch(console.error)
-  return { ok: true, appointmentId: appt.id, startsAt: startsAt.toISOString() }
+    const { rows: [appt] } = await db.query(
+      `INSERT INTO appointments (tenant_id, customer_id, professional_id, service_id, starts_at, ends_at, status, created_by)
+       VALUES ($1, $2, $3, $4, $5, $6, 'confirmed', NULL) RETURNING id`,
+      [tenantId, customerId, professionalId, serviceId, startsAt.toISOString(), endsAt.toISOString()]
+    )
+
+    console.log(`[scheduling] bookAppointment OK: appointment=${appt.id} ${date} ${time} customer=${customerId} professional=${professionalId} (tenant=${tenantId})`)
+    syncAppointmentToCalendar(appt.id).catch(console.error)
+    return { ok: true, appointmentId: appt.id, startsAt: startsAt.toISOString() }
+  } catch (err) {
+    console.error(`[scheduling] bookAppointment FALHOU (erro de banco) tenant=${tenantId} customer=${customerId} ${date} ${time}:`, err)
+    throw err
+  }
 }
 
 /** Cancel the customer's next upcoming (non-cancelled) appointment. */

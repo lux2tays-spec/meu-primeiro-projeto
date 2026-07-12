@@ -179,11 +179,20 @@ ${formatWorkingHours(live.workingHours) || 'Horários não configurados.'}
 ## CALENDÁRIO (use estas datas ao agendar)
 ${dateReference()}
 
-## FERRAMENTAS (obrigatório usá-las — nunca invente dados)
-- check_availability: SEMPRE consulte antes de oferecer horários. Nunca invente horários livres.
-- book_appointment: use para AGENDAR DE VERDADE. Só confirme "agendado" ao cliente DEPOIS que a ferramenta retornar sucesso.
-- cancel_appointment: para cancelar o próximo agendamento do cliente.
-- save_customer_info: assim que souber o NOME, o E-MAIL, ou um SERVIÇO DE INTERESSE do cliente, salve na hora (mesmo que ele não feche).
+## FERRAMENTAS (USO OBRIGATÓRIO — nenhuma ação acontece sem elas)
+Você NÃO consegue realizar nenhuma ação sozinho(a). Consultar horários, agendar, cancelar e salvar dados SÓ acontecem quando você CHAMA a ferramenta e ela retorna sucesso ("ok": true). Nunca simule uma ação, nunca prometa "fazer depois".
+- check_availability: CHAME SEMPRE antes de mencionar ou oferecer QUALQUER horário. Nunca invente horários livres.
+- book_appointment: a ÚNICA forma de agendar. CHAME após confirmar serviço + data + hora com o cliente.
+- cancel_appointment: a ÚNICA forma de cancelar o próximo agendamento do cliente.
+- save_customer_info: CHAME IMEDIATAMENTE (na mesma resposta) quando o cliente informar NOME, E-MAIL ou um serviço de interesse — mesmo que ele não vá fechar agora.
+
+## HONESTIDADE (REGRAS INVIOLÁVEIS)
+- Só diga "agendado", "confirmado" ou "garantido" DEPOIS que book_appointment retornar "ok": true NESTA conversa. Antes disso, o agendamento NÃO existe.
+- Só diga "dados salvos" / "anotei seus dados" DEPOIS que save_customer_info retornar "ok": true.
+- Se uma ferramenta retornar erro, o resultado é que a ação NÃO FOI FEITA. Seja honesto(a): peça desculpas brevemente e diga que não conseguiu concluir agora e que alguém da equipe vai confirmar com o cliente. É PROIBIDO: dizer que foi um "problema técnico" ou "instabilidade", dizer que "o sistema vai normalizar", prometer "processar depois", ou afirmar que a ação aconteceu.
+- Significado dos erros: "sem_profissional" ou "sem_horario_config" = a agenda deste estabelecimento ainda não está configurada — NÃO ofereça nem confirme horários; diga que vai verificar a agenda e que alguém da equipe confirma o horário em seguida. "horario_indisponivel" = aquele horário foi ocupado — consulte check_availability e ofereça outro. "servico_nao_encontrado" = confirme com o cliente qual serviço ele quer (use os nomes da lista de serviços).
+- Você NÃO tem como gerar link de pagamento, cobrar, dar desconto, parcelar ou enviar boleto/PIX. NUNCA ofereça nem prometa nada disso. Pagamento e valores especiais são tratados diretamente com o estabelecimento.
+- Nunca prometa nenhuma ação futura que você não consegue executar com as ferramentas listadas acima.
 
 ## REGRAS GERAIS
 - Estilo WhatsApp: mensagens CURTAS e humanas, no máximo 2-4 linhas. Emojis com moderação. Nunca mande textão.
@@ -212,7 +221,7 @@ ${nameIsKnown ? `- O cliente se chama "${customerName}". NUNCA pergunte o nome d
 const TOOLS: Anthropic.Tool[] = [
   {
     name: 'save_customer_info',
-    description: 'Salva nome, e-mail e/ou serviço de interesse do cliente. Use assim que descobrir qualquer um desses dados, mesmo que o cliente não vá fechar agora.',
+    description: 'ÚNICA forma de salvar dados do cliente. CHAME IMEDIATAMENTE quando o cliente informar o nome, o e-mail ou demonstrar interesse em um serviço — na mesma resposta, mesmo que ele não vá agendar agora. Sem esta chamada, NADA fica salvo. Só afirme "dados salvos" se ela retornar "ok": true.',
     input_schema: {
       type: 'object',
       properties: {
@@ -224,7 +233,7 @@ const TOOLS: Anthropic.Tool[] = [
   },
   {
     name: 'check_availability',
-    description: 'Retorna os horários REALMENTE livres para um serviço numa data. Use SEMPRE antes de oferecer horários.',
+    description: 'Retorna os horários REALMENTE livres para um serviço numa data. CHAME SEMPRE antes de mencionar, oferecer ou confirmar qualquer horário — nunca cite um horário sem consultar aqui primeiro. Se retornar erro (ex.: sem_horario_config, sem_profissional), NÃO ofereça horários.',
     input_schema: {
       type: 'object',
       properties: {
@@ -237,7 +246,7 @@ const TOOLS: Anthropic.Tool[] = [
   },
   {
     name: 'book_appointment',
-    description: 'Agenda DE VERDADE um horário para o cliente. Só use após confirmar serviço, data e hora com o cliente.',
+    description: 'ÚNICA forma de agendar de verdade. CHAME após o cliente confirmar serviço, data e hora. Se retornar "ok": true, o agendamento existe e você pode confirmar ao cliente. Se retornar erro, o agendamento NÃO foi feito — nunca diga que está agendado/garantido nesse caso.',
     input_schema: {
       type: 'object',
       properties: {
@@ -251,18 +260,36 @@ const TOOLS: Anthropic.Tool[] = [
   },
   {
     name: 'cancel_appointment',
-    description: 'Cancela o próximo agendamento do cliente.',
+    description: 'ÚNICA forma de cancelar o próximo agendamento do cliente. CHAME quando o cliente pedir para cancelar. Só confirme o cancelamento se retornar "ok": true.',
     input_schema: { type: 'object', properties: {} },
   },
 ]
 
 type ExecCtx = { tenantId: string; customerId?: string }
 
+/** Logging wrapper: EVERY tool call is logged (tenant, tool, input, outcome). */
 async function executeTool(name: string, input: any, ctx: ExecCtx): Promise<any> {
-  const { tenantId, customerId } = ctx
+  console.log(`[bot:tool] CHAMADA tenant=${ctx.tenantId} customer=${ctx.customerId ?? 'AUSENTE'} tool=${name} input=${JSON.stringify(input)}`)
+  let result: any
   try {
+    result = await runTool(name, input, ctx)
+  } catch (err) {
+    console.error(`[bot:tool] EXCEÇÃO tenant=${ctx.tenantId} tool=${name}:`, err)
+    result = { error: 'falha_interna' }
+  }
+  if (result && result.error) {
+    console.error(`[bot:tool] ERRO tenant=${ctx.tenantId} tool=${name} resultado=${JSON.stringify(result)}`)
+  } else {
+    console.log(`[bot:tool] OK tenant=${ctx.tenantId} tool=${name} resultado=${JSON.stringify(result)}`)
+  }
+  return result
+}
+
+async function runTool(name: string, input: any, ctx: ExecCtx): Promise<any> {
+  const { tenantId, customerId } = ctx
+  {
     if (name === 'save_customer_info') {
-      if (!customerId) return { ok: false }
+      if (!customerId) return { error: 'sem_cliente' }
       // name/email — always available
       const sets: string[] = []
       const vals: any[] = []
@@ -290,11 +317,16 @@ async function executeTool(name: string, input: any, ctx: ExecCtx): Promise<any>
       if (!service) return { error: 'servico_nao_encontrado' }
       const prof = await resolveProfessional(tenantId, input.professional)
       if (prof.ambiguous) return { error: 'escolha_profissional', profissionais: prof.options?.map((p) => p.name) }
-      if (!prof.professional) return { error: 'sem_profissional' }
-      const slots = await findAvailableSlots(tenantId, prof.professional.id, service.id, input.date)
+      if (!prof.professional) return { error: 'sem_profissional', detalhe: 'Nenhum profissional cadastrado — não ofereça horários; diga que a equipe vai confirmar.' }
+      const slotsRes = await findAvailableSlots(tenantId, prof.professional.id, service.id, input.date)
+      if (!slotsRes.ok) {
+        return slotsRes.reason === 'sem_horario_config'
+          ? { error: 'sem_horario_config', detalhe: 'Horários de atendimento não configurados para essa data — não ofereça horários; diga que a equipe vai confirmar.' }
+          : { error: 'dados_invalidos' }
+      }
       return {
         service: service.name, professional: prof.professional.name, date: input.date,
-        horarios_livres: slots.length ? slots : [], sem_horario: slots.length === 0,
+        horarios_livres: slotsRes.slots, sem_horario: slotsRes.slots.length === 0,
       }
     }
 
@@ -304,12 +336,16 @@ async function executeTool(name: string, input: any, ctx: ExecCtx): Promise<any>
       if (!service) return { error: 'servico_nao_encontrado' }
       const prof = await resolveProfessional(tenantId, input.professional)
       if (prof.ambiguous) return { error: 'escolha_profissional', profissionais: prof.options?.map((p) => p.name) }
-      if (!prof.professional) return { error: 'sem_profissional' }
+      if (!prof.professional) return { error: 'sem_profissional', detalhe: 'Nenhum profissional cadastrado — o agendamento NÃO foi feito; diga que a equipe vai confirmar.' }
       const res = await bookAppointment({
         tenantId, customerId, serviceId: service.id, professionalId: prof.professional.id,
         date: input.date, time: input.time,
       })
-      if (!res.ok) return { error: res.reason === 'unavailable' ? 'horario_indisponivel' : 'dados_invalidos' }
+      if (!res.ok) {
+        if (res.reason === 'unavailable') return { error: 'horario_indisponivel' }
+        if (res.reason === 'sem_horario_config') return { error: 'sem_horario_config', detalhe: 'Agenda não configurada para essa data — o agendamento NÃO foi feito; diga que a equipe vai confirmar.' }
+        return { error: 'dados_invalidos' }
+      }
       return { ok: true, agendado: { service: service.name, professional: prof.professional.name, date: input.date, time: input.time } }
     }
 
@@ -320,9 +356,6 @@ async function executeTool(name: string, input: any, ctx: ExecCtx): Promise<any>
     }
 
     return { error: 'ferramenta_desconhecida' }
-  } catch (err) {
-    console.error(`Tool ${name} failed:`, err)
-    return { error: 'falha_interna' }
   }
 }
 
@@ -337,6 +370,12 @@ export async function runBot(params: {
   customerPhone?: string
 }): Promise<string> {
   const { tenantId, conversationId, customerMessage, customerId, customerName = '', customerPhone = '' } = params
+
+  // The webhook always resolves/creates the customer before dispatching; if this
+  // ever regresses, surface it loudly — without customerId every action tool fails.
+  if (!customerId) {
+    console.warn(`[bot] AVISO tenant=${tenantId} conversa=${conversationId}: customerId AUSENTE — save_customer_info/book_appointment/cancel_appointment vão falhar`)
+  }
 
   const [context, live, history, profile] = await Promise.all([
     getTenantContext(tenantId),
@@ -371,30 +410,52 @@ export async function runBot(params: {
 
   const execCtx: ExecCtx = { tenantId, customerId }
 
-  for (let turn = 0; turn < MAX_TOOL_TURNS; turn++) {
-    const createParams: any = { model, max_tokens: 1024, system, tools: TOOLS, messages }
+  // Single place to call the model — preserves model-config, prompt caching,
+  // thinking-disabled and usage-recording behavior for every request in the loop.
+  const callModel = async (toolChoice: any): Promise<any> => {
+    const createParams: any = { model, max_tokens: 1024, system, tools: TOOLS, tool_choice: toolChoice, messages }
     if (thinkingOff) createParams.thinking = { type: 'disabled' }
     const response: any = await anthropic.messages.create(createParams)
-
     recordUsage(tenantId, model, response.usage).catch(() => {})
+    return response
+  }
 
-    if (response.stop_reason === 'tool_use') {
+  const extractText = (response: any): string =>
+    response.content.filter((b: any) => b.type === 'text').map((b: any) => b.text).join('\n').trim()
+
+  for (let turn = 0; turn < MAX_TOOL_TURNS; turn++) {
+    const response = await callModel({ type: 'auto' })
+
+    // Branch on tool_use BLOCKS, not stop_reason — the model can emit a tool_use
+    // and stop with a different stop_reason; the old code then returned an empty
+    // text turn and the customer got the generic "Desculpe, pode repetir?".
+    const toolUses = response.content.filter((b: any) => b.type === 'tool_use')
+    if (toolUses.length > 0) {
       const toolResults: Anthropic.ToolResultBlockParam[] = []
-      for (const block of response.content) {
-        if (block.type === 'tool_use') {
-          const result = await executeTool(block.name, block.input, execCtx)
-          toolResults.push({ type: 'tool_result', tool_use_id: block.id, content: JSON.stringify(result) })
-        }
+      for (const block of toolUses) {
+        const result = await executeTool(block.name, block.input, execCtx)
+        toolResults.push({
+          type: 'tool_result',
+          tool_use_id: block.id,
+          content: JSON.stringify(result),
+          is_error: Boolean(result && result.error),
+        })
       }
       messages.push({ role: 'assistant', content: response.content })
       messages.push({ role: 'user', content: toolResults })
-      continue
+      continue // ALWAYS loop again so the model produces a final natural-language reply
     }
 
-    // Final answer — concatenate text blocks
-    const text = response.content.filter((b: any) => b.type === 'text').map((b: any) => b.text).join('\n').trim()
-    return text || 'Desculpe, pode repetir? 😊'
+    const text = extractText(response)
+    if (text) return text
+    break // no tools and no text — force a plain-text reply below
   }
 
-  return 'Só um instante, já te respondo!'
+  // Tool budget exhausted, or the model produced an empty turn: one final call
+  // with tool_choice "none" so the customer ALWAYS gets a real reply that
+  // reflects the actual tool results (never a fabricated success).
+  console.warn(`[bot] tenant=${tenantId} conversa=${conversationId}: forçando resposta final em texto (tool_choice=none)`)
+  const finalResponse = await callModel({ type: 'none' })
+  const finalText = extractText(finalResponse)
+  return finalText || 'Desculpe, não consegui concluir isso agora. 🙏 Alguém da nossa equipe vai continuar seu atendimento em breve!'
 }

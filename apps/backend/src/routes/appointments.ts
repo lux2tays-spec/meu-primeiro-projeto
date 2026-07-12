@@ -131,7 +131,7 @@ export const appointmentRoutes: FastifyPluginAsync = async (app) => {
     const { rows: conflicts } = await db.query(
       `SELECT id FROM appointments
        WHERE professional_id = $1 AND tenant_id = $2 AND status NOT IN ('cancelled')
-       AND tsrange(starts_at, ends_at) && tsrange($3::timestamptz, $4::timestamptz)`,
+       AND tstzrange(starts_at, ends_at) && tstzrange($3::timestamptz, $4::timestamptz)`,
       [body.professional_id, tenant_id, startsAt.toISOString(), endsAt.toISOString()]
     )
     if (conflicts.length > 0) {
@@ -199,7 +199,7 @@ export const appointmentRoutes: FastifyPluginAsync = async (app) => {
         const { rows: conflicts } = await db.query(
           `SELECT id FROM appointments
            WHERE professional_id = $1 AND tenant_id = $2 AND status NOT IN ('cancelled') AND id != $3
-           AND tsrange(starts_at, ends_at) && tsrange($4::timestamptz, $5::timestamptz)`,
+           AND tstzrange(starts_at, ends_at) && tstzrange($4::timestamptz, $5::timestamptz)`,
           [professionalId, tenant_id, appointmentId, body.starts_at, endsAt]
         )
         if (conflicts.length > 0) {
