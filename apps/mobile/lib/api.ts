@@ -88,6 +88,18 @@ export const tenantApi = {
     api.post<any>('/tenant/customers', data),
   updateCustomer: (id: string, data: { name?: string; email?: string }) =>
     api.put<any>(`/tenant/customers/${id}`, data),
+  onboarding: () =>
+    api.get<{
+      completed: boolean
+      steps: { key: string; done: boolean }[]
+      progress: { done: number; total: number }
+    }>('/tenant/onboarding'),
+  completeOnboarding: () =>
+    api.post<{ completed: true }>('/tenant/onboarding/complete', {}),
+  businessTypeTemplates: () =>
+    api.get<{ business_type: string; display_name: string }[]>('/tenant/business-type-templates'),
+  applyBusinessTemplate: (business_type: string) =>
+    api.post<any>('/tenant/apply-business-template', { business_type }),
 }
 
 // Appointments

@@ -1,13 +1,29 @@
 import { Redirect } from 'expo-router'
 import { Tabs } from 'expo-router'
 import { Ionicons } from '@expo/vector-icons'
+import { useQuery } from '@tanstack/react-query'
 import { useAuthStore } from '@/lib/store'
+import { tenantApi } from '@/lib/api'
+import { onboardingSession } from '@/lib/onboarding-session'
 import { colors } from '@/lib/theme'
 
 export default function AppLayout() {
   const token = useAuthStore((s) => s.token)
 
+  const { data: onboarding, isLoading: onboardingLoading } = useQuery({
+    queryKey: ['onboarding'],
+    queryFn: tenantApi.onboarding,
+    enabled: !!token,
+  })
+
   if (!token) return <Redirect href="/(auth)/login" />
+
+  // Aguarda o estado do onboarding antes de decidir (evita flash da home)
+  if (onboardingLoading && !onboarding) return null
+
+  if (onboarding && !onboarding.completed && !onboardingSession.skipped) {
+    return <Redirect href="/onboarding" />
+  }
 
   return (
     <Tabs

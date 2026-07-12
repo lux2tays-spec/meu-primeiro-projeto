@@ -13,6 +13,7 @@ const today = new Date().toISOString().split('T')[0]
 
 export default function DashboardScreen() {
   const { data: tenant } = useQuery({ queryKey: ['tenant'], queryFn: tenantApi.me })
+  const { data: onboarding } = useQuery({ queryKey: ['onboarding'], queryFn: tenantApi.onboarding })
   const {
     data: appointments,
     isLoading,
@@ -53,6 +54,36 @@ export default function DashboardScreen() {
             />
           )}
         </View>
+
+        {/* Onboarding progress card */}
+        {onboarding && !onboarding.completed && (
+          <TouchableOpacity
+            style={styles.onboardingCard}
+            onPress={() => router.push('/onboarding')}
+            activeOpacity={0.85}
+          >
+            <View style={styles.onboardingHeader}>
+              <View style={styles.onboardingIcon}>
+                <Ionicons name="rocket-outline" size={16} color={colors.primary} />
+              </View>
+              <Text style={styles.onboardingTitle}>
+                Configuração {onboarding.progress.done}/{onboarding.progress.total}
+              </Text>
+            </View>
+            <View style={styles.onboardingTrack}>
+              <View
+                style={[
+                  styles.onboardingFill,
+                  { width: `${(onboarding.progress.done / (onboarding.progress.total || 1)) * 100}%` },
+                ]}
+              />
+            </View>
+            <View style={styles.onboardingCta}>
+              <Text style={styles.onboardingCtaText}>Continuar configuração</Text>
+              <Ionicons name="chevron-forward" size={15} color={colors.primary} />
+            </View>
+          </TouchableOpacity>
+        )}
 
         {/* Trial banner */}
         {tenant?.status === 'trial' && (
@@ -118,6 +149,33 @@ const styles = StyleSheet.create({
   header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' },
   greeting: { fontSize: font.md, color: colors.textSecondary },
   businessName: { fontSize: font.xl, fontWeight: '700', color: colors.text, marginTop: 2 },
+  onboardingCard: {
+    backgroundColor: colors.surface,
+    borderRadius: 12,
+    padding: spacing.md,
+    gap: spacing.sm,
+    borderWidth: 1.5,
+    borderColor: colors.primaryLight,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.06,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  onboardingHeader: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+  onboardingIcon: {
+    width: 28,
+    height: 28,
+    borderRadius: 8,
+    backgroundColor: colors.primaryLight,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  onboardingTitle: { fontSize: font.md, fontWeight: '700', color: colors.text },
+  onboardingTrack: { height: 6, borderRadius: 3, backgroundColor: colors.surfaceAlt, overflow: 'hidden' },
+  onboardingFill: { height: '100%', borderRadius: 3, backgroundColor: colors.primary },
+  onboardingCta: { flexDirection: 'row', alignItems: 'center', gap: 2 },
+  onboardingCtaText: { fontSize: font.sm, fontWeight: '600', color: colors.primary },
   trialBanner: {
     backgroundColor: colors.warning + '22',
     borderRadius: 12,
