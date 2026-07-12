@@ -14,6 +14,22 @@ import { useToast } from '@/lib/toast'
 import { api } from '@/lib/api'
 import { colors, font, spacing, radius } from '@/lib/theme'
 
+interface Appointment {
+  id: string
+  status: string
+  starts_at: string
+  ends_at: string
+  notes: string | null
+  customer_name: string
+  customer_phone: string
+  service_name: string
+  duration_minutes: number
+  price: number | string
+  professional_name: string
+  created_by: string
+  professional_user_id: string | null
+}
+
 const statusMap: Record<string, { label: string; variant: any }> = {
   pending:   { label: 'Pendente',   variant: 'warning' },
   confirmed: { label: 'Confirmado', variant: 'info' },
@@ -39,9 +55,8 @@ export default function AppointmentDetailScreen() {
 
   const { data: appt, isLoading } = useQuery({
     queryKey: ['appointment', id],
-    queryFn: () => api.get<any>(`/appointments/${id}`),
-    onSuccess: (data: any) => setNotes(data.notes ?? ''),
-  } as any)
+    queryFn: () => api.get<Appointment>(`/appointments/${id}`),
+  })
 
   const canEdit = (() => {
     if (!appt || !role) return false
@@ -100,7 +115,7 @@ export default function AppointmentDetailScreen() {
         </TouchableOpacity>
         <Text style={styles.title}>Agendamento</Text>
         {canEdit && !isEditing && (
-          <TouchableOpacity onPress={() => setIsEditing(true)}>
+          <TouchableOpacity onPress={() => { setNotes(appt.notes ?? ''); setIsEditing(true) }}>
             <Ionicons name="create-outline" size={22} color={colors.primary} />
           </TouchableOpacity>
         )}

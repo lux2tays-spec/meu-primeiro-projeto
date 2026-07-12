@@ -37,14 +37,22 @@ export default function LoginScreen() {
     setGoogleLoading(true)
     googleApi.loginWithIdToken(idToken)
       .then(async (res) => {
-        if (res.error === 'business_name_required' || res.is_new) {
+        if (res.is_new) {
           router.push({ pathname: '/(auth)/register', params: { id_token: idToken } })
           return
         }
         await setAuth(res.token)
         router.replace('/(app)')
       })
-      .catch((err) => toast.show(err.message ?? 'Erro ao entrar com Google', 'error'))
+      .catch((err) => {
+        // Backend returns 422 business_name_required for new Google users — route to
+        // the register step so they can name their business (api.post throws on non-2xx).
+        if (err?.message === 'business_name_required') {
+          router.push({ pathname: '/(auth)/register', params: { id_token: idToken } })
+          return
+        }
+        toast.show(err.message ?? 'Erro ao entrar com Google', 'error')
+      })
       .finally(() => setGoogleLoading(false))
   }, [googleResponse])
 
