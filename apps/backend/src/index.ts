@@ -21,6 +21,7 @@ import { rootRoutes } from './routes/root'
 import { affiliateRoutes } from './routes/affiliate'
 import { financeiroRoutes } from './routes/financeiro'
 import { startReminderJob } from './jobs/reminders'
+import { startSubscriptionEnforcer } from './jobs/subscriptionEnforcer'
 
 // Validate required environment variables at boot — fail fast before binding to port
 const REQUIRED_ENVS = ['JWT_SECRET', 'DATABASE_URL', 'REDIS_URL', 'ANTHROPIC_API_KEY'] as const
@@ -106,6 +107,7 @@ async function start() {
   await app.listen({ port: Number(process.env.PORT ?? 3000), host: '0.0.0.0' })
 
   startReminderJob()
+  startSubscriptionEnforcer()
 }
 
 // Graceful shutdown — drain in-flight requests before exiting

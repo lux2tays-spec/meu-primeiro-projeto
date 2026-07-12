@@ -97,12 +97,28 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
           </div>
         </div>
 
-        {/* Trial banner */}
-        {tenant?.status === 'trial' && (
-          <div className="mx-4 mt-4 bg-yellow-500/10 border border-yellow-500/20 rounded-xl p-3">
-            <p className="text-yellow-400 text-xs font-medium">⏰ Período de teste ativo</p>
-          </div>
-        )}
+        {/* Subscription / trial banner */}
+        {(() => {
+          const trialExpired = tenant?.status === 'trial' && tenant?.trial_ends_at && new Date(tenant.trial_ends_at).getTime() < Date.now()
+          const blocked = trialExpired || tenant?.status === 'suspended' || tenant?.status === 'cancelled'
+          if (blocked) {
+            return (
+              <Link href="/settings/subscription" onClick={() => setSidebarOpen(false)}
+                className="mx-4 mt-4 block bg-red-500/15 border border-red-500/30 rounded-xl p-3 hover:bg-red-500/25 transition-colors">
+                <p className="text-red-300 text-xs font-semibold">🔒 {tenant?.status === 'cancelled' ? 'Assinatura cancelada' : tenant?.status === 'suspended' ? 'Assinatura suspensa' : 'Período de teste encerrado'}</p>
+                <p className="text-red-300/80 text-[11px] mt-1">O WhatsApp foi desconectado. Assine para reativar o atendimento →</p>
+              </Link>
+            )
+          }
+          if (tenant?.status === 'trial') {
+            return (
+              <div className="mx-4 mt-4 bg-yellow-500/10 border border-yellow-500/20 rounded-xl p-3">
+                <p className="text-yellow-400 text-xs font-medium">⏰ Período de teste ativo</p>
+              </div>
+            )
+          }
+          return null
+        })()}
 
         {/* Nav */}
         <nav className="flex-1 p-4 space-y-1 overflow-y-auto">

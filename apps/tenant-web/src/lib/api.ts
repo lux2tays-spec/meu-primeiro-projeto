@@ -35,6 +35,10 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
       window.location.href = '/login'
       throw new Error('Sessão expirada')
     }
+    // 402 = subscription required (trial expired / suspended) — send them to subscribe.
+    if (res.status === 402 && typeof window !== 'undefined' && !window.location.pathname.startsWith('/settings/subscription')) {
+      window.location.href = '/settings/subscription'
+    }
     throw new Error(err.error ?? `Erro ${res.status}`)
   }
 

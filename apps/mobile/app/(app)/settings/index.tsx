@@ -1,4 +1,4 @@
-import { View, Text, StyleSheet, ScrollView, Alert, Linking } from 'react-native'
+import { View, Text, StyleSheet, ScrollView, Alert, Linking, TouchableOpacity } from 'react-native'
 import { router } from 'expo-router'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useQuery } from '@tanstack/react-query'
@@ -81,6 +81,26 @@ export default function SettingsScreen() {
           </Card>
         )}
 
+        {/* Trial/assinatura vencida — bloqueio */}
+        {tenant && (() => {
+          const trialExpired = tenant.status === 'trial' && tenant.trial_ends_at && new Date(tenant.trial_ends_at).getTime() < Date.now()
+          const blocked = trialExpired || tenant.status === 'suspended' || tenant.status === 'cancelled'
+          if (!blocked) return null
+          const title = tenant.status === 'cancelled' ? 'Assinatura cancelada'
+            : tenant.status === 'suspended' ? 'Assinatura suspensa'
+            : 'Período de teste encerrado'
+          return (
+            <TouchableOpacity style={styles.blockedBanner} onPress={() => router.push('/(app)/settings/subscription')}>
+              <Text style={styles.blockedIcon}>🔒</Text>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.blockedTitle}>{title}</Text>
+                <Text style={styles.blockedSub}>WhatsApp desconectado. Toque para assinar e reativar o atendimento.</Text>
+              </View>
+              <Text style={styles.blockedChevron}>›</Text>
+            </TouchableOpacity>
+          )
+        })()}
+
         {/* Automação */}
         <Text style={styles.section}>Automação</Text>
         <Card style={styles.group}>
@@ -139,6 +159,11 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.background },
   content: { padding: spacing.lg, gap: spacing.md },
   businessCard: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
+  blockedBanner: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, backgroundColor: '#FEE2E2', borderColor: '#FCA5A5', borderWidth: 1, borderRadius: 14, padding: spacing.md },
+  blockedIcon: { fontSize: 18 },
+  blockedTitle: { fontSize: font.md, fontWeight: '700', color: '#B91C1C' },
+  blockedSub: { fontSize: font.sm, color: '#B91C1C', opacity: 0.85, marginTop: 2 },
+  blockedChevron: { fontSize: 22, color: '#B91C1C', fontWeight: '700' },
   avatar: {
     width: 52,
     height: 52,
