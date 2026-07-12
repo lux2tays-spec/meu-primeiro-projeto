@@ -1,6 +1,7 @@
 import { FastifyPluginAsync } from 'fastify'
 import { z } from 'zod'
 import { db } from '../lib/db'
+import { redis } from '../lib/redis'
 import { hashPassword } from '../lib/password'
 import { encrypt, decrypt, maskSecret } from '../lib/crypto'
 
@@ -695,5 +696,101 @@ export const tenantRoutes: FastifyPluginAsync = async (app) => {
       }
       throw err
     }
+  })
+
+  // ── Onboarding ─────────────────────────────────────────────────────────────
+  // Per-step completion is computed from real data so the wizard never lies
+  // about the account state. `completed` reflects the explicit finish/skip flag.
+  app.get('/onboarding', async (request, reply) => {
+    const { tenant_id } = request.user
+    const { rows: [row] } = await db.query(
+      `SELECT
+         t.onboarding_completed_at,
+         t.mp_access_token,
+         COALESCE(ac.business_type, '')  AS business_type,
+         COALESCE(ac.business_info, '')  AS business_info,
+         EXISTS (SELECT 1 FROM professionals p WHERE p.tenant_id = t.id AND p.active = TRUE)       AS has_professional,
+         EXISTS (SELECT 1 FROM services s WHERE s.tenant_id = t.id)                                AS has_service,
+         EXISTS (SELECT 1 FROM working_hours w WHERE w.tenant_id = t.id)                           AS has_hours,
+         EXISTS (SELECT 1 FROM whatsapp_instances wi WHERE wi.tenant_id = t.id AND wi.status = 'connected') AS whatsapp_connected
+       FROM tenants t
+       LEFT JOIN agent_config ac ON ac.tenant_id = t.id
+       WHERE t.id = $1`,
+      [tenant_id]
+    )
+    if (!row) return reply.status(404).send({ error: 'Tenant não encontrado' })
+
+    const steps = [
+      { key: 'negocio',    done: row.business_type.trim().length > 0 },
+      { key: 'equipe',     done: row.has_professional },
+      { key: 'servicos',   done: row.has_service },
+      { key: 'horarios',   done: row.has_hours },
+      { key: 'agente',     done: row.business_info.trim().length > 0 },
+      { key: 'pagamentos', done: !!row.mp_access_token },
+      { key: 'whatsapp',   done: row.whatsapp_connected },
+    ]
+    const doneCount = steps.filter((s) => s.done).length
+
+    return reply.send({
+      completed: !!row.onboarding_completed_at,
+      steps,
+      progress: { done: doneCount, total: steps.length },
+    })
+  })
+
+  app.post('/onboarding/complete', async (request, reply) => {
+    const { tenant_id } = request.user
+    await db.query(
+      `UPDATE tenants SET onboarding_completed_at = COALESCE(onboarding_completed_at, NOW()) WHERE id = $1`,
+      [tenant_id]
+    )
+    return reply.send({ completed: true })
+  })
+
+  // Business-type templates (read-only for tenants) — powers the "Negócio" step
+  // dropdown. The full CRUD lives under the root admin routes.
+  app.get('/business-type-templates', async (_request, reply) => {
+    const { rows } = await db.query(
+      `SELECT business_type, display_name FROM business_type_templates ORDER BY display_name`
+    )
+    return reply.send(rows)
+  })
+
+  // Apply a business-type template to this tenant's agent_config. Sets the
+  // business_type always; only overwrites the prompt/tone/instructions when the
+  // agent hasn't been customized yet, so we never clobber a user's own wording.
+  app.post('/apply-business-template', async (request, reply) => {
+    const { tenant_id, role } = request.user
+    if (!['owner', 'admin', 'root'].includes(role)) return reply.status(403).send({ error: 'Sem permissão' })
+
+    const { business_type } = z.object({ business_type: z.string().min(1) }).parse(request.body)
+
+    const { rows: [tpl] } = await db.query(
+      `SELECT system_prompt, custom_instructions, tone FROM business_type_templates WHERE business_type = $1`,
+      [business_type]
+    )
+    if (!tpl) return reply.status(404).send({ error: 'Tipo de negócio não encontrado' })
+
+    const { rows: [current] } = await db.query(
+      `SELECT COALESCE(system_prompt, '') AS system_prompt FROM agent_config WHERE tenant_id = $1`,
+      [tenant_id]
+    )
+    const alreadyCustomized = (current?.system_prompt ?? '').trim().length > 0
+
+    const { rows: [updated] } = await db.query(
+      `UPDATE agent_config SET
+         business_type       = $1,
+         system_prompt       = CASE WHEN $2 THEN system_prompt       ELSE $3 END,
+         custom_instructions = CASE WHEN $2 THEN custom_instructions ELSE $4 END,
+         tone                = CASE WHEN $2 THEN tone                ELSE $5 END,
+         updated_at = NOW()
+       WHERE tenant_id = $6
+       RETURNING business_type`,
+      [business_type, alreadyCustomized, tpl.system_prompt, tpl.custom_instructions, tpl.tone, tenant_id]
+    )
+    if (!updated) return reply.status(404).send({ error: 'Configuração do agente não encontrada' })
+
+    await redis.del(`tenant:config:${tenant_id}`)
+    return reply.send({ business_type: updated.business_type, applied_template: !alreadyCustomized })
   })
 }
