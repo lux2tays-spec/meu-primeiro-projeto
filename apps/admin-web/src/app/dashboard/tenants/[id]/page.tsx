@@ -335,7 +335,13 @@ function Info({ label, value }: { label: string; value: any }) {
   )
 }
 
-function SField({ label, value, onChange, placeholder, type = 'text' }: any) {
+function SField({ label, value, onChange, placeholder, type = 'text' }: {
+  label: string
+  value: string
+  onChange: (value: string) => void
+  placeholder?: string
+  type?: string
+}) {
   return (
     <div>
       <label className="block text-sm font-medium text-gray-700 mb-1">{label}</label>
