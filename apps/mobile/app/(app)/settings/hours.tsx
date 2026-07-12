@@ -1,11 +1,12 @@
-import { View, Text, StyleSheet, ScrollView, Switch, ActivityIndicator } from 'react-native'
+import { View, Text, StyleSheet, ScrollView, Switch, ActivityIndicator, TouchableOpacity, Alert } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useState, useEffect } from 'react'
+import { Ionicons } from '@expo/vector-icons'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Card } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
-import { hoursApi } from '@/lib/api'
+import { hoursApi, tenantApi } from '@/lib/api'
 import { useToast } from '@/lib/toast'
 import { colors, font, spacing } from '@/lib/theme'
 
@@ -43,6 +44,33 @@ function rowsToSchedule(rows: any[]): Schedule {
 }
 
 function isValidTime(v: string) { return /^\d{2}:\d{2}$/.test(v) }
+
+/** Auto-mask DD/MM/AAAA while typing */
+function maskDate(v: string) {
+  const digits = v.replace(/\D/g, '').slice(0, 8)
+  if (digits.length <= 2) return digits
+  if (digits.length <= 4) return `${digits.slice(0, 2)}/${digits.slice(2)}`
+  return `${digits.slice(0, 2)}/${digits.slice(2, 4)}/${digits.slice(4)}`
+}
+
+/** DD/MM/AAAA → YYYY-MM-DD (null if invalid) */
+function toISODate(v: string): string | null {
+  const m = v.match(/^(\d{2})\/(\d{2})\/(\d{4})$/)
+  if (!m) return null
+  const [, dd, mm, yyyy] = m
+  const date = new Date(Number(yyyy), Number(mm) - 1, Number(dd))
+  if (
+    date.getFullYear() !== Number(yyyy) ||
+    date.getMonth() !== Number(mm) - 1 ||
+    date.getDate() !== Number(dd)
+  ) return null
+  return `${yyyy}-${mm}-${dd}`
+}
+
+function formatBRDate(iso: string) {
+  const [yyyy, mm, dd] = iso.split('-')
+  return `${dd}/${mm}/${yyyy}`
+}
 
 export default function HoursScreen() {
   const queryClient = useQueryClient()
@@ -148,8 +176,121 @@ export default function HoursScreen() {
           onPress={() => saveMutation.mutate()}
           loading={saveMutation.isPending}
         />
+
+        <DaysOffSection />
       </ScrollView>
     </SafeAreaView>
+  )
+}
+
+function DaysOffSection() {
+  const queryClient = useQueryClient()
+  const toast = useToast()
+  const [date, setDate] = useState('')
+  const [reason, setReason] = useState('')
+  const [dateError, setDateError] = useState<string | undefined>(undefined)
+
+  const { data: daysOff = [], isLoading } = useQuery({ queryKey: ['days-off'], queryFn: tenantApi.daysOff })
+
+  const addMutation = useMutation({
+    mutationFn: (isoDate: string) =>
+      tenantApi.addDayOff({ date: isoDate, professional_id: null, reason: reason.trim() || null }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['days-off'] })
+      setDate('')
+      setReason('')
+      setDateError(undefined)
+      toast.show('Folga adicionada!', 'success')
+    },
+    onError: (err: any) => toast.show(err.message ?? 'Não foi possível adicionar a folga.', 'error'),
+  })
+
+  const removeMutation = useMutation({
+    mutationFn: (id: string) => tenantApi.removeDayOff(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['days-off'] })
+      toast.show('Folga removida.', 'info')
+    },
+    onError: (err: any) => toast.show(err.message ?? 'Não foi possível remover.', 'error'),
+  })
+
+  function handleAdd() {
+    const iso = toISODate(date)
+    if (!iso) {
+      setDateError('Data inválida. Use o formato DD/MM/AAAA')
+      return
+    }
+    addMutation.mutate(iso)
+  }
+
+  function confirmRemove(d: any) {
+    Alert.alert(
+      'Remover folga',
+      `Remover a folga de ${formatBRDate(d.date)}?`,
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        { text: 'Remover', style: 'destructive', onPress: () => removeMutation.mutate(d.id) },
+      ]
+    )
+  }
+
+  return (
+    <View style={styles.daysOffSection}>
+      <Text style={styles.daysOffTitle}>Folgas e bloqueios</Text>
+      <Text style={styles.hint}>
+        Datas em que não haverá atendimento (feriados, folgas...). O bot e a agenda não oferecem
+        horários nessas datas.
+      </Text>
+
+      {isLoading ? (
+        <ActivityIndicator color={colors.primary} style={{ paddingVertical: spacing.md }} />
+      ) : (daysOff as any[]).length === 0 ? (
+        <Card>
+          <Text style={styles.daysOffEmpty}>Nenhuma folga ou bloqueio cadastrado.</Text>
+        </Card>
+      ) : (
+        (daysOff as any[]).map((d) => (
+          <Card key={d.id} style={styles.dayOffRow}>
+            <Ionicons name="calendar-clear-outline" size={18} color={colors.primary} />
+            <View style={{ flex: 1 }}>
+              <Text style={styles.dayOffDate}>{formatBRDate(d.date)}</Text>
+              <Text style={styles.dayOffMeta}>
+                {d.professional_name ?? 'Todos os profissionais'}
+                {d.reason ? ` · ${d.reason}` : ''}
+              </Text>
+            </View>
+            <TouchableOpacity onPress={() => confirmRemove(d)} disabled={removeMutation.isPending} style={{ padding: 4 }}>
+              <Ionicons name="trash-outline" size={18} color={colors.danger} />
+            </TouchableOpacity>
+          </Card>
+        ))
+      )}
+
+      <Card style={styles.dayOffForm}>
+        <Input
+          label="Data *"
+          value={date}
+          onChangeText={(v) => { setDate(maskDate(v)); setDateError(undefined) }}
+          placeholder="DD/MM/AAAA"
+          keyboardType="number-pad"
+          maxLength={10}
+          error={dateError}
+        />
+        <Input
+          label="Motivo (opcional)"
+          value={reason}
+          onChangeText={setReason}
+          placeholder="Feriado, manutenção..."
+        />
+        <Button
+          label="Adicionar folga"
+          onPress={handleAdd}
+          loading={addMutation.isPending}
+          disabled={!date}
+          variant="outline"
+        />
+      </Card>
+    </View>
   )
 }
 
@@ -166,4 +307,12 @@ const styles = StyleSheet.create({
   timeLabel: { fontSize: font.sm, color: colors.textSecondary },
   timeInput: { height: 44 },
   timeSep: { fontSize: font.sm, color: colors.textSecondary, paddingBottom: 12 },
+  // Folgas e bloqueios
+  daysOffSection: { gap: spacing.md, marginTop: spacing.lg },
+  daysOffTitle: { fontSize: font.lg, fontWeight: '700', color: colors.text },
+  daysOffEmpty: { fontSize: font.sm, color: colors.textSecondary },
+  dayOffRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+  dayOffDate: { fontSize: font.md, fontWeight: '600', color: colors.text },
+  dayOffMeta: { fontSize: font.sm, color: colors.textSecondary, marginTop: 1 },
+  dayOffForm: { gap: spacing.md },
 })

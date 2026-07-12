@@ -56,29 +56,40 @@ export default function SettingsScreen() {
     free: 'warning', basico: 'info', premium: 'success', profissional: 'success',
   }
 
+  const canManageBusiness = ['owner', 'admin', 'root'].includes(role ?? '')
+
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
       <ScrollView contentContainerStyle={styles.content}>
 
         {/* Business info card */}
         {tenant && (
-          <Card style={styles.businessCard}>
-            <View style={styles.avatar}>
-              <Text style={styles.avatarText}>{tenant.name.charAt(0).toUpperCase()}</Text>
-            </View>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.businessName}>{tenant.name}</Text>
-              <View style={styles.badgeRow}>
-                <Badge
-                  label={`Plano ${tenant.plan.charAt(0).toUpperCase() + tenant.plan.slice(1)}`}
-                  variant={planVariant[tenant.plan] ?? 'default'}
-                />
-                {tenant.status === 'trial' && (
-                  <Badge label="Trial" variant="warning" />
-                )}
+          <TouchableOpacity
+            activeOpacity={canManageBusiness ? 0.7 : 1}
+            disabled={!canManageBusiness}
+            onPress={() => router.push('/(app)/settings/business')}
+          >
+            <Card style={styles.businessCard}>
+              <View style={styles.avatar}>
+                <Text style={styles.avatarText}>{tenant.name.charAt(0).toUpperCase()}</Text>
               </View>
-            </View>
-          </Card>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.businessName}>{tenant.name}</Text>
+                <View style={styles.badgeRow}>
+                  <Badge
+                    label={`Plano ${tenant.plan.charAt(0).toUpperCase() + tenant.plan.slice(1)}`}
+                    variant={planVariant[tenant.plan] ?? 'default'}
+                  />
+                  {tenant.status === 'trial' && (
+                    <Badge label="Trial" variant="warning" />
+                  )}
+                </View>
+              </View>
+              {canManageBusiness && (
+                <Text style={styles.businessChevron}>›</Text>
+              )}
+            </Card>
+          </TouchableOpacity>
         )}
 
         {/* Trial/assinatura vencida — bloqueio */}
@@ -114,6 +125,12 @@ export default function SettingsScreen() {
         {/* Negócio */}
         <Text style={styles.section}>Negócio</Text>
         <Card style={styles.group}>
+          {canManageBusiness && (
+            <>
+              <SettingsRow icon="business-outline" label="Dados do negócio" subtitle="Nome da empresa e informações de contato" onPress={() => router.push('/(app)/settings/business')} />
+              <View style={styles.divider} />
+            </>
+          )}
           <SettingsRow icon="cut-outline" label="Serviços" subtitle="Gerenciar serviços e preços" onPress={() => router.push('/(app)/settings/services')} />
           <View style={styles.divider} />
           <SettingsRow icon="people-outline" label="Colaboradores" subtitle="Permissões e prestadores de serviço" onPress={() => router.push('/(app)/settings/staff')} />
@@ -174,6 +191,7 @@ const styles = StyleSheet.create({
   },
   avatarText: { fontSize: font.xl, fontWeight: '800', color: colors.primary },
   businessName: { fontSize: font.lg, fontWeight: '700', color: colors.text },
+  businessChevron: { fontSize: 24, color: colors.textDisabled, fontWeight: '400' },
   badgeRow: { flexDirection: 'row', gap: spacing.xs, marginTop: spacing.xs },
   section: { fontSize: font.sm, fontWeight: '700', color: colors.textSecondary, textTransform: 'uppercase', letterSpacing: 0.8 },
   group: { gap: 0 },

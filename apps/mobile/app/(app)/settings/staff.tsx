@@ -9,6 +9,7 @@ import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { tenantApi, api } from '@/lib/api'
+import { useAuthStore } from '@/lib/store'
 import { useToast } from '@/lib/toast'
 import { colors, font, spacing, radius } from '@/lib/theme'
 
@@ -17,11 +18,19 @@ const ROLES = [
   { value: 'staff', label: 'Colaborador', desc: 'Ver agenda e atualizar agendamentos' },
 ]
 
+const EDIT_ROLES = [
+  { value: 'owner', label: 'Proprietário', desc: 'Acesso total, incluindo assinatura' },
+  ...ROLES,
+]
+
 const roleVariant: Record<string, any> = { owner: 'success', admin: 'info', staff: 'default' }
 const roleLabel: Record<string, string> = { owner: 'Proprietário', admin: 'Admin', staff: 'Colaborador' }
 
 type FormErrors = { name?: string; email?: string; password?: string }
 const emptyForm = { name: '', email: '', password: '', role: 'staff', also_professional: false }
+
+type EditErrors = { name?: string; email?: string }
+const emptyEditForm = { name: '', email: '', phone: '', role: 'staff' }
 
 function validateEmail(v: string) { return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v) }
 
@@ -32,6 +41,13 @@ export default function StaffScreen() {
   const [form, setForm] = useState(emptyForm)
   const [errors, setErrors] = useState<FormErrors>({})
   const [removeTarget, setRemoveTarget] = useState<{ id: string; name: string } | null>(null)
+  const [editTarget, setEditTarget] = useState<any>(null)
+  const [editForm, setEditForm] = useState(emptyEditForm)
+  const [editErrors, setEditErrors] = useState<EditErrors>({})
+
+  const role = useAuthStore((s) => s.role)
+  const myUserId = useAuthStore((s) => s.userId)
+  const canManage = ['owner', 'admin', 'root'].includes(role ?? '')
 
   const { data: staff = [] } = useQuery({ queryKey: ['staff'], queryFn: tenantApi.staff })
   const { data: professionals = [] } = useQuery({ queryKey: ['professionals'], queryFn: tenantApi.professionals })
@@ -78,7 +94,28 @@ export default function StaffScreen() {
       setRemoveTarget(null)
       toast.show('Colaborador removido.', 'info')
     },
-    onError: (err: any) => { setRemoveTarget(null); toast.show(err.message ?? 'Não foi possível remover.', 'error') },
+    onError: (err: any) => {
+      setRemoveTarget(null)
+      Alert.alert('Não foi possível remover', err.message ?? 'Tente novamente.')
+    },
+  })
+
+  const editMutation = useMutation({
+    mutationFn: ({ id, data }: { id: string; data: typeof emptyEditForm }) =>
+      tenantApi.editStaff(id, {
+        name: data.name.trim(),
+        email: data.email.trim(),
+        phone: data.phone.trim() || null,
+        role: data.role,
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['staff'] })
+      closeEditModal()
+      toast.show('Colaborador atualizado!', 'success')
+    },
+    onError: (err: any) => {
+      Alert.alert('Não foi possível salvar', err.message ?? 'Tente novamente.')
+    },
   })
 
   const addAsProfessional = useMutation({
@@ -120,6 +157,35 @@ export default function StaffScreen() {
 
   function closeModal() { setModalVisible(false); setForm(emptyForm); setErrors({}) }
 
+  function openEditModal(u: any) {
+    setEditTarget(u)
+    setEditForm({ name: u.name ?? '', email: u.email ?? '', phone: u.phone ?? '', role: u.role })
+    setEditErrors({})
+  }
+
+  function closeEditModal() { setEditTarget(null); setEditForm(emptyEditForm); setEditErrors({}) }
+
+  function setEditField(key: keyof typeof emptyEditForm) {
+    return (v: string) => {
+      setEditForm((f) => ({ ...f, [key]: v }))
+      if (editErrors[key as keyof EditErrors]) setEditErrors((e) => ({ ...e, [key]: undefined }))
+    }
+  }
+
+  function validateEdit() {
+    const e: EditErrors = {}
+    if (!editForm.name.trim()) e.name = 'Informe o nome'
+    if (!editForm.email.trim()) e.email = 'Informe o e-mail'
+    else if (!validateEmail(editForm.email.trim())) e.email = 'E-mail inválido'
+    setEditErrors(e)
+    return Object.keys(e).length === 0
+  }
+
+  function handleSaveEdit() {
+    if (!editTarget || !validateEdit()) return
+    editMutation.mutate({ id: editTarget.id, data: editForm })
+  }
+
   function handleToggleProfessional(u: any) {
     const isProf = isProfessional(u.id)
     const profId = professionalId(u.id)
@@ -141,7 +207,9 @@ export default function StaffScreen() {
         contentContainerStyle={s.list}
         ItemSeparatorComponent={() => <View style={{ height: spacing.sm }} />}
         ListHeaderComponent={
-          <Button label="+ Adicionar colaborador" onPress={() => setModalVisible(true)} style={{ marginBottom: spacing.md }} />
+          canManage
+            ? <Button label="+ Adicionar colaborador" onPress={() => setModalVisible(true)} style={{ marginBottom: spacing.md }} />
+            : null
         }
         ListEmptyComponent={<Text style={s.empty}>Nenhum colaborador cadastrado</Text>}
         renderItem={({ item }) => {
@@ -159,25 +227,34 @@ export default function StaffScreen() {
                 </View>
                 <Text style={s.email}>{item.email}</Text>
                 {/* Professional toggle */}
-                <TouchableOpacity
-                  style={[s.proToggle, isProf && s.proToggleActive]}
-                  onPress={() => handleToggleProfessional(item)}
-                  disabled={addAsProfessional.isPending || removeAsProfessional.isPending}
-                >
-                  <Ionicons
-                    name={isProf ? 'checkmark-circle' : 'add-circle-outline'}
-                    size={14}
-                    color={isProf ? colors.primary : colors.textSecondary}
-                  />
-                  <Text style={[s.proToggleText, isProf && s.proToggleTextActive]}>
-                    {isProf ? 'Presta serviços' : 'Habilitar para serviços'}
-                  </Text>
-                </TouchableOpacity>
+                {canManage && (
+                  <TouchableOpacity
+                    style={[s.proToggle, isProf && s.proToggleActive]}
+                    onPress={() => handleToggleProfessional(item)}
+                    disabled={addAsProfessional.isPending || removeAsProfessional.isPending}
+                  >
+                    <Ionicons
+                      name={isProf ? 'checkmark-circle' : 'add-circle-outline'}
+                      size={14}
+                      color={isProf ? colors.primary : colors.textSecondary}
+                    />
+                    <Text style={[s.proToggleText, isProf && s.proToggleTextActive]}>
+                      {isProf ? 'Presta serviços' : 'Habilitar para serviços'}
+                    </Text>
+                  </TouchableOpacity>
+                )}
               </View>
-              {item.role !== 'owner' && (
-                <TouchableOpacity onPress={() => setRemoveTarget({ id: item.id, name: item.name })} style={{ padding: 4 }}>
-                  <Ionicons name="trash-outline" size={18} color={colors.danger} />
-                </TouchableOpacity>
+              {canManage && (
+                <View style={s.cardActions}>
+                  <TouchableOpacity onPress={() => openEditModal(item)} style={{ padding: 4 }}>
+                    <Ionicons name="create-outline" size={18} color={colors.primary} />
+                  </TouchableOpacity>
+                  {item.id !== myUserId && (
+                    <TouchableOpacity onPress={() => setRemoveTarget({ id: item.id, name: item.name })} style={{ padding: 4 }}>
+                      <Ionicons name="trash-outline" size={18} color={colors.danger} />
+                    </TouchableOpacity>
+                  )}
+                </View>
               )}
             </Card>
           )
@@ -222,6 +299,36 @@ export default function StaffScreen() {
         </SafeAreaView>
       </Modal>
 
+      {/* Edit modal */}
+      <Modal visible={!!editTarget} animationType="slide" presentationStyle="pageSheet" onRequestClose={closeEditModal}>
+        <SafeAreaView style={s.modal} edges={['top']}>
+          <View style={s.modalHeader}>
+            <Text style={s.modalTitle}>Editar colaborador</Text>
+            <TouchableOpacity onPress={closeEditModal}>
+              <Ionicons name="close" size={24} color={colors.text} />
+            </TouchableOpacity>
+          </View>
+          <ScrollView contentContainerStyle={s.modalContent} keyboardShouldPersistTaps="handled">
+            <Input label="Nome *" value={editForm.name} onChangeText={setEditField('name')} placeholder="Maria Silva" error={editErrors.name} />
+            <Input label="E-mail *" value={editForm.email} onChangeText={setEditField('email')} placeholder="maria@email.com" keyboardType="email-address" autoCapitalize="none" error={editErrors.email} />
+            <Input label="Telefone" value={editForm.phone} onChangeText={setEditField('phone')} placeholder="(11) 99999-9999" keyboardType="phone-pad" />
+
+            <View style={s.field}>
+              <Text style={s.fieldLabel}>Nível de acesso</Text>
+              {EDIT_ROLES.map((r) => (
+                <TouchableOpacity key={r.value} style={[s.roleBtn, editForm.role === r.value && s.roleBtnActive]}
+                  onPress={() => setEditForm((f) => ({ ...f, role: r.value }))}>
+                  <Text style={[s.roleName, editForm.role === r.value && s.roleNameActive]}>{r.label}</Text>
+                  <Text style={s.roleDesc}>{r.desc}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+
+            <Button label="Salvar alterações" onPress={handleSaveEdit} loading={editMutation.isPending} />
+          </ScrollView>
+        </SafeAreaView>
+      </Modal>
+
       <ConfirmDialog
         visible={!!removeTarget}
         title="Remover colaborador"
@@ -239,6 +346,7 @@ const s = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.background },
   list: { padding: spacing.lg },
   card: { flexDirection: 'row', alignItems: 'flex-start', gap: spacing.md },
+  cardActions: { flexDirection: 'column', gap: spacing.sm },
   avatar: { width: 42, height: 42, borderRadius: 21, backgroundColor: colors.primaryLight, alignItems: 'center', justifyContent: 'center', marginTop: 2 },
   avatarText: { fontSize: font.md, fontWeight: '700', color: colors.primary },
   nameRow: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: spacing.xs },

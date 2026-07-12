@@ -59,6 +59,12 @@ export const authApi = {
 // Tenant
 export const tenantApi = {
   me: () => api.get<any>('/tenant/me'),
+  updateBusiness: (data: {
+    name: string
+    contact_email?: string | null
+    contact_phone?: string | null
+    responsible_name?: string | null
+  }) => api.put<any>('/tenant/business', data),
   services: () => api.get<any[]>('/tenant/services'),
   createService: (data: any) => api.post<any>('/tenant/services', data),
   updateService: (id: string, data: any) => api.put<any>(`/tenant/services/${id}`, data),
@@ -68,9 +74,20 @@ export const tenantApi = {
   removeProfessional: (id: string) => api.delete<any>(`/tenant/professionals/${id}`),
   staff: () => api.get<any[]>('/tenant/staff'),
   addStaff: (data: any) => api.post<any>('/tenant/staff', data),
+  editStaff: (id: string, data: { name?: string; email?: string; phone?: string | null; role?: string }) =>
+    api.patch<any>(`/tenant/staff/${id}`, data),
   removeStaff: (id: string) => api.delete<any>(`/tenant/staff/${id}`),
+  daysOff: () => api.get<any[]>('/tenant/days-off'),
+  addDayOff: (data: { date: string; professional_id?: string | null; reason?: string | null }) =>
+    api.post<any>('/tenant/days-off', data),
+  removeDayOff: (id: string) => api.delete<any>(`/tenant/days-off/${id}`),
   customers: (search?: string) =>
     api.get<any[]>(`/tenant/customers${search ? `?search=${encodeURIComponent(search)}` : ''}`),
+  customer: (id: string) => api.get<any>(`/tenant/customers/${id}`),
+  addCustomer: (data: { name: string; phone: string; email?: string }) =>
+    api.post<any>('/tenant/customers', data),
+  updateCustomer: (id: string, data: { name?: string; email?: string }) =>
+    api.put<any>(`/tenant/customers/${id}`, data),
 }
 
 // Appointments

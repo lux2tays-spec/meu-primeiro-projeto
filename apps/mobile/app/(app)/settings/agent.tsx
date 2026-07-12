@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import {
-  View, Text, StyleSheet, ScrollView, TouchableOpacity, Alert, Platform,
+  View, Text, StyleSheet, ScrollView, TouchableOpacity, Alert, Platform, Switch,
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import * as DocumentPicker from 'expo-document-picker'
@@ -30,7 +30,9 @@ const BLANK = {
   city: '', state: '', instagram_url: '', google_maps_url: '',
   website_url: '', whatsapp_number: '', tone: 'friendly',
   custom_instructions: '', system_prompt: '',
-  return_reminder_days: 30,
+  appointment_reminders_enabled: true,
+  reminder1_minutes: 180,
+  reminder2_minutes: 30,
   catalog_files: [] as { name: string; url: string }[],
   language: 'pt-BR',
 }
@@ -58,7 +60,9 @@ export default function AgentScreen() {
       tone:                 config.tone ?? 'friendly',
       custom_instructions:  config.custom_instructions ?? '',
       system_prompt:        config.system_prompt ?? '',
-      return_reminder_days: config.return_reminder_days ?? 30,
+      appointment_reminders_enabled: config.appointment_reminders_enabled ?? true,
+      reminder1_minutes:    config.reminder1_minutes ?? 180,
+      reminder2_minutes:    config.reminder2_minutes ?? 30,
       catalog_files:        config.catalog_files ?? [],
       language:             config.language ?? 'pt-BR',
     })
@@ -252,17 +256,45 @@ export default function AgentScreen() {
               style={s.textarea}
             />
 
-            <Label hint="Após quantos dias sem visita o agente sugere um novo agendamento">
-              Lembrete de retorno
-            </Label>
-            <View style={s.reminderRow}>
-              <Input
-                value={String(form.return_reminder_days)}
-                onChangeText={(v) => set('return_reminder_days', parseInt(v) || 30)}
-                keyboardType="number-pad"
-                style={s.reminderInput}
-              />
-              <Text style={s.reminderLabel}>dias</Text>
+            {/* ── Lembretes de agendamento ── */}
+            <View style={s.remindersSection}>
+              <View style={s.remindersHeader}>
+                <View style={{ flex: 1 }}>
+                  <Text style={s.label}>Lembretes de agendamento</Text>
+                  <Text style={s.hint}>
+                    Envia até 2 mensagens no WhatsApp antes do horário pedindo a confirmação do cliente
+                  </Text>
+                </View>
+                <Switch
+                  value={form.appointment_reminders_enabled}
+                  onValueChange={(v) => set('appointment_reminders_enabled', v)}
+                  trackColor={{ true: colors.primary, false: colors.border }}
+                  thumbColor="#fff"
+                />
+              </View>
+
+              {form.appointment_reminders_enabled && (
+                <View style={s.row}>
+                  <View style={s.flex1}>
+                    <Label hint="Ex.: 180 = 3 horas antes">1º lembrete (minutos antes)</Label>
+                    <Input
+                      value={String(form.reminder1_minutes)}
+                      onChangeText={(v) => set('reminder1_minutes', Math.max(0, parseInt(v, 10) || 0))}
+                      keyboardType="number-pad"
+                      placeholder="180"
+                    />
+                  </View>
+                  <View style={[s.flex1, { marginLeft: spacing.sm }]}>
+                    <Label hint="Ex.: 30 = meia hora antes">2º lembrete (minutos antes)</Label>
+                    <Input
+                      value={String(form.reminder2_minutes)}
+                      onChangeText={(v) => set('reminder2_minutes', Math.max(0, parseInt(v, 10) || 0))}
+                      keyboardType="number-pad"
+                      placeholder="30"
+                    />
+                  </View>
+                </View>
+              )}
             </View>
 
             <Button label="Salvar comportamento" onPress={handleSave} loading={saveMutation.isPending} />
@@ -345,9 +377,8 @@ const s = StyleSheet.create({
   toneBtnLabelActive:{ color: colors.primaryDark },
   toneBtnDesc:       { fontSize: font.sm, color: colors.textSecondary, marginTop: 2 },
   toneBtnDescActive: { color: colors.primaryDark },
-  reminderRow:       { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
-  reminderInput:     { width: 80 },
-  reminderLabel:     { fontSize: font.md, color: colors.textSecondary },
+  remindersSection:  { borderTopWidth: 1, borderTopColor: colors.border, paddingTop: spacing.md, gap: spacing.md },
+  remindersHeader:   { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
   emptyText:         { textAlign: 'center', color: colors.textSecondary, fontSize: font.sm, paddingVertical: spacing.xl },
   fileRow:           { flexDirection: 'row', alignItems: 'center', backgroundColor: colors.surface, borderRadius: radius.md, padding: spacing.md, gap: spacing.sm, borderWidth: 1, borderColor: colors.border },
   fileIcon:          { fontSize: 22 },

@@ -10,22 +10,12 @@ import { tenantApi } from '@/lib/api'
 import { useToast } from '@/lib/toast'
 import { colors, font, spacing, radius } from '@/lib/theme'
 
-const REMINDER_OPTIONS = [
-  { label: 'Sem lembrete', value: null },
-  { label: '7 dias', value: 7 },
-  { label: '14 dias', value: 14 },
-  { label: '21 dias', value: 21 },
-  { label: '30 dias', value: 30 },
-  { label: '60 dias', value: 60 },
-  { label: '90 dias', value: 90 },
-]
-
 const emptyForm = {
   name: '',
   description: '',
   duration_minutes: '60',
   price: '',
-  reminder_days: null as number | null,
+  reminder_days: '',
   professional_ids: [] as string[],
 }
 type FormErrors = { name?: string; duration_minutes?: string; price?: string }
@@ -85,7 +75,7 @@ export default function ServicesScreen() {
       description: item.description ?? '',
       duration_minutes: String(item.duration_minutes),
       price: Number(item.price).toFixed(2).replace('.', ','),
-      reminder_days: item.reminder_days ?? null,
+      reminder_days: item.reminder_days ? String(item.reminder_days) : '',
       professional_ids: (item.professionals ?? []).map((p: any) => p.id),
     })
     setErrors({})
@@ -128,12 +118,13 @@ export default function ServicesScreen() {
 
   function handleSave() {
     if (!validate()) return
+    const reminderDays = Math.max(0, Math.floor(Number(form.reminder_days) || 0))
     const payload = {
       name: form.name.trim(),
       description: form.description.trim() || null,
       duration_minutes: Number(form.duration_minutes),
       price: parseFloat(form.price.replace(',', '.')),
-      reminder_days: form.reminder_days,
+      reminder_days: reminderDays > 0 ? reminderDays : null,
       professional_ids: form.professional_ids,
     }
     if (editing) {
@@ -255,25 +246,17 @@ export default function ServicesScreen() {
 
             {/* Período de lembrete */}
             <View style={s.proSection}>
-              <Text style={s.proSectionLabel}>Período para lembrar os clientes</Text>
+              <Input
+                label="Período para lembrar os clientes (dias)"
+                value={form.reminder_days}
+                onChangeText={(v) => setForm((f) => ({ ...f, reminder_days: v.replace(/[^0-9]/g, '') }))}
+                keyboardType="number-pad"
+                placeholder="Ex: 30 — deixe vazio para desativar"
+              />
               <Text style={s.reminderHint}>
                 O cliente receberá uma mensagem no WhatsApp após este período sugerindo agendar novamente.
+                Deixe vazio ou 0 para não lembrar.
               </Text>
-              <View style={s.proChipsWrap}>
-                {REMINDER_OPTIONS.map((opt) => {
-                  const selected = form.reminder_days === opt.value
-                  return (
-                    <TouchableOpacity
-                      key={String(opt.value)}
-                      onPress={() => setForm((f) => ({ ...f, reminder_days: opt.value }))}
-                      style={[s.proSelectChip, selected && s.proSelectChipActive]}
-                    >
-                      {selected && <Ionicons name="checkmark" size={13} color="#fff" style={{ marginRight: 3 }} />}
-                      <Text style={[s.proSelectChipText, selected && s.proSelectChipTextActive]}>{opt.label}</Text>
-                    </TouchableOpacity>
-                  )
-                })}
-              </View>
             </View>
 
             {/* Seleção de profissionais */}
