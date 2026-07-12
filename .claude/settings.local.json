@@ -13,7 +13,21 @@
       "Bash(open *)",
       "Bash(docker info *)",
       "Bash(docker compose *)",
-      "Bash(psql *)"
+      "Bash(psql *)",
+      "Bash(git add *)",
+      "Bash(git commit *)",
+      "Bash(git push *)",
+      "Bash(lsof -ti:3001)",
+      "Bash(lsof -ti:3002)",
+      "Bash(xargs cat)",
+      "Bash(lsof -ti:3000)",
+      "Bash(ps -p 28419 -o comm,args)",
+      "Bash(ps -p 35498 -o comm,args)",
+      "Bash(ps -p 28421 -o comm,args)",
+      "Bash(kill 28419)",
+      "Bash(pkill -f \"turbo run dev\")",
+      "Bash(echo \"port 3000 free: $\\(lsof -ti:3000)",
+      "Bash(ssh -L 3000:localhost:3000 root@187.127.12.161 -N -f -o StrictHostKeyChecking=no -o ConnectTimeout=10)"
     ]
   }
 }

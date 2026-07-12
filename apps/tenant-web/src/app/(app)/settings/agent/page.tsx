@@ -22,7 +22,8 @@ type Tab = typeof TABS[number]
 const BLANK = {
   business_info: '', business_type: '', address: '', neighborhood: '', city: '', state: '',
   instagram_url: '', google_maps_url: '', website_url: '', whatsapp_number: '',
-  tone: 'friendly', custom_instructions: '', system_prompt: '', return_reminder_days: 30,
+  tone: 'friendly', custom_instructions: '', system_prompt: '',
+  appointment_reminders_enabled: true, reminder1_minutes: 180, reminder2_minutes: 30,
   catalog_files: [] as { name: string; url: string }[],
   language: 'pt-BR',
 }
@@ -53,7 +54,9 @@ export default function AgentPage() {
       tone:                 config.tone ?? 'friendly',
       custom_instructions:  config.custom_instructions ?? '',
       system_prompt:        config.system_prompt ?? '',
-      return_reminder_days: config.return_reminder_days ?? 30,
+      appointment_reminders_enabled: config.appointment_reminders_enabled ?? true,
+      reminder1_minutes:    config.reminder1_minutes ?? 180,
+      reminder2_minutes:    config.reminder2_minutes ?? 30,
       catalog_files:        config.catalog_files ?? [],
       language:             config.language ?? 'pt-BR',
     })
@@ -233,22 +236,55 @@ export default function AgentPage() {
               />
             </Field>
 
-            <Field
-              label="Lembrete de retorno (dias)"
-              hint="Após quantos dias sem visita o agente deve sugerir ao cliente um novo agendamento"
-            >
-              <div className="flex items-center gap-3">
-                <input
-                  type="number"
-                  min={1}
-                  max={365}
-                  value={form.return_reminder_days}
-                  onChange={(e) => set('return_reminder_days', Number(e.target.value))}
-                  className="w-24 h-10 px-3 rounded-xl border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary text-center"
-                />
-                <span className="text-sm text-gray-500">dias</span>
+            {/* ── Lembretes de agendamento ── */}
+            <div className="border-t border-gray-100 pt-5 space-y-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-semibold text-gray-900">Lembretes de agendamento</p>
+                  <p className="text-xs text-gray-400 mt-0.5">
+                    Envia até 2 mensagens no WhatsApp antes do horário pedindo a confirmação do cliente
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={form.appointment_reminders_enabled}
+                  onClick={() => set('appointment_reminders_enabled', !form.appointment_reminders_enabled)}
+                  className={`relative w-11 h-6 rounded-full transition-colors shrink-0 ${
+                    form.appointment_reminders_enabled ? 'bg-primary' : 'bg-gray-200'
+                  }`}
+                >
+                  <span
+                    className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${
+                      form.appointment_reminders_enabled ? 'translate-x-5' : ''
+                    }`}
+                  />
+                </button>
               </div>
-            </Field>
+
+              {form.appointment_reminders_enabled && (
+                <div className="grid grid-cols-2 gap-4">
+                  <Field label="1º lembrete (minutos antes)" hint="Ex.: 180 = 3 horas antes">
+                    <input
+                      type="number"
+                      min={0}
+                      value={form.reminder1_minutes}
+                      onChange={(e) => set('reminder1_minutes', Math.max(0, Math.floor(Number(e.target.value) || 0)))}
+                      className={inputCls}
+                    />
+                  </Field>
+                  <Field label="2º lembrete (minutos antes)" hint="Ex.: 30 = meia hora antes">
+                    <input
+                      type="number"
+                      min={0}
+                      value={form.reminder2_minutes}
+                      onChange={(e) => set('reminder2_minutes', Math.max(0, Math.floor(Number(e.target.value) || 0)))}
+                      className={inputCls}
+                    />
+                  </Field>
+                </div>
+              )}
+            </div>
           </>
         )}
 

@@ -22,6 +22,7 @@ import { affiliateRoutes } from './routes/affiliate'
 import { financeiroRoutes } from './routes/financeiro'
 import { subscriptionRoutes } from './routes/subscription'
 import { startReminderJob } from './jobs/reminders'
+import { startAppointmentReminders } from './jobs/appointmentReminders'
 import { startSubscriptionEnforcer } from './jobs/subscriptionEnforcer'
 import { startWhatsappReconciler } from './jobs/whatsappReconciler'
 
@@ -112,6 +113,7 @@ async function start() {
   await app.listen({ port: Number(process.env.PORT ?? 3000), host: '0.0.0.0' })
 
   startReminderJob()
+  startAppointmentReminders()
   startSubscriptionEnforcer()
   startWhatsappReconciler()
 }

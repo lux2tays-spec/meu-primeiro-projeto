@@ -26,6 +26,9 @@ const updateSchema = z.object({
   catalog_files:        z.array(z.object({ name: z.string(), url: z.string() })).optional(),
   custom_instructions:  z.string().optional(),
   return_reminder_days: z.number().int().min(1).max(365).optional(),
+  appointment_reminders_enabled: z.boolean().optional(),
+  reminder1_minutes:    z.number().int().min(0).optional(),
+  reminder2_minutes:    z.number().int().min(0).optional(),
 })
 
 export const agentRoutes: FastifyPluginAsync = async (app) => {

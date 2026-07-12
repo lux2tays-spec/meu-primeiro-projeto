@@ -14,16 +14,6 @@ type FormState = {
 
 const BLANK: FormState = { name: '', description: '', duration_minutes: 60, price: 0, reminder_days: null, professional_ids: [] }
 
-const REMINDER_OPTIONS = [
-  { label: 'Sem lembrete', value: null },
-  { label: '7 dias', value: 7 },
-  { label: '14 dias', value: 14 },
-  { label: '21 dias', value: 21 },
-  { label: '30 dias', value: 30 },
-  { label: '60 dias', value: 60 },
-  { label: '90 dias', value: 90 },
-]
-
 const inputCls = 'w-full h-10 px-3 rounded-xl border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary'
 
 // NOTE: must live at module scope. If defined inside ServicesPage, a new component
@@ -72,25 +62,25 @@ function FormFields({ form, setForm, professionals }: {
 
       {/* Período de lembrete */}
       <div>
-        <label className="block text-xs font-medium text-gray-600 mb-1">Período para lembrar os clientes</label>
+        <label className="block text-xs font-medium text-gray-600 mb-1">Período para lembrar os clientes (dias)</label>
         <p className="text-xs text-gray-400 mb-2">
           O cliente receberá uma mensagem via WhatsApp após esse período sugerindo agendar novamente.
+          Deixe vazio ou 0 para desativar.
         </p>
-        <div className="flex flex-wrap gap-2">
-          {REMINDER_OPTIONS.map((opt) => {
-            const sel = form.reminder_days === opt.value
-            return (
-              <button key={String(opt.value)} type="button"
-                onClick={() => setForm((f) => ({ ...f, reminder_days: opt.value }))}
-                className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors ${
-                  sel
-                    ? 'bg-amber-500 text-white border-amber-500'
-                    : 'bg-white text-gray-600 border-gray-200 hover:border-amber-400 hover:text-amber-600'
-                }`}>
-                {opt.label}
-              </button>
-            )
-          })}
+        <div className="flex items-center gap-3">
+          <input
+            type="number"
+            min={0}
+            step={1}
+            value={form.reminder_days ?? ''}
+            onChange={(e) => setForm((f) => ({
+              ...f,
+              reminder_days: e.target.value === '' ? null : Math.max(0, Math.floor(Number(e.target.value) || 0)),
+            }))}
+            className="w-28 h-10 px-3 rounded-xl border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary text-center"
+            placeholder="Ex.: 30"
+          />
+          <span className="text-xs text-gray-500">dias</span>
         </div>
       </div>
 
