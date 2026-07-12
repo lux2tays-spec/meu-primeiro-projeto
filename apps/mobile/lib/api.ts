@@ -205,6 +205,71 @@ export const financeiroApi = {
   deletePaymentLink: (id: string) => api.delete<any>(`/financeiro/payment-links/${id}`),
 }
 
+// Subscription (platform plans + transparent checkout)
+export const subscriptionApi = {
+  plans: () =>
+    api.get<Array<{
+      slug: string
+      name: string
+      description?: string | null
+      price_cents: number
+      max_agendas: number
+      max_users: number
+    }>>('/subscription/plans'),
+  paymentInfo: () =>
+    api.get<{ available: boolean; public_key: string | null }>('/subscription/payment-info'),
+  checkout: (plan: string, cardTokenId: string) =>
+    api.post<{ status?: string }>('/subscription/checkout', { plan, card_token_id: cardTokenId }),
+  me: () => api.get<any>('/subscription/me'),
+}
+
+// Mercado Pago card tokenization (transparent checkout).
+// The card data goes DIRECTLY to Mercado Pago over TLS using the platform's
+// PUBLIC key — it never touches our backend and must never be logged.
+// Deliberately a plain fetch (no `api` helper): MP's public endpoint must not
+// receive our JWT.
+export interface CardTokenInput {
+  cardNumber: string // digits only
+  cardholderName: string
+  expirationMonth: number
+  expirationYear: number // 4-digit
+  securityCode: string
+  cpf: string // digits only
+}
+
+export async function createCardToken(publicKey: string, card: CardTokenInput): Promise<string> {
+  let res: Response
+  try {
+    res = await fetch(
+      `https://api.mercadopago.com/v1/card_tokens?public_key=${encodeURIComponent(publicKey)}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          card_number: card.cardNumber,
+          security_code: card.securityCode,
+          expiration_month: card.expirationMonth,
+          expiration_year: card.expirationYear,
+          cardholder: {
+            name: card.cardholderName,
+            identification: { type: 'CPF', number: card.cpf },
+          },
+        }),
+        signal: AbortSignal.timeout(15000),
+      }
+    )
+  } catch {
+    throw new Error('Falha de conexão. Verifique sua internet e tente novamente.')
+  }
+
+  const data: any = await res.json().catch(() => null)
+  if (!res.ok || !data?.id) {
+    // Never surface Mercado Pago's raw error payload to the user.
+    throw new Error('Não foi possível validar o cartão. Confira os dados e tente novamente.')
+  }
+  return String(data.id)
+}
+
 // Payment config
 export const paymentConfigApi = {
   get: () => api.get<any>('/tenant/payment-config'),

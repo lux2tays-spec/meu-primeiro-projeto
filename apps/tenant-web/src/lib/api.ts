@@ -172,6 +172,8 @@ export const affiliateApi = {
 
 export const subscriptionApi = {
   plans: () => api.get<any[]>('/subscription/plans'),
-  checkout: (plan: string) => api.post<{ init_point: string }>('/subscription/checkout', { plan }),
+  paymentInfo: () => api.get<{ available: boolean; public_key: string | null }>('/subscription/payment-info'),
+  checkout: (plan: string, cardTokenId?: string) =>
+    api.post<{ status?: string; init_point?: string }>('/subscription/checkout', { plan, card_token_id: cardTokenId }),
   me: () => api.get<any>('/subscription/me'),
 }
