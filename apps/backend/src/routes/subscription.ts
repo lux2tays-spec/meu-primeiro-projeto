@@ -31,9 +31,15 @@ export const subscriptionRoutes: FastifyPluginAsync = async (app) => {
     if (!planRow) return reply.status(404).send({ error: 'Plano não encontrado' })
     if (planRow.price_cents <= 0) return reply.status(400).send({ error: 'Este plano é gratuito e não requer pagamento' })
 
+    // Payment availability is a PLATFORM-side concern (the platform owner's
+    // Mercado Pago config). The tenant can't fix it and must never see the
+    // technical reason — return a generic, friendly message and log the detail.
+    const UNAVAILABLE_MSG = 'As assinaturas estão temporariamente indisponíveis. Tente novamente mais tarde ou fale com o suporte.'
+
     const cfg = await getPaymentConfig()
     if (cfg.provider !== 'mercadopago' || !cfg.mp_access_token) {
-      return reply.status(503).send({ error: 'Pagamentos ainda não foram configurados pelo administrador.' })
+      request.log.error({ tenant_id }, 'checkout blocked: platform payment provider not configured')
+      return reply.status(503).send({ error: UNAVAILABLE_MSG, detail: 'payment_not_configured' })
     }
 
     // Mercado Pago rejects non-HTTPS back_url ("Invalid value for back_url"), so
@@ -41,9 +47,7 @@ export const subscriptionRoutes: FastifyPluginAsync = async (app) => {
     const backUrl = (cfg.back_url ?? '').trim()
     if (!backUrl.startsWith('https://')) {
       request.log.error({ tenant_id, back_url: backUrl }, 'checkout blocked: payment back_url missing or not HTTPS')
-      return reply.status(503).send({
-        error: 'Pagamentos não configurados: defina uma URL de retorno HTTPS no painel de Pagamentos.',
-      })
+      return reply.status(503).send({ error: UNAVAILABLE_MSG, detail: 'back_url_not_https' })
     }
 
     const { rows: [user] } = await db.query('SELECT email FROM users WHERE id = $1', [user_id])
