@@ -6,6 +6,7 @@ import * as SplashScreen from 'expo-splash-screen'
 import { useAuthStore } from '@/lib/store'
 import { StatusBar } from 'expo-status-bar'
 import { Toast } from '@/components/ui/Toast'
+import { ErrorBoundary } from '@/components/ErrorBoundary'
 
 if (Platform.OS !== 'web') {
   SplashScreen.preventAutoHideAsync()
@@ -31,15 +32,17 @@ export default function RootLayout() {
 
   return (
     <QueryClientProvider client={queryClient}>
-      <View style={{ flex: 1 }}>
-        <StatusBar style="dark" />
-        <Stack screenOptions={{ headerShown: false }}>
-          <Stack.Screen name="(auth)" />
-          <Stack.Screen name="(app)" />
-          <Stack.Screen name="onboarding" />
-        </Stack>
-        <Toast />
-      </View>
+      <ErrorBoundary>
+        <View style={{ flex: 1 }}>
+          <StatusBar style="dark" />
+          <Stack screenOptions={{ headerShown: false }}>
+            <Stack.Screen name="(auth)" />
+            <Stack.Screen name="(app)" />
+            <Stack.Screen name="onboarding" />
+          </Stack>
+          <Toast />
+        </View>
+      </ErrorBoundary>
     </QueryClientProvider>
   )
 }
