@@ -24,6 +24,106 @@ const REMINDER_OPTIONS = [
   { label: '90 dias', value: 90 },
 ]
 
+const inputCls = 'w-full h-10 px-3 rounded-xl border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary'
+
+// NOTE: must live at module scope. If defined inside ServicesPage, a new component
+// type is created on every render, so React remounts the fields on each keystroke
+// and the input loses focus.
+function FormFields({ form, setForm, professionals }: {
+  form: FormState
+  setForm: React.Dispatch<React.SetStateAction<FormState>>
+  professionals: any[]
+}) {
+  function togglePro(id: string) {
+    setForm((f) => ({
+      ...f,
+      professional_ids: f.professional_ids.includes(id)
+        ? f.professional_ids.filter((x) => x !== id)
+        : [...f.professional_ids, id],
+    }))
+  }
+
+  return (
+    <div className="space-y-4 mt-3">
+      <div className="grid grid-cols-2 gap-3">
+        <div className="col-span-2">
+          <label className="block text-xs font-medium text-gray-600 mb-1">Nome do serviço *</label>
+          <input value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
+            className={inputCls} placeholder="Limpeza de pele" required />
+        </div>
+        <div className="col-span-2">
+          <label className="block text-xs font-medium text-gray-600 mb-1">Descrição (opcional)</label>
+          <input value={form.description} onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))}
+            className={inputCls} placeholder="Descrição do serviço" />
+        </div>
+        <div>
+          <label className="block text-xs font-medium text-gray-600 mb-1">Duração (min) *</label>
+          <input type="number" value={form.duration_minutes}
+            onChange={(e) => setForm((f) => ({ ...f, duration_minutes: Number(e.target.value) }))}
+            className={inputCls} min={15} step={15} />
+        </div>
+        <div>
+          <label className="block text-xs font-medium text-gray-600 mb-1">Preço (R$) *</label>
+          <input type="number" value={form.price}
+            onChange={(e) => setForm((f) => ({ ...f, price: Number(e.target.value) }))}
+            className={inputCls} min={0} step={0.01} />
+        </div>
+      </div>
+
+      {/* Período de lembrete */}
+      <div>
+        <label className="block text-xs font-medium text-gray-600 mb-1">Período para lembrar os clientes</label>
+        <p className="text-xs text-gray-400 mb-2">
+          O cliente receberá uma mensagem via WhatsApp após esse período sugerindo agendar novamente.
+        </p>
+        <div className="flex flex-wrap gap-2">
+          {REMINDER_OPTIONS.map((opt) => {
+            const sel = form.reminder_days === opt.value
+            return (
+              <button key={String(opt.value)} type="button"
+                onClick={() => setForm((f) => ({ ...f, reminder_days: opt.value }))}
+                className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors ${
+                  sel
+                    ? 'bg-amber-500 text-white border-amber-500'
+                    : 'bg-white text-gray-600 border-gray-200 hover:border-amber-400 hover:text-amber-600'
+                }`}>
+                {opt.label}
+              </button>
+            )
+          })}
+        </div>
+      </div>
+
+      {/* Profissionais */}
+      <div>
+        <label className="block text-xs font-medium text-gray-600 mb-2">Profissionais que realizam este serviço</label>
+        {professionals.length === 0 ? (
+          <p className="text-xs text-gray-400 italic">
+            Nenhum profissional cadastrado ainda. Vá em{' '}
+            <a href="/settings/staff" className="text-primary underline">Colaboradores</a> e habilite alguém para prestar serviços.
+          </p>
+        ) : (
+          <div className="flex flex-wrap gap-2">
+            {professionals.map((p) => {
+              const sel = form.professional_ids.includes(p.id)
+              return (
+                <button key={p.id} type="button" onClick={() => togglePro(p.id)}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors ${
+                    sel
+                      ? 'bg-primary text-white border-primary'
+                      : 'bg-white text-gray-600 border-gray-200 hover:border-primary hover:text-primary'
+                  }`}>
+                  {p.name}
+                </button>
+              )
+            })}
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
 export default function ServicesPage() {
   const qc = useQueryClient()
   const { data: services = [], isLoading } = useQuery({ queryKey: ['services'], queryFn: tenantApi.services })
@@ -82,97 +182,6 @@ export default function ServicesPage() {
     })
   }
 
-  function togglePro(id: string) {
-    setForm((f) => ({
-      ...f,
-      professional_ids: f.professional_ids.includes(id)
-        ? f.professional_ids.filter((x) => x !== id)
-        : [...f.professional_ids, id],
-    }))
-  }
-
-  const inputCls = 'w-full h-10 px-3 rounded-xl border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary'
-
-  const FormFields = () => (
-    <div className="space-y-4 mt-3">
-      <div className="grid grid-cols-2 gap-3">
-        <div className="col-span-2">
-          <label className="block text-xs font-medium text-gray-600 mb-1">Nome do serviço *</label>
-          <input value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
-            className={inputCls} placeholder="Limpeza de pele" required />
-        </div>
-        <div className="col-span-2">
-          <label className="block text-xs font-medium text-gray-600 mb-1">Descrição (opcional)</label>
-          <input value={form.description} onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))}
-            className={inputCls} placeholder="Descrição do serviço" />
-        </div>
-        <div>
-          <label className="block text-xs font-medium text-gray-600 mb-1">Duração (min) *</label>
-          <input type="number" value={form.duration_minutes}
-            onChange={(e) => setForm((f) => ({ ...f, duration_minutes: Number(e.target.value) }))}
-            className={inputCls} min={15} step={15} />
-        </div>
-        <div>
-          <label className="block text-xs font-medium text-gray-600 mb-1">Preço (R$) *</label>
-          <input type="number" value={form.price}
-            onChange={(e) => setForm((f) => ({ ...f, price: Number(e.target.value) }))}
-            className={inputCls} min={0} step={0.01} />
-        </div>
-      </div>
-
-      {/* Período de lembrete */}
-      <div>
-        <label className="block text-xs font-medium text-gray-600 mb-1">Período para lembrar os clientes</label>
-        <p className="text-xs text-gray-400 mb-2">
-          O cliente receberá uma mensagem via WhatsApp após esse período sugerindo agendar novamente.
-        </p>
-        <div className="flex flex-wrap gap-2">
-          {REMINDER_OPTIONS.map((opt) => {
-            const sel = form.reminder_days === opt.value
-            return (
-              <button key={String(opt.value)} type="button"
-                onClick={() => setForm((f) => ({ ...f, reminder_days: opt.value }))}
-                className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors ${
-                  sel
-                    ? 'bg-amber-500 text-white border-amber-500'
-                    : 'bg-white text-gray-600 border-gray-200 hover:border-amber-400 hover:text-amber-600'
-                }`}>
-                {opt.label}
-              </button>
-            )
-          })}
-        </div>
-      </div>
-
-      {/* Profissionais */}
-      <div>
-        <label className="block text-xs font-medium text-gray-600 mb-2">Profissionais que realizam este serviço</label>
-        {(professionals as any[]).length === 0 ? (
-          <p className="text-xs text-gray-400 italic">
-            Nenhum profissional cadastrado ainda. Vá em{' '}
-            <a href="/settings/staff" className="text-primary underline">Colaboradores</a> e habilite alguém para prestar serviços.
-          </p>
-        ) : (
-          <div className="flex flex-wrap gap-2">
-            {(professionals as any[]).map((p) => {
-              const sel = form.professional_ids.includes(p.id)
-              return (
-                <button key={p.id} type="button" onClick={() => togglePro(p.id)}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors ${
-                    sel
-                      ? 'bg-primary text-white border-primary'
-                      : 'bg-white text-gray-600 border-gray-200 hover:border-primary hover:text-primary'
-                  }`}>
-                  {p.name}
-                </button>
-              )
-            })}
-          </div>
-        )}
-      </div>
-    </div>
-  )
-
   return (
     <div className="max-w-2xl space-y-6">
       <div className="flex items-center justify-between">
@@ -194,7 +203,7 @@ export default function ServicesPage() {
       {showForm && !editing && (
         <div className="bg-white rounded-2xl p-5 border border-primary/30 shadow-sm">
           <p className="font-semibold text-gray-900 text-sm">Novo serviço</p>
-          <FormFields />
+          <FormFields form={form} setForm={setForm} professionals={professionals as any[]} />
           {error && <p className="text-red-500 text-xs mt-2">{error}</p>}
           <div className="flex gap-2 mt-4">
             <button onClick={() => createMutation.mutate(form)} disabled={createMutation.isPending}
@@ -222,7 +231,7 @@ export default function ServicesPage() {
               {editing?.id === s.id ? (
                 <>
                   <p className="font-semibold text-gray-900 text-sm mb-1">Editando: {s.name}</p>
-                  <FormFields />
+                  <FormFields form={form} setForm={setForm} professionals={professionals as any[]} />
                   {error && <p className="text-red-500 text-xs mt-2">{error}</p>}
                   <div className="flex gap-2 mt-4">
                     <button onClick={() => updateMutation.mutate({ id: s.id, data: form })} disabled={updateMutation.isPending}

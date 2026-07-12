@@ -38,6 +38,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   }, [router])
 
   const { data: tenant } = useQuery({ queryKey: ['tenant'], queryFn: tenantApi.me, enabled: ready })
+  const { data: me } = useQuery({ queryKey: ['auth-me'], queryFn: authApi.me, enabled: ready })
 
   function logout() {
     clearToken()
@@ -144,10 +145,11 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         <div className="p-4 border-t border-white/10">
           <div className="flex items-center gap-3 mb-3">
             <div className="w-8 h-8 rounded-full bg-primary/30 flex items-center justify-center">
-              <span className="text-primary text-xs font-bold">{payload?.role?.[0]?.toUpperCase() ?? 'U'}</span>
+              <span className="text-primary text-xs font-bold">{(me?.name ?? payload?.role)?.[0]?.toUpperCase() ?? 'U'}</span>
             </div>
             <div className="flex-1 min-w-0">
-              <p className="text-white text-xs font-medium truncate">{payload?.role ?? 'user'}</p>
+              <p className="text-white text-xs font-medium truncate">{me?.name ?? payload?.role ?? 'user'}</p>
+              <p className="text-gray-400 text-[11px] truncate">{me?.role ?? payload?.role ?? ''}</p>
             </div>
           </div>
           <button

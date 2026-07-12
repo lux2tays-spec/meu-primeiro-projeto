@@ -66,6 +66,7 @@ export const authApi = {
   googleAuth: (data: { id_token: string; business_name?: string; phone?: string; referral_code?: string }) =>
     api.post<{ token: string; tenant_id: string; is_new: boolean }>('/auth/google', data),
   deleteAccount: () => api.delete<{ deleted: boolean }>('/auth/account'),
+  me: () => api.get<{ id: string; name: string; email: string; role: string }>('/auth/me'),
 }
 
 export const tenantApi = {

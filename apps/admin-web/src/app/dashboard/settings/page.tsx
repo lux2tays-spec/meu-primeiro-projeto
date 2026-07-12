@@ -23,12 +23,12 @@ export default function SettingsPage() {
     <div className="p-8 space-y-6">
       <div>
         <h1 className="text-2xl font-bold text-gray-900">Configurações Gerais da Plataforma</h1>
-        <p className="text-gray-500 text-sm mt-1">E-mails, IA e gestão de planos</p>
+        <p className="text-gray-500 text-sm mt-1">E-mails e gestão de planos (a configuração de IA fica em <strong>IA &amp; Custos</strong>)</p>
       </div>
 
       {/* Tabs */}
       <div className="flex gap-1 bg-gray-100 rounded-xl p-1 w-fit">
-        {([['email', '📧 E-mails'], ['ai', '🤖 IA'], ['plans', '📦 Planos']] as [Tab, string][]).map(([key, label]) => (
+        {([['email', '📧 E-mails'], ['plans', '📦 Planos']] as [Tab, string][]).map(([key, label]) => (
           <button key={key} onClick={() => setTab(key)}
             className={`px-5 py-2 rounded-lg text-sm font-medium transition-colors ${tab === key ? 'bg-white shadow-sm text-gray-900' : 'text-gray-500 hover:text-gray-700'}`}>
             {label}
@@ -37,7 +37,6 @@ export default function SettingsPage() {
       </div>
 
       {tab === 'email' && <EmailTab />}
-      {tab === 'ai'    && <AITab />}
       {tab === 'plans' && <PlansTab />}
     </div>
   )

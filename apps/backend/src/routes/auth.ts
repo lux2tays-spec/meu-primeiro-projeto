@@ -191,6 +191,28 @@ export const authRoutes: FastifyPluginAsync = async (app) => {
     return reply.send({ token })
   })
 
+  // ── Current user profile ─────────────────────────────────────────────────────
+  // The JWT only carries user_id/tenant_id/role; clients call this to display the
+  // logged-in user's name/email. Authenticated (unlike the other routes here).
+  app.get('/me', {
+    preHandler: [(app as any).authenticate],
+  }, async (request, reply) => {
+    const { user_id, tenant_id, role } = request.user
+
+    const { rows: [user] } = await db.query(
+      'SELECT id, name, email FROM users WHERE id = $1',
+      [user_id]
+    )
+    if (!user) return reply.status(404).send({ error: 'Usuário não encontrado' })
+
+    const { rows: [userRole] } = await db.query(
+      'SELECT role FROM user_roles WHERE user_id = $1 AND tenant_id = $2',
+      [user_id, tenant_id]
+    )
+
+    return reply.send({ id: user.id, name: user.name, email: user.email, role: userRole?.role ?? role })
+  })
+
   // ── Account deletion (required by Apple 5.1.1(v) and Google Play) ────────────
   // Owner deletes the whole business (cascades customers, appointments, messages,
   // conversations, WhatsApp instance, tokens, subscription). Staff removes only

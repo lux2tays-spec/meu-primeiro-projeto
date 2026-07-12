@@ -48,6 +48,8 @@ function ModelConfig() {
   const [rate, setRate] = useState(6)
   const [caps, setCaps] = useState<Record<string, number>>({})
   const [apiKey, setApiKey] = useState('')
+  const [provider, setProvider] = useState('anthropic')
+  const [baseUrl, setBaseUrl] = useState('')
 
   useEffect(() => {
     const cfg = settings?.ai_config
@@ -57,12 +59,14 @@ function ModelConfig() {
     setRate(Number(cfg.usd_brl_rate ?? 6))
     setCaps(cfg.caps ?? {})
     setApiKey(cfg.api_key || '')
+    setProvider(cfg.provider || 'anthropic')
+    setBaseUrl(cfg.base_url || '')
   }, [settings])
 
   const mutation = useMutation({
     mutationFn: () => {
       const base = settings?.ai_config ?? {}
-      const common = { api_key: apiKey, usd_brl_rate: rate, caps }
+      const common = { provider, api_key: apiKey, base_url: baseUrl, usd_brl_rate: rate, caps }
       const value = sel === 'hybrid'
         ? { ...base, ...common, mode: 'hybrid', model: closing, model_simple: simple }
         : { ...base, ...common, mode: 'single', model: sel }
@@ -81,11 +85,28 @@ function ModelConfig() {
       </div>
 
       <div>
-        <label className="block text-sm font-medium text-gray-700 mb-1">Chave da API (Anthropic)</label>
+        <label className="block text-sm font-medium text-gray-700 mb-1">Provedor</label>
+        <select value={provider} onChange={(e) => setProvider(e.target.value)}
+          className="w-full h-10 px-3 rounded-xl border border-gray-200 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-primary">
+          <option value="anthropic">Anthropic (Claude)</option>
+          <option value="custom">Custom / endpoint compatível (via URL base)</option>
+        </select>
+      </div>
+
+      <div>
+        <label className="block text-sm font-medium text-gray-700 mb-1">Chave da API</label>
         <input type="password" value={apiKey} onChange={(e) => setApiKey(e.target.value)} placeholder="sk-ant-..."
           className="w-full h-10 px-3 rounded-xl border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary" />
         <p className="text-xs text-gray-400 mt-1">Usada pelo bot para responder. Se ficar vazia, usa a variável de ambiente do servidor (ANTHROPIC_API_KEY).</p>
       </div>
+
+      {provider === 'custom' && (
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">URL base da API (endpoint compatível)</label>
+          <input value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} placeholder="https://seu-proxy.exemplo.com"
+            className="w-full h-10 px-3 rounded-xl border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary" />
+        </div>
+      )}
 
       <div>
         <label className="block text-sm font-medium text-gray-700 mb-1">Modelo / Modo</label>

@@ -36,8 +36,17 @@ export const subscriptionRoutes: FastifyPluginAsync = async (app) => {
       return reply.status(503).send({ error: 'Pagamentos ainda não foram configurados pelo administrador.' })
     }
 
+    // Mercado Pago rejects non-HTTPS back_url ("Invalid value for back_url"), so
+    // never fall back to a localhost/http default — that's a platform-config issue.
+    const backUrl = (cfg.back_url ?? '').trim()
+    if (!backUrl.startsWith('https://')) {
+      request.log.error({ tenant_id, back_url: backUrl }, 'checkout blocked: payment back_url missing or not HTTPS')
+      return reply.status(503).send({
+        error: 'Pagamentos não configurados: defina uma URL de retorno HTTPS no painel de Pagamentos.',
+      })
+    }
+
     const { rows: [user] } = await db.query('SELECT email FROM users WHERE id = $1', [user_id])
-    const backUrl = cfg.back_url || `${process.env.TENANT_WEB_URL ?? 'http://localhost:3002'}/settings/subscription`
 
     const result = await createPreapproval(cfg, {
       tenantId: tenant_id!,
@@ -49,7 +58,11 @@ export const subscriptionRoutes: FastifyPluginAsync = async (app) => {
     })
 
     if (!result.ok) {
-      return reply.status(502).send({ error: 'Não foi possível iniciar o pagamento. Tente novamente.' })
+      request.log.error({ tenant_id, plan: planRow.slug, reason: result.reason }, 'Mercado Pago checkout failed')
+      return reply.status(502).send({
+        error: 'Não foi possível iniciar o pagamento. Tente novamente.',
+        detail: result.reason, // MP failure reason, for platform-admin diagnosis
+      })
     }
     return reply.send({ init_point: result.init_point })
   })
