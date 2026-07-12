@@ -83,19 +83,28 @@ export const whatsappRoutes: FastifyPluginAsync = async (app) => {
     const liveStatus = await evolutionGetStatus(instance.instance_name)
     const state = liveStatus?.instance?.state ?? liveStatus?.state ?? 'unknown'
 
-    // Sync DB with Evolution state
-    if (state === 'open' && instance.status !== 'connected') {
-      await db.query(
-        `UPDATE whatsapp_instances SET status = 'connected' WHERE tenant_id = $1`,
-        [tenant_id]
-      )
-      instance.status = 'connected'
-    } else if ((state === 'close' || state === 'unknown') && instance.status === 'qr_pending') {
-      // Instance gone or disconnected — unblock the UI so user can reconnect
-      await db.query(
-        `UPDATE whatsapp_instances SET status = 'disconnected' WHERE tenant_id = $1`,
-        [tenant_id]
-      )
+    // Sync DB with Evolution's real state.
+    if (state === 'open') {
+      if (instance.status !== 'connected') {
+        await db.query(`UPDATE whatsapp_instances SET status = 'connected' WHERE tenant_id = $1`, [tenant_id])
+        instance.status = 'connected'
+      }
+    } else if (state === 'close') {
+      // Definitive: the WhatsApp session ended (phone unlinked) — finalize, even
+      // if we were 'connected'. 'unknown' (transient Evolution error) is NOT
+      // treated as a disconnect for a live connection.
+      if (instance.status !== 'disconnected') {
+        await db.query(
+          `UPDATE whatsapp_instances SET status = 'disconnected', phone_number = NULL WHERE tenant_id = $1`,
+          [tenant_id]
+        )
+        await redis.del(`whatsapp:qr:${tenant_id}`)
+        instance.status = 'disconnected'
+        instance.phone_number = null
+      }
+    } else if (state === 'unknown' && instance.status === 'qr_pending') {
+      // Only a pending (not yet live) connection is cleared on an unknown state.
+      await db.query(`UPDATE whatsapp_instances SET status = 'disconnected' WHERE tenant_id = $1`, [tenant_id])
       instance.status = 'disconnected'
     }
 

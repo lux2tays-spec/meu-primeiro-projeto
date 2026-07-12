@@ -23,6 +23,7 @@ import { financeiroRoutes } from './routes/financeiro'
 import { subscriptionRoutes } from './routes/subscription'
 import { startReminderJob } from './jobs/reminders'
 import { startSubscriptionEnforcer } from './jobs/subscriptionEnforcer'
+import { startWhatsappReconciler } from './jobs/whatsappReconciler'
 
 // Validate required environment variables at boot — fail fast before binding to port
 const REQUIRED_ENVS = ['JWT_SECRET', 'DATABASE_URL', 'REDIS_URL', 'ANTHROPIC_API_KEY'] as const
@@ -112,6 +113,7 @@ async function start() {
 
   startReminderJob()
   startSubscriptionEnforcer()
+  startWhatsappReconciler()
 }
 
 // Graceful shutdown — drain in-flight requests before exiting

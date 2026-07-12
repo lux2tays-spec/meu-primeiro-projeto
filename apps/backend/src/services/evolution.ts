@@ -80,6 +80,31 @@ export async function evolutionGetStatus(instanceName: string) {
   }
 }
 
+// Discriminated connection state — distinguishes a definitive state ("open"/"close")
+// from a transient Evolution error (so we never disconnect on a mere outage) and
+// from an instance that no longer exists in Evolution.
+export type ConnStateResult = { ok: true; state: string } | { ok: false; notFound: boolean }
+
+export async function evolutionConnectionState(instanceName: string): Promise<ConnStateResult> {
+  try {
+    const data = await evolutionRequest(`/instance/connectionState/${instanceName}`)
+    const state = data?.instance?.state ?? data?.state ?? 'unknown'
+    return { ok: true, state }
+  } catch (err: any) {
+    const msg = String(err?.message ?? '').toLowerCase()
+    const notFound = msg.includes('does not exist') || msg.includes('not found') ||
+      (msg.includes('not') && msg.includes('exist'))
+    return { ok: false, notFound }
+  }
+}
+
+// Logout ends the WhatsApp session (unlinks the device) but keeps the instance.
+export async function evolutionLogout(instanceName: string) {
+  try {
+    return await evolutionRequest(`/instance/logout/${instanceName}`, undefined, 'DELETE')
+  } catch { /* ignore */ }
+}
+
 export async function evolutionSend(instanceName: string, to: string, text: string) {
   return evolutionRequest(`/message/sendText/${instanceName}`, { number: to, text })
 }
