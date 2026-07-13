@@ -403,8 +403,9 @@ export async function runBot(params: {
   customerId?: string
   customerName?: string
   customerPhone?: string
+  image?: { base64: string; mediaType: string }
 }): Promise<string> {
-  const { tenantId, conversationId, customerMessage, customerId, customerName = '', customerPhone = '' } = params
+  const { tenantId, conversationId, customerMessage, customerId, customerName = '', customerPhone = '', image } = params
 
   // The webhook always resolves/creates the customer before dispatching; if this
   // ever regresses, surface it loudly — without customerId every action tool fails.
@@ -443,9 +444,18 @@ export async function runBot(params: {
     { type: 'text', text: volatile },
   ]
 
+  // When the customer sent an image (and the plan allows vision), attach it to
+  // the latest user turn so Claude can look at it and comment.
+  const latestUserContent: any = image
+    ? [
+        { type: 'image', source: { type: 'base64', media_type: image.mediaType || 'image/jpeg', data: image.base64 } },
+        { type: 'text', text: customerMessage || 'O cliente enviou esta imagem. Comente de forma útil e, se tiver dúvida técnica, diga que vai encaminhar a um especialista para confirmar.' },
+      ]
+    : customerMessage
+
   const messages: Anthropic.MessageParam[] = [
     ...history.map((m) => ({ role: m.role as 'user' | 'assistant', content: m.content })),
-    { role: 'user', content: customerMessage },
+    { role: 'user', content: latestUserContent },
   ]
 
   const execCtx: ExecCtx = { tenantId, customerId }

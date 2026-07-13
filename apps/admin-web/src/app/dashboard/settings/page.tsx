@@ -14,7 +14,7 @@ const EMAIL_TEMPLATE_LABELS: Record<string, string> = {
   subscription_confirmed: 'Assinatura confirmada',
 }
 
-const PLAN_BLANK = { slug: '', name: '', description: '', price_cents: 0, max_agendas: 1, max_users: 1, trial_days: 0, features: [], is_active: true, sort_order: 0 }
+const PLAN_BLANK = { slug: '', name: '', description: '', price_cents: 0, max_agendas: 1, max_users: 1, trial_days: 0, features: [], is_active: true, sort_order: 0, media_enabled: false }
 
 export default function SettingsPage() {
   const [tab, setTab] = useState<Tab>('email')
@@ -261,7 +261,7 @@ function PlansTab() {
     setForm(PLAN_BLANK); setFeaturesStr(''); setErr(''); setModal('create')
   }
   const openEdit = (p: any) => {
-    setForm({ ...p }); setFeaturesStr((p.features ?? []).join('\n')); setErr(''); setModal(p)
+    setForm({ ...p, media_enabled: !!p.media_enabled }); setFeaturesStr((p.features ?? []).join('\n')); setErr(''); setModal(p)
   }
 
   const createMutation = useMutation({
@@ -373,6 +373,14 @@ function PlansTab() {
             <label className="flex items-center gap-2 text-sm text-gray-600 cursor-pointer">
               <input type="checkbox" checked={form.is_active} onChange={(e) => setForm((f: any) => ({ ...f, is_active: e.target.checked }))} className="rounded" />
               Plano ativo (visível para novos usuários)
+            </label>
+
+            <label className="flex items-start gap-2 text-sm text-gray-600 cursor-pointer">
+              <input type="checkbox" checked={!!form.media_enabled} onChange={(e) => setForm((f: any) => ({ ...f, media_enabled: e.target.checked }))} className="rounded mt-0.5" />
+              <span>
+                Tratamento de áudio e imagem
+                <span className="block text-xs text-gray-400">Permite o bot transcrever áudios e analisar imagens recebidas</span>
+              </span>
             </label>
 
             <div className="flex gap-3 pt-2">

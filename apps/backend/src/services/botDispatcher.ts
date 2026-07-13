@@ -17,6 +17,8 @@ const DEDUP_TTL = 60 * 60 // 1h
 
 const timers = new Map<string, NodeJS.Timeout>()
 
+export type BotImage = { base64: string; mediaType: string }
+
 export type DispatchCtx = {
   tenantId: string
   conversationId: string
@@ -24,6 +26,7 @@ export type DispatchCtx = {
   customerName: string
   customerPhone: string
   instanceId: string
+  image?: BotImage
 }
 
 const latestCtx = new Map<string, DispatchCtx>()
@@ -36,10 +39,13 @@ export async function isDuplicateMessage(messageId?: string): Promise<boolean> {
 }
 
 /** Buffer an incoming message and (re)start the debounce window. */
-export async function scheduleReply(ctx: DispatchCtx, text: string): Promise<void> {
+export async function scheduleReply(ctx: DispatchCtx, text: string, image?: BotImage): Promise<void> {
   await redis.rpush(`bot:buf:${ctx.conversationId}`, text)
   await redis.expire(`bot:buf:${ctx.conversationId}`, 600)
-  latestCtx.set(ctx.conversationId, ctx)
+  // Preserve an image from an earlier message in the same debounce window if the
+  // newest message doesn't carry one.
+  const prev = latestCtx.get(ctx.conversationId)
+  latestCtx.set(ctx.conversationId, { ...ctx, image: image ?? prev?.image })
 
   const existing = timers.get(ctx.conversationId)
   if (existing) clearTimeout(existing)
@@ -69,6 +75,7 @@ async function flush(conversationId: string): Promise<void> {
     customerId: ctx.customerId,
     customerName: ctx.customerName,
     customerPhone: ctx.customerPhone,
+    image: ctx.image,
   })
 
   await db.query(

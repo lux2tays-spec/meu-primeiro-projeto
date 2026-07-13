@@ -13,6 +13,8 @@ export type AiConfig = {
   mode: 'single' | 'hybrid'
   usd_brl_rate: number
   caps: Record<string, number> // monthly USD cap per plan slug (0 = unlimited)
+  transcription_provider: string // 'openai' | 'groq' | '' — for audio transcription
+  transcription_api_key: string  // key for the transcription provider
 }
 
 const DEFAULTS: AiConfig = {
@@ -24,6 +26,8 @@ const DEFAULTS: AiConfig = {
   mode: 'single',
   usd_brl_rate: 6,
   caps: {},
+  transcription_provider: '',
+  transcription_api_key: '',
 }
 
 const CACHE_KEY = 'ai:config'

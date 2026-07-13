@@ -3,6 +3,7 @@ import { randomBytes } from 'crypto'
 import { db } from '../lib/db'
 import { hashPassword } from '../lib/password'
 import { invalidateAiConfig } from '../lib/botConfig'
+import { redis } from '../lib/redis'
 import { invalidatePaymentConfig } from '../lib/paymentConfig'
 
 export const rootRoutes: FastifyPluginAsync = async (app) => {
@@ -373,24 +374,28 @@ export const rootRoutes: FastifyPluginAsync = async (app) => {
   })
 
   app.patch<{ Params: { id: string } }>('/plans/:id', async (request, reply) => {
-    const { name, description, price_cents, max_agendas, max_users, trial_days, features, is_active, sort_order } = request.body as any
+    const { name, description, price_cents, max_agendas, max_users, trial_days, features, is_active, sort_order, media_enabled } = request.body as any
     const { rows: [plan] } = await db.query(
       `UPDATE platform_plans SET
-         name        = COALESCE($1, name),
-         description = COALESCE($2, description),
-         price_cents = COALESCE($3, price_cents),
-         max_agendas = COALESCE($4, max_agendas),
-         max_users   = COALESCE($5, max_users),
-         trial_days  = COALESCE($6, trial_days),
-         features    = COALESCE($7, features),
-         is_active   = COALESCE($8, is_active),
-         sort_order  = COALESCE($9, sort_order),
-         updated_at  = NOW()
+         name          = COALESCE($1, name),
+         description   = COALESCE($2, description),
+         price_cents   = COALESCE($3, price_cents),
+         max_agendas   = COALESCE($4, max_agendas),
+         max_users     = COALESCE($5, max_users),
+         trial_days    = COALESCE($6, trial_days),
+         features      = COALESCE($7, features),
+         is_active     = COALESCE($8, is_active),
+         sort_order    = COALESCE($9, sort_order),
+         media_enabled = COALESCE($11, media_enabled),
+         updated_at    = NOW()
        WHERE id = $10 RETURNING *`,
       [name, description, price_cents, max_agendas, max_users, trial_days,
-       features ? JSON.stringify(features) : null, is_active, sort_order, request.params.id]
+       features ? JSON.stringify(features) : null, is_active, sort_order, request.params.id,
+       typeof media_enabled === 'boolean' ? media_enabled : null]
     )
     if (!plan) return reply.status(404).send({ error: 'Plano não encontrado' })
+    // Plan capability changed → drop cached media flags so the bot re-reads it.
+    await redis.keys('tenant:media:*').then((keys) => keys.length && redis.del(...keys)).catch(() => {})
     return reply.send(plan)
   })
 

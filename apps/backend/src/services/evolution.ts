@@ -109,6 +109,27 @@ export async function evolutionSend(instanceName: string, to: string, text: stri
   return evolutionRequest(`/message/sendText/${instanceName}`, { number: to, text })
 }
 
+// Fetches a media message (image/audio) as base64. Used when the webhook payload
+// doesn't already carry the base64 (webhookBase64). Returns { base64, mimetype }
+// or null on failure.
+export async function evolutionGetMediaBase64(
+  instanceName: string,
+  messageKey: unknown
+): Promise<{ base64: string; mimetype: string } | null> {
+  try {
+    const res = await evolutionRequest(
+      `/chat/getBase64FromMediaMessage/${instanceName}`,
+      { message: { key: messageKey } }
+    )
+    const base64 = res?.base64 ?? res?.media ?? null
+    if (!base64) return null
+    return { base64, mimetype: res?.mimetype ?? res?.mimeType ?? '' }
+  } catch (err) {
+    console.error('[evolution] getBase64FromMediaMessage falhou:', err)
+    return null
+  }
+}
+
 export async function evolutionDeleteInstance(instanceName: string) {
   try {
     return await evolutionRequest(`/instance/delete/${instanceName}`, {}, 'DELETE')

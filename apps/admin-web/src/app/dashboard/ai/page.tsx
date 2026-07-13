@@ -50,6 +50,8 @@ function ModelConfig() {
   const [apiKey, setApiKey] = useState('')
   const [provider, setProvider] = useState('anthropic')
   const [baseUrl, setBaseUrl] = useState('')
+  const [transcriptionProvider, setTranscriptionProvider] = useState('')
+  const [transcriptionApiKey, setTranscriptionApiKey] = useState('')
 
   useEffect(() => {
     const cfg = settings?.ai_config
@@ -61,12 +63,14 @@ function ModelConfig() {
     setApiKey(cfg.api_key || '')
     setProvider(cfg.provider || 'anthropic')
     setBaseUrl(cfg.base_url || '')
+    setTranscriptionProvider(cfg.transcription_provider || '')
+    setTranscriptionApiKey(cfg.transcription_api_key || '')
   }, [settings])
 
   const mutation = useMutation({
     mutationFn: () => {
       const base = settings?.ai_config ?? {}
-      const common = { provider, api_key: apiKey, base_url: baseUrl, usd_brl_rate: rate, caps }
+      const common = { provider, api_key: apiKey, base_url: baseUrl, usd_brl_rate: rate, caps, transcription_provider: transcriptionProvider, transcription_api_key: transcriptionApiKey }
       const value = sel === 'hybrid'
         ? { ...base, ...common, mode: 'hybrid', model: closing, model_simple: simple }
         : { ...base, ...common, mode: 'single', model: sel }
@@ -140,6 +144,30 @@ function ModelConfig() {
           <label className="block text-sm font-medium text-gray-700 mb-1">Cotação USD → BRL (para exibir custos)</label>
           <input type="number" step="0.01" value={rate} onChange={(e) => setRate(Number(e.target.value))}
             className="w-full h-10 px-3 rounded-xl border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary" />
+        </div>
+      </div>
+
+      <div className="border-t border-gray-100 pt-5 space-y-4">
+        <div>
+          <h3 className="font-semibold text-gray-900 text-sm">Transcrição de áudio (Whisper)</h3>
+          <p className="text-xs text-gray-500 mt-1">Usada quando o plano do tenant tem "Tratamento de áudio e imagem" habilitado.</p>
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Provedor de transcrição</label>
+            <select value={transcriptionProvider} onChange={(e) => setTranscriptionProvider(e.target.value)}
+              className="w-full h-10 px-3 rounded-xl border border-gray-200 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-primary">
+              <option value="">Desativado</option>
+              <option value="openai">OpenAI</option>
+              <option value="groq">Groq</option>
+            </select>
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Chave de API da transcrição</label>
+            <input type="password" value={transcriptionApiKey} onChange={(e) => setTranscriptionApiKey(e.target.value)} placeholder="sk-... / gsk_..."
+              className="w-full h-10 px-3 rounded-xl border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary" />
+            <p className="text-xs text-gray-400 mt-1">Chave da OpenAI (whisper-1) ou Groq (whisper-large-v3). Necessária para transcrever áudios recebidos.</p>
+          </div>
         </div>
       </div>
 

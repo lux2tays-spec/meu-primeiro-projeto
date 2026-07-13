@@ -5,6 +5,9 @@ import { redis, QR_CODE_TTL } from '../lib/redis'
 import { isDuplicateMessage, scheduleReply } from '../services/botDispatcher'
 import { getPaymentConfig } from '../lib/paymentConfig'
 import { applyPreapproval } from '../lib/subscriptionState'
+import { tenantMediaEnabled } from '../lib/planMedia'
+import { transcribeAudio } from '../lib/transcription'
+import { evolutionGetMediaBase64, evolutionSend } from '../services/evolution'
 
 // Validate the shared secret Evolution must send with every webhook.
 // Enabled only when EVOLUTION_WEBHOOK_SECRET is set — so existing instances keep
@@ -70,14 +73,23 @@ export const webhookRoutes: FastifyPluginAsync = async (app) => {
         return reply.send({ ok: true })
       }
 
-      // Only process text messages from customers (not echo)
+      // Ignore our own echoes and non-message events.
       if (body?.data?.key?.fromMe) return reply.send({ ok: true })
       if (body?.event !== 'messages.upsert') return reply.send({ ok: true })
 
       const customerPhone = body.data?.key?.remoteJid?.replace('@s.whatsapp.net', '')
-      const messageText = body.data?.message?.conversation || body.data?.message?.extendedTextMessage?.text
       const messageId = body.data?.key?.id as string | undefined
-      if (!customerPhone || !messageText) return reply.send({ ok: true })
+      const msg = body.data?.message ?? {}
+
+      // Classify the message. Text is always handled; image/audio only when the
+      // tenant's plan allows (checked below, after the tenant is resolved).
+      const textContent = msg.conversation || msg.extendedTextMessage?.text || ''
+      const imageMsg = msg.imageMessage
+      const audioMsg = msg.audioMessage || msg.pttMessage
+      const kind: 'text' | 'image' | 'audio' | 'other' =
+        textContent ? 'text' : imageMsg ? 'image' : audioMsg ? 'audio' : 'other'
+
+      if (!customerPhone || kind === 'other') return reply.send({ ok: true })
 
       // De-duplicate — Evolution re-delivers webhooks; never process the same message twice
       if (await isDuplicateMessage(messageId)) return reply.send({ ok: true, dedup: true })
@@ -131,11 +143,52 @@ export const webhookRoutes: FastifyPluginAsync = async (app) => {
         )
       ).rows[0].id
 
+      // Resolve the message text + optional image the bot will actually receive.
+      // For audio/image, gate on the plan and download/transcribe as needed.
+      let finalText = textContent
+      let botImage: { base64: string; mediaType: string } | undefined
+
+      if (kind === 'image' || kind === 'audio') {
+        if (!(await tenantMediaEnabled(tenantId))) {
+          await evolutionSend(instanceId, customerPhone,
+            kind === 'audio'
+              ? 'Recebi seu áudio! 😊 Por aqui consigo te ajudar melhor por texto — pode me escrever?'
+              : 'Recebi sua imagem! 😊 Me conta por texto o que você precisa que eu já te ajudo.')
+          return reply.send({ ok: true, media: 'disabled' })
+        }
+
+        // webhookBase64 may already carry the media; otherwise fetch it.
+        const inlineB64 = (msg as any).base64 || body.data?.base64
+        const media = inlineB64
+          ? { base64: inlineB64 as string, mimetype: (imageMsg?.mimetype || audioMsg?.mimetype || '') as string }
+          : await evolutionGetMediaBase64(instanceId, body.data?.key)
+
+        if (!media?.base64) {
+          await evolutionSend(instanceId, customerPhone, 'Não consegui abrir seu arquivo 😕 Pode me mandar por texto o que você precisa?')
+          return reply.send({ ok: true, media: 'download_failed' })
+        }
+        // Evolution may return a data URI; Claude and Buffer need raw base64.
+        const rawB64 = media.base64.replace(/^data:[^;]+;base64,/, '')
+
+        if (kind === 'image') {
+          botImage = { base64: rawB64, mediaType: media.mimetype || imageMsg?.mimetype || 'image/jpeg' }
+          finalText = imageMsg?.caption || ''
+        } else {
+          const transcript = await transcribeAudio(rawB64, media.mimetype || audioMsg?.mimetype || 'audio/ogg')
+          if (!transcript) {
+            await evolutionSend(instanceId, customerPhone, 'Recebi seu áudio, mas não consegui entender agora 😊 Pode me mandar por texto?')
+            return reply.send({ ok: true, media: 'transcribe_failed' })
+          }
+          finalText = transcript
+        }
+      }
+
       // Buffer + debounce: reply ONCE after a short quiet window (runs async).
       // Respond 200 immediately so Evolution never times out and retries.
       await scheduleReply(
         { tenantId, conversationId, customerId: customer.id, customerName: customer.name, customerPhone: customer.phone, instanceId },
-        messageText
+        finalText,
+        botImage
       )
       return reply.send({ ok: true })
   }
