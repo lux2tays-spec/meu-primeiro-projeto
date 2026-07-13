@@ -8,6 +8,7 @@ import {
 } from './scheduling'
 import { getAiConfig, resolveModel } from '../lib/botConfig'
 import { recordUsage, monthlySpend } from '../lib/aiUsage'
+import { sendInviteForAppointment, sendInvitesForCustomerUpcoming } from './appointmentInvite'
 
 const TZ = 'America/Sao_Paulo'
 const MAX_TOOL_TURNS = 6
@@ -262,6 +263,11 @@ const TOOLS: Anthropic.Tool[] = [
     description: 'ÚNICA forma de cancelar o próximo agendamento do cliente. CHAME quando o cliente pedir para cancelar. Só confirme o cancelamento se retornar "ok": true.',
     input_schema: { type: 'object', properties: {} },
   },
+  {
+    name: 'send_appointment_invite',
+    description: 'Envia por e-mail um convite de calendário (.ics) dos agendamentos futuros do cliente, para ele adicionar na própria agenda. CHAME quando o cliente pedir um convite/invite ou lembrete na agenda dele por e-mail. Precisa que o e-mail do cliente esteja salvo (use save_customer_info antes se não tiver). Só diga que enviou se retornar "ok": true.',
+    input_schema: { type: 'object', properties: {} },
+  },
 ]
 
 type ExecCtx = { tenantId: string; customerId?: string }
@@ -358,6 +364,9 @@ async function runTool(name: string, input: any, ctx: ExecCtx): Promise<any> {
         if (res.reason === 'dia_bloqueado') return { error: 'dia_bloqueado', detalhe: 'Essa data está bloqueada (folga) — o agendamento NÃO foi feito; informe que essa data não está disponível e ofereça outra data.' }
         return { error: 'dados_invalidos' }
       }
+      // Auto-send the calendar invite if we already have the customer's email.
+      // Fire-and-forget: a mail hiccup must never fail the booking.
+      sendInviteForAppointment(tenantId, res.appointmentId).catch(() => {})
       return { ok: true, agendado: { service: service.name, professional: prof.professional.name, date: input.date, time: input.time } }
     }
 
@@ -365,6 +374,15 @@ async function runTool(name: string, input: any, ctx: ExecCtx): Promise<any> {
       if (!customerId) return { error: 'sem_cliente' }
       const res = await cancelUpcomingAppointment(tenantId, customerId)
       return res.ok ? { ok: true, cancelado: res.when } : { error: 'sem_agendamento' }
+    }
+
+    if (name === 'send_appointment_invite') {
+      if (!customerId) return { error: 'sem_cliente' }
+      const res = await sendInvitesForCustomerUpcoming(tenantId, customerId)
+      if (res.ok) return { ok: true, enviados: res.count, detalhe: 'Convite(s) de calendário enviado(s) ao e-mail do cliente.' }
+      if (res.reason === 'sem_email') return { error: 'sem_email', detalhe: 'O cliente não tem e-mail salvo — peça o e-mail e use save_customer_info antes de enviar o convite.' }
+      if (res.reason === 'sem_agendamento') return { error: 'sem_agendamento', detalhe: 'O cliente não tem agendamento futuro — não há convite para enviar. Ofereça agendar primeiro.' }
+      return { error: 'erro_envio', detalhe: 'Não foi possível enviar o convite agora — seja honesto: diga que não conseguiu enviar o convite e que ele receberá lembretes no WhatsApp antes do horário.' }
     }
 
     return { error: 'ferramenta_desconhecida' }
