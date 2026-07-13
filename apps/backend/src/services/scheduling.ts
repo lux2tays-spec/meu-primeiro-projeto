@@ -72,7 +72,23 @@ export async function resolveProfessional(
 
 export type SlotsResult =
   | { ok: true; slots: string[] }
-  | { ok: false; reason: 'sem_horario_config' | 'servico_invalido' | 'dia_bloqueado' }
+  | { ok: false; reason: 'servico_invalido' | 'dia_bloqueado' | 'sem_horario_config' }
+  // Business is closed on the requested weekday but open on others — carries the
+  // open weekday names so the bot can tell the customer which days it CAN book.
+  | { ok: false; reason: 'dia_fechado'; openDays: string[] }
+
+const WEEKDAY_PT = ['domingo', 'segunda', 'terça', 'quarta', 'quinta', 'sexta', 'sábado']
+
+/** Open weekday names (pt-BR) for this professional (or tenant-wide), sorted. */
+export async function getOpenWeekdays(tenantId: string, professionalId: string): Promise<string[]> {
+  const { rows } = await db.query(
+    `SELECT DISTINCT day_of_week FROM working_hours
+     WHERE tenant_id = $1 AND (professional_id = $2 OR professional_id IS NULL)
+     ORDER BY day_of_week`,
+    [tenantId, professionalId]
+  )
+  return rows.map((r: any) => WEEKDAY_PT[r.day_of_week]).filter(Boolean)
+}
 
 /** True when the date is blocked in days_off for this professional (or tenant-wide). */
 async function isDayOff(tenantId: string, professionalId: string, date: string): Promise<boolean> {
@@ -135,7 +151,14 @@ export async function findAvailableSlots(
     return { ok: false, reason: 'dia_bloqueado' }
   }
   if (hoursRes.rows.length === 0) {
-    console.error(`[scheduling] findAvailableSlots FALHOU: nenhum working_hours para professional=${professionalId} na data ${date} (tenant=${tenantId}) — agenda não configurada para esse dia`)
+    // No hours for THIS weekday. Distinguish "closed on this day" (business has
+    // hours on other days) from "agenda never configured at all".
+    const openDays = await getOpenWeekdays(tenantId, professionalId)
+    if (openDays.length > 0) {
+      console.warn(`[scheduling] findAvailableSlots: ${date} é dia fechado (tenant=${tenantId}); dias abertos: ${openDays.join(', ')}`)
+      return { ok: false, reason: 'dia_fechado', openDays }
+    }
+    console.error(`[scheduling] findAvailableSlots FALHOU: nenhum working_hours para professional=${professionalId} na data ${date} (tenant=${tenantId}) — agenda não configurada`)
     return { ok: false, reason: 'sem_horario_config' }
   }
   const duration = service.duration_minutes as number
@@ -173,6 +196,7 @@ function saoPauloTimestamp(date: string, time: string): string {
 export type BookResult =
   | { ok: true; appointmentId: string; startsAt: string }
   | { ok: false; reason: 'unavailable' | 'invalid' | 'sem_horario_config' | 'dia_bloqueado' }
+  | { ok: false; reason: 'dia_fechado'; openDays: string[] }
 
 /** Create an appointment for the bot (created_by = NULL). Rechecks conflicts. */
 export async function bookAppointment(params: {
@@ -211,6 +235,11 @@ export async function bookAppointment(params: {
     [tenantId, professionalId, date]
   )
   if (hours.length === 0) {
+    const openDays = await getOpenWeekdays(tenantId, professionalId)
+    if (openDays.length > 0) {
+      console.warn(`[scheduling] bookAppointment: ${date} é dia fechado (tenant=${tenantId}); dias abertos: ${openDays.join(', ')}`)
+      return { ok: false, reason: 'dia_fechado', openDays }
+    }
     console.error(`[scheduling] bookAppointment FALHOU: nenhum working_hours para professional=${professionalId} em ${date} (tenant=${tenantId}) — horários de atendimento não configurados`)
     return { ok: false, reason: 'sem_horario_config' }
   }
