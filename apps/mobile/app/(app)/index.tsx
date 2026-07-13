@@ -9,7 +9,8 @@ import { Badge } from '@/components/ui/Badge'
 import { tenantApi, appointmentsApi } from '@/lib/api'
 import { colors, font, spacing } from '@/lib/theme'
 
-const today = new Date().toISOString().split('T')[0]
+const _now = new Date()
+const today = `${_now.getFullYear()}-${String(_now.getMonth() + 1).padStart(2, '0')}-${String(_now.getDate()).padStart(2, '0')}`
 
 export default function DashboardScreen() {
   const { data: tenant } = useQuery({ queryKey: ['tenant'], queryFn: tenantApi.me })

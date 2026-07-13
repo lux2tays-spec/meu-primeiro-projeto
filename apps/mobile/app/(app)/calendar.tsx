@@ -25,7 +25,9 @@ function getWeekDates(baseDate: Date) {
 }
 
 function toISO(d: Date) {
-  return d.toISOString().split('T')[0]
+  // Local date components — not toISOString() (UTC), which shifts the day when
+  // `d` carries an evening time in a negative-offset TZ (e.g. after 21h in Brazil).
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 }
 
 export default function CalendarScreen() {

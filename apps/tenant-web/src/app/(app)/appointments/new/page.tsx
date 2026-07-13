@@ -4,9 +4,15 @@ import { useQuery, useMutation } from '@tanstack/react-query'
 import { useRouter } from 'next/navigation'
 import { tenantApi, appointmentsApi } from '@/lib/api'
 
+// Local date (not UTC) so the default day doesn't jump ahead in the evening (BRT).
+function localToday() {
+  const d = new Date()
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
 export default function NewAppointmentPage() {
   const router = useRouter()
-  const [form, setForm] = useState({ customer_id: '', professional_id: '', service_id: '', date: new Date().toISOString().split('T')[0], slot: '', notes: '' })
+  const [form, setForm] = useState({ customer_id: '', professional_id: '', service_id: '', date: localToday(), slot: '', notes: '' })
   const [error, setError] = useState('')
 
   const { data: customers = [] } = useQuery({ queryKey: ['customers'], queryFn: () => tenantApi.customers() })

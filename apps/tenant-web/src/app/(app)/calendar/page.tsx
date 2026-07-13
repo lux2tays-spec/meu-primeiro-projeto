@@ -7,7 +7,13 @@ import { appointmentsApi } from '@/lib/api'
 const DAYS = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb']
 const MONTHS = ['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro']
 
-function toISO(d: Date) { return d.toISOString().split('T')[0] }
+// Use LOCAL date components — never toISOString() (UTC), which shifts the day
+// when `d` carries an evening time in a negative-offset timezone (e.g. after 21h
+// in Brazil, UTC is already tomorrow). The cell label uses d.getDate() (local),
+// so the query date must match it.
+function toISO(d: Date) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
 function getWeekDates(base: Date) {
   const start = new Date(base)
   start.setDate(base.getDate() - base.getDay())

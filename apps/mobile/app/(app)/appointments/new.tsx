@@ -34,7 +34,10 @@ const si = StyleSheet.create({
 
 const STEPS: Step[] = ['professional', 'service', 'customer', 'datetime', 'confirm']
 
-function toDateStr(d: Date) { return d.toISOString().split('T')[0] }
+function toDateStr(d: Date) {
+  // Local components, not UTC — avoids the evening off-by-one in Brazil (UTC-3).
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
 
 export default function NewAppointmentScreen() {
   const toast = useToast()
