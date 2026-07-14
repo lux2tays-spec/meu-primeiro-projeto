@@ -233,6 +233,7 @@ export const subscriptionApi = {
   checkout: (plan: string, cardTokenId: string) =>
     api.post<{ status?: string }>('/subscription/checkout', { plan, card_token_id: cardTokenId }),
   me: () => api.get<any>('/subscription/me'),
+  cancel: () => api.post<{ ok: boolean }>('/subscription/cancel', {}),
 }
 
 // Mercado Pago card tokenization (transparent checkout).

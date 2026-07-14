@@ -164,17 +164,40 @@ function CheckoutModal({ plan, onClose, onSuccess }: { plan: Plan; onClose: () =
 export default function SubscriptionPage() {
   const [checkoutPlan, setCheckoutPlan] = useState<Plan | null>(null)
   const [success, setSuccess] = useState(false)
+  const [cancelOpen, setCancelOpen] = useState(false)
+  const [cancelling, setCancelling] = useState(false)
+  const [cancelError, setCancelError] = useState('')
+  const [cancelled, setCancelled] = useState(false)
   const queryClient = useQueryClient()
   const { data: tenant } = useQuery({ queryKey: ['tenant'], queryFn: tenantApi.me })
   const { data: plans } = useQuery({ queryKey: ['sub-plans'], queryFn: subscriptionApi.plans })
 
   const trialExpired = tenant?.status === 'trial' && tenant?.trial_ends_at && new Date(tenant.trial_ends_at).getTime() < Date.now()
   const blocked = trialExpired || tenant?.status === 'suspended' || tenant?.status === 'cancelled'
+  const hasActivePaid = tenant?.status === 'active' && !!tenant?.plan && tenant.plan !== 'free'
 
   const handleSuccess = useCallback(() => {
     setCheckoutPlan(null)
     setSuccess(true)
+    setCancelled(false)
     queryClient.invalidateQueries({ queryKey: ['tenant'] })
+  }, [queryClient])
+
+  const handleCancelSubscription = useCallback(async () => {
+    setCancelling(true)
+    setCancelError('')
+    try {
+      await subscriptionApi.cancel()
+      setCancelOpen(false)
+      setCancelled(true)
+      setSuccess(false)
+      queryClient.invalidateQueries({ queryKey: ['tenant'] })
+    } catch (e: unknown) {
+      const msg = e instanceof Error && e.message ? e.message : ''
+      setCancelError(msg || 'Não foi possível cancelar agora. Tente novamente ou fale com o suporte.')
+    } finally {
+      setCancelling(false)
+    }
   }, [queryClient])
 
   return (
@@ -188,6 +211,16 @@ export default function SubscriptionPage() {
             <p className="text-green-700 text-sm mt-1">Seu plano já está ativo. Bom trabalho!</p>
           </div>
           <button onClick={() => setSuccess(false)} className="text-green-600 hover:text-green-800 text-lg leading-none" aria-label="Fechar">✕</button>
+        </div>
+      )}
+
+      {cancelled && (
+        <div className="bg-green-50 border-l-4 border-green-400 rounded-xl p-4 flex items-start justify-between gap-3">
+          <div>
+            <p className="text-green-800 font-medium text-sm">Assinatura cancelada</p>
+            <p className="text-green-700 text-sm mt-1">Sua conta voltou para o plano gratuito. Você pode assinar novamente quando quiser.</p>
+          </div>
+          <button onClick={() => setCancelled(false)} className="text-green-600 hover:text-green-800 text-lg leading-none" aria-label="Fechar">✕</button>
         </div>
       )}
 
@@ -249,7 +282,44 @@ export default function SubscriptionPage() {
         </div>
       </div>
 
+      {hasActivePaid && (
+        <div className="flex justify-center">
+          <button
+            onClick={() => { setCancelError(''); setCancelOpen(true) }}
+            className="text-red-500 hover:text-red-700 text-sm font-medium transition-colors">
+            Cancelar assinatura
+          </button>
+        </div>
+      )}
+
       <p className="text-gray-400 text-xs text-center">Pagamentos processados com segurança via Mercado Pago</p>
+
+      {cancelOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/30" onClick={() => { if (!cancelling) setCancelOpen(false) }} />
+          <div className="relative w-full max-w-md bg-white rounded-2xl shadow-2xl p-6 space-y-4">
+            <h2 className="text-lg font-bold text-gray-900">Cancelar assinatura?</h2>
+            <p className="text-gray-600 text-sm">
+              Sua assinatura será cancelada e sua conta voltará para o plano gratuito. Você pode assinar novamente quando quiser.
+            </p>
+            {cancelError && <div className="bg-red-50 text-red-700 rounded-xl px-4 py-3 text-sm">{cancelError}</div>}
+            <div className="flex gap-3">
+              <button
+                onClick={() => setCancelOpen(false)}
+                disabled={cancelling}
+                className="flex-1 h-10 bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-semibold rounded-xl transition-colors disabled:opacity-50">
+                Voltar
+              </button>
+              <button
+                onClick={handleCancelSubscription}
+                disabled={cancelling}
+                className="flex-1 h-10 bg-red-500 hover:bg-red-600 text-white text-sm font-semibold rounded-xl transition-colors disabled:opacity-50">
+                {cancelling ? 'Cancelando...' : 'Cancelar assinatura'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {checkoutPlan && (
         <CheckoutModal

@@ -3,6 +3,7 @@ import { z, ZodError } from 'zod'
 import { db } from '../lib/db'
 import { sendPasswordResetEmail, sendVerificationEmail } from '../lib/email'
 import { hashPassword, verifyPassword } from '../lib/password'
+import { bumpTokenVersion } from '../lib/tokenVersion'
 import crypto from 'node:crypto'
 
 const registerSchema = z.object({
@@ -141,7 +142,10 @@ export const authRoutes: FastifyPluginAsync = async (app) => {
       return reply.status(400).send({ error: 'Link expirado. Solicite um novo e-mail de verificação.' })
     }
 
-    await db.query('UPDATE users SET email_verified = TRUE WHERE id = $1', [record.user_id])
+    const { rows: [verifiedUser] } = await db.query(
+      'UPDATE users SET email_verified = TRUE WHERE id = $1 RETURNING token_version',
+      [record.user_id]
+    )
     await db.query('DELETE FROM email_verifications WHERE token = $1', [token])
 
     const { rows: [userRole] } = await db.query(
@@ -150,7 +154,7 @@ export const authRoutes: FastifyPluginAsync = async (app) => {
     )
 
     const jwtToken = app.jwt.sign(
-      { user_id: record.user_id, tenant_id: userRole.tenant_id, role: userRole.role },
+      { user_id: record.user_id, tenant_id: userRole.tenant_id, role: userRole.role, tv: verifiedUser?.token_version ?? 0 },
       { expiresIn: '7d' }
     )
 
@@ -171,7 +175,7 @@ export const authRoutes: FastifyPluginAsync = async (app) => {
     }
 
     const { rows: [user] } = await db.query(
-      'SELECT id, password_hash, email_verified FROM users WHERE email = $1',
+      'SELECT id, password_hash, email_verified, token_version FROM users WHERE email = $1',
       [body.email]
     )
 
@@ -197,7 +201,7 @@ export const authRoutes: FastifyPluginAsync = async (app) => {
     )
 
     const token = app.jwt.sign(
-      { user_id: user.id, tenant_id: userRole?.tenant_id ?? null, role: userRole?.role ?? 'staff' },
+      { user_id: user.id, tenant_id: userRole?.tenant_id ?? null, role: userRole?.role ?? 'staff', tv: user.token_version ?? 0 },
       { expiresIn: '7d' }
     )
 
@@ -298,6 +302,9 @@ export const authRoutes: FastifyPluginAsync = async (app) => {
         'UPDATE password_reset_tokens SET used_at = NOW() WHERE user_id = $1 AND used_at IS NULL',
         [record.user_id]
       )
+
+      // Revoke every existing session: old JWTs die together with the old password
+      await bumpTokenVersion(record.user_id, client)
 
       await client.query('COMMIT')
     } catch (err) {

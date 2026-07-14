@@ -4,7 +4,6 @@ import {
   Modal, KeyboardAvoidingView, Platform, ActivityIndicator,
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
-import { useRouter } from 'expo-router'
 import { Ionicons } from '@expo/vector-icons'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Card } from '@/components/ui/Card'
@@ -55,7 +54,6 @@ const emptyCard = { number: '', name: '', expiry: '', cvv: '', cpf: '' }
 
 export default function SubscriptionScreen() {
   const queryClient = useQueryClient()
-  const router = useRouter()
   const toast = useToast()
 
   const { data: tenant } = useQuery({ queryKey: ['tenant'], queryFn: tenantApi.me })
@@ -66,6 +64,7 @@ export default function SubscriptionScreen() {
   const [card, setCard] = useState(emptyCard)
   const [errors, setErrors] = useState<CardErrors>({})
   const [submitting, setSubmitting] = useState(false)
+  const [cancelling, setCancelling] = useState(false)
 
   // Only fetched while the checkout modal is open — tells us whether the
   // platform accepts payments and gives us the MP public key for tokenization.
@@ -166,6 +165,34 @@ export default function SubscriptionScreen() {
     }
   }
 
+  async function handleCancelSubscription() {
+    setCancelling(true)
+    try {
+      await subscriptionApi.cancel()
+      queryClient.invalidateQueries({ queryKey: ['tenant'] })
+      toast.show('Assinatura cancelada', 'success')
+    } catch (e: any) {
+      // e.message já é a mensagem amigável do backend — nunca o erro cru do MP.
+      Alert.alert(
+        'Não foi possível cancelar',
+        e?.message || 'Não foi possível cancelar agora. Tente novamente ou fale com o suporte.'
+      )
+    } finally {
+      setCancelling(false)
+    }
+  }
+
+  function confirmCancelSubscription() {
+    Alert.alert(
+      'Cancelar assinatura',
+      'Sua assinatura será cancelada e sua conta voltará para o plano gratuito. Deseja continuar?',
+      [
+        { text: 'Voltar', style: 'cancel' },
+        { text: 'Cancelar assinatura', style: 'destructive', onPress: handleCancelSubscription },
+      ]
+    )
+  }
+
   return (
     <SafeAreaView style={styles.container} edges={[]}>
       <ScrollView contentContainerStyle={styles.content}>
@@ -231,23 +258,14 @@ export default function SubscriptionScreen() {
           )
         })}
 
-        {/* Cancel — o backend ainda não expõe cancelamento self-service, então
-            direcionamos para o suporte em vez de mostrar um botão sem ação. */}
-        {tenant?.plan !== 'free' && (
+        {/* Cancel — só aparece com assinatura paga ativa. Confirma, cancela no
+            Mercado Pago via backend e a conta volta para o plano gratuito. */}
+        {tenant?.status === 'active' && tenant?.plan !== 'free' && (
           <Button
             label="Cancelar assinatura"
             variant="ghost"
-            onPress={() => Alert.alert(
-              'Cancelar assinatura',
-              'O cancelamento é feito com a nossa equipe de suporte, sem burocracia. Você mantém o acesso até o final do período já pago.',
-              [
-                { text: 'Voltar', style: 'cancel' },
-                {
-                  text: 'Falar com o suporte',
-                  onPress: () => router.push('/(app)/settings/support'),
-                },
-              ]
-            )}
+            loading={cancelling}
+            onPress={confirmCancelSubscription}
           />
         )}
       </ScrollView>

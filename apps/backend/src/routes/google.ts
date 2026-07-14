@@ -24,7 +24,7 @@ export const googleRoutes: FastifyPluginAsync = async (app) => {
 
     // Find existing user by google_sub or email
     const { rows: [existing] } = await db.query(
-      'SELECT id FROM users WHERE google_sub = $1 OR email = $2 LIMIT 1',
+      'SELECT id, token_version FROM users WHERE google_sub = $1 OR email = $2 LIMIT 1',
       [googleSub, email]
     )
 
@@ -41,7 +41,7 @@ export const googleRoutes: FastifyPluginAsync = async (app) => {
       )
 
       const token = app.jwt.sign(
-        { user_id: existing.id, tenant_id: userRole?.tenant_id ?? null, role: userRole?.role ?? 'staff' },
+        { user_id: existing.id, tenant_id: userRole?.tenant_id ?? null, role: userRole?.role ?? 'staff', tv: existing.token_version ?? 0 },
         { expiresIn: '7d' }
       )
       return reply.send({ token, is_new: false })
@@ -67,7 +67,7 @@ export const googleRoutes: FastifyPluginAsync = async (app) => {
 
       const { rows: [user] } = await client.query(
         `INSERT INTO users (name, email, phone, password_hash, google_sub, email_verified)
-         VALUES ($1, $2, $3, $4, $5, TRUE) RETURNING id`,
+         VALUES ($1, $2, $3, $4, $5, TRUE) RETURNING id, token_version`,
         [name, email, phone ?? null, hashPassword(crypto.randomBytes(16).toString('hex')), googleSub]
       )
 
@@ -93,7 +93,7 @@ export const googleRoutes: FastifyPluginAsync = async (app) => {
       await client.query('COMMIT')
 
       const jwtToken = app.jwt.sign(
-        { user_id: user.id, tenant_id: tenant.id, role: 'owner' },
+        { user_id: user.id, tenant_id: tenant.id, role: 'owner', tv: user.token_version ?? 0 },
         { expiresIn: '7d' }
       )
 

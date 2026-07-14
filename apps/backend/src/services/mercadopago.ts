@@ -71,3 +71,37 @@ export async function createPreapproval(cfg: PaymentConfig, params: {
 
   return { ok: true, id: (data as any).id, status: status ?? 'pending', init_point: initPoint }
 }
+
+export type CancelPreapprovalResult =
+  | { ok: true }
+  | { ok: false; reason: string }
+
+// Cancels a preapproval on Mercado Pago. The caller is responsible for
+// reflecting the cancellation locally (applyPreapproval) — the webhook will
+// also confirm it idempotently. Never log the access token.
+export async function cancelPreapproval(cfg: PaymentConfig, mpSubscriptionId: string): Promise<CancelPreapprovalResult> {
+  if (!cfg.mp_access_token) return { ok: false, reason: 'payment_not_configured' }
+
+  let res: Response
+  try {
+    res = await fetch(`https://api.mercadopago.com/preapproval/${encodeURIComponent(mpSubscriptionId)}`, {
+      method: 'PUT',
+      headers: {
+        Authorization: `Bearer ${cfg.mp_access_token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ status: 'cancelled' }),
+      signal: AbortSignal.timeout(15_000),
+    })
+  } catch (e: any) {
+    return { ok: false, reason: e?.name === 'TimeoutError' || e?.name === 'AbortError' ? 'mp_timeout' : 'mp_network_error' }
+  }
+
+  const data = await res.json().catch(() => ({}))
+  if (!res.ok) {
+    console.error('MP preapproval cancel error:', res.status, data)
+    return { ok: false, reason: (data as any)?.message || `mp_error_${res.status}` }
+  }
+
+  return { ok: true }
+}

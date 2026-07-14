@@ -3,6 +3,7 @@ import { z } from 'zod'
 import { db } from '../lib/db'
 import { redis } from '../lib/redis'
 import { hashPassword } from '../lib/password'
+import { bumpTokenVersion } from '../lib/tokenVersion'
 import { encrypt, decrypt, maskSecret } from '../lib/crypto'
 
 const serviceSchema = z.object({
@@ -416,11 +417,14 @@ export const tenantRoutes: FastifyPluginAsync = async (app) => {
         await client.query(`UPDATE users SET ${sets.join(', ')} WHERE id = $${i}`, values)
       }
 
-      if (body.role !== undefined && body.role !== target.role) {
+      const roleChanged = body.role !== undefined && body.role !== target.role
+      if (roleChanged) {
         await client.query(
           'UPDATE user_roles SET role = $1 WHERE user_id = $2 AND tenant_id = $3',
           [body.role, targetId, tenant_id]
         )
+        // Revoke existing sessions: old JWTs carry the old role in their claims
+        await bumpTokenVersion(targetId, client)
       }
 
       await client.query('COMMIT')
@@ -466,6 +470,9 @@ export const tenantRoutes: FastifyPluginAsync = async (app) => {
       'DELETE FROM user_roles WHERE user_id = $1 AND tenant_id = $2',
       [request.params.id, tenant_id]
     )
+    // Revoke existing sessions: the removed collaborator loses access immediately
+    await bumpTokenVersion(request.params.id)
+
     return reply.send({ removed: true })
   })
 

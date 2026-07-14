@@ -1,7 +1,7 @@
 import { FastifyPluginAsync } from 'fastify'
 import { db } from '../lib/db'
 import { getPaymentConfig } from '../lib/paymentConfig'
-import { createPreapproval } from '../services/mercadopago'
+import { createPreapproval, cancelPreapproval } from '../services/mercadopago'
 import { applyPreapproval } from '../lib/subscriptionState'
 
 // Tenant-facing subscription endpoints. Only `authenticate` (NOT planGuard) —
@@ -112,6 +112,39 @@ export const subscriptionRoutes: FastifyPluginAsync = async (app) => {
     }
 
     return reply.send({ init_point: result.init_point })
+  })
+
+  // Cancel the current subscription. Cancels the preapproval on Mercado Pago
+  // first; only on MP success do we reflect it locally (tenant drops to
+  // free/cancelled immediately — the webhook will also confirm, idempotently).
+  app.post('/cancel', async (request, reply) => {
+    const { tenant_id } = request.user
+
+    const { rows: [sub] } = await db.query(
+      `SELECT plan, status, mp_subscription_id FROM subscriptions WHERE tenant_id = $1`,
+      [tenant_id]
+    )
+    if (!sub || !sub.mp_subscription_id || sub.status === 'cancelled') {
+      return reply.status(400).send({ error: 'Você não tem uma assinatura ativa.' })
+    }
+
+    const cfg = await getPaymentConfig()
+    const result = await cancelPreapproval(cfg, sub.mp_subscription_id)
+
+    if (!result.ok) {
+      // The raw MP reason goes only to logs — never in the HTTP response.
+      request.log.error({ tenant_id, reason: result.reason }, 'Mercado Pago subscription cancel failed')
+      return reply.status(502).send({ error: 'Não foi possível cancelar agora. Tente novamente ou fale com o suporte.' })
+    }
+
+    await applyPreapproval({
+      tenantId: tenant_id!,
+      plan: sub.plan,
+      mpSubscriptionId: sub.mp_subscription_id,
+      mpStatus: 'cancelled',
+    })
+
+    return reply.send({ ok: true })
   })
 
   // Current subscription (if any)
