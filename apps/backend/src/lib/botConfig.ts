@@ -1,5 +1,6 @@
 import { db } from './db'
 import { redis } from './redis'
+import { decrypt } from './crypto'
 
 // AI model configuration, stored as the `ai_config` row in platform_settings and
 // edited by the Root Admin. Cached in Redis (60s) and invalidated on save.
@@ -37,6 +38,9 @@ export async function getAiConfig(): Promise<AiConfig> {
   if (cached) return JSON.parse(cached)
   const { rows: [row] } = await db.query("SELECT value FROM platform_settings WHERE key = 'ai_config'")
   const merged: AiConfig = { ...DEFAULTS, ...(row?.value ?? {}) }
+  // Secrets are stored encrypted at rest (decrypt tolerates legacy plaintext).
+  merged.api_key = decrypt(merged.api_key)
+  merged.transcription_api_key = decrypt(merged.transcription_api_key)
   // Back-compat: an old config may have `model: claude-haiku-4-5` and no mode
   if (!merged.mode) merged.mode = 'single'
   await redis.setex(CACHE_KEY, 60, JSON.stringify(merged))

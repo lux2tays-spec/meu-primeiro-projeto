@@ -4,6 +4,14 @@ import { db } from '../lib/db'
 import { hashPassword } from '../lib/password'
 import { invalidateAiConfig } from '../lib/botConfig'
 import { redis } from '../lib/redis'
+import { encrypt, decrypt, maskSecret } from '../lib/crypto'
+
+// Secret fields (per platform_settings key) that must be encrypted at rest and
+// never returned in full to the admin panel.
+const SECRET_FIELDS: Record<string, string[]> = {
+  payment_config: ['mp_access_token', 'mp_webhook_secret'],
+  ai_config: ['api_key', 'transcription_api_key'],
+}
 import { invalidatePaymentConfig } from '../lib/paymentConfig'
 
 export const rootRoutes: FastifyPluginAsync = async (app) => {
@@ -283,17 +291,54 @@ export const rootRoutes: FastifyPluginAsync = async (app) => {
   // ── Platform Settings ────────────────────────────────────────────────────────
   app.get('/settings', async (_request, reply) => {
     const { rows } = await db.query(`SELECT key, value FROM platform_settings ORDER BY key`)
-    return reply.send(Object.fromEntries(rows.map((r: any) => [r.key, r.value])))
+    const out: Record<string, any> = {}
+    for (const r of rows as any[]) {
+      const secrets = SECRET_FIELDS[r.key]
+      if (secrets && r.value && typeof r.value === 'object') {
+        // Return secrets masked (decrypt first — values may be encrypted at rest).
+        const masked = { ...r.value }
+        for (const f of secrets) {
+          if (masked[f]) masked[f] = maskSecret(decrypt(String(masked[f])))
+        }
+        out[r.key] = masked
+      } else {
+        out[r.key] = r.value
+      }
+    }
+    return reply.send(out)
   })
 
   app.patch<{ Params: { key: string } }>('/settings/:key', async (request, reply) => {
+    const key = request.params.key
+    let body: any = request.body
+    const secrets = SECRET_FIELDS[key]
+
+    if (secrets && body && typeof body === 'object') {
+      // Encrypt secrets at rest. A masked/blank incoming value means "unchanged"
+      // (the panel showed a masked value) → keep the existing encrypted secret.
+      const { rows: [existing] } = await db.query(
+        `SELECT value FROM platform_settings WHERE key = $1`, [key]
+      )
+      const prev = existing?.value ?? {}
+      body = { ...body }
+      for (const f of secrets) {
+        const incoming = body[f]
+        if (incoming === undefined) continue
+        if (!incoming || String(incoming).includes('****')) {
+          body[f] = prev[f] ?? '' // unchanged → keep stored (already encrypted)
+        } else {
+          body[f] = encrypt(String(incoming))
+        }
+      }
+    }
+
     await db.query(
       `INSERT INTO platform_settings (key, value) VALUES ($1, $2)
        ON CONFLICT (key) DO UPDATE SET value = $2, updated_at = NOW()`,
-      [request.params.key, JSON.stringify(request.body)]
+      [key, JSON.stringify(body)]
     )
-    if (request.params.key === 'ai_config') await invalidateAiConfig()
-    if (request.params.key === 'payment_config') await invalidatePaymentConfig()
+    if (key === 'ai_config') await invalidateAiConfig()
+    if (key === 'payment_config') await invalidatePaymentConfig()
     return reply.send({ ok: true })
   })
 

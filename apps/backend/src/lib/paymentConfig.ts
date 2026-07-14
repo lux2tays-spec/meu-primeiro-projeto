@@ -1,5 +1,6 @@
 import { db } from './db'
 import { redis } from './redis'
+import { decrypt } from './crypto'
 
 // Platform payment provider config (the tenant pays the PLATFORM here — separate
 // from each tenant's own Mercado Pago used to receive money from their customers).
@@ -28,6 +29,9 @@ export async function getPaymentConfig(): Promise<PaymentConfig> {
   if (cached) return JSON.parse(cached)
   const { rows: [row] } = await db.query("SELECT value FROM platform_settings WHERE key = 'payment_config'")
   const cfg: PaymentConfig = { ...DEFAULTS, ...(row?.value ?? {}) }
+  // Secrets are stored encrypted at rest (decrypt tolerates legacy plaintext).
+  cfg.mp_access_token = decrypt(cfg.mp_access_token)
+  cfg.mp_webhook_secret = decrypt(cfg.mp_webhook_secret)
   // env fallback so an already-running deployment keeps working before the panel is filled
   if (!cfg.mp_access_token && process.env.MERCADOPAGO_ACCESS_TOKEN) cfg.mp_access_token = process.env.MERCADOPAGO_ACCESS_TOKEN
   if (!cfg.mp_webhook_secret && process.env.MP_WEBHOOK_SECRET) cfg.mp_webhook_secret = process.env.MP_WEBHOOK_SECRET
