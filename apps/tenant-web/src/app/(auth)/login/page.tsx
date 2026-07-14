@@ -68,6 +68,11 @@ export default function LoginPage() {
             required
           />
         </div>
+        <div className="flex justify-end">
+          <Link href="/esqueci-senha" className="text-sm text-primary font-medium hover:underline">
+            Esqueci minha senha
+          </Link>
+        </div>
         {error && <div className="bg-red-50 text-red-600 text-sm rounded-lg px-4 py-3">{error}</div>}
         <button
           type="submit"

@@ -133,6 +133,12 @@ export default function LoginScreen() {
             autoComplete="password"
             error={errors.password}
           />
+          <TouchableOpacity
+            style={styles.forgotLink}
+            onPress={() => router.push('/(auth)/esqueci-senha')}
+          >
+            <Text style={styles.link}>Esqueci minha senha</Text>
+          </TouchableOpacity>
           <Button label="Entrar" onPress={handleLogin} loading={loading} />
         </View>
 
@@ -163,6 +169,7 @@ const styles = StyleSheet.create({
   footerText: { color: colors.textSecondary, fontSize: font.md },
   link: { color: colors.primary, fontSize: font.md, fontWeight: '600' },
   googleBtn: { borderColor: colors.border },
+  forgotLink: { alignSelf: 'flex-end' },
   dividerRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
   dividerLine: { flex: 1, height: 1, backgroundColor: colors.border },
   dividerText: { color: colors.textSecondary, fontSize: font.sm },

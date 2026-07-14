@@ -53,6 +53,8 @@ export const authApi = {
     business_name: string
     referral_code?: string
   }) => api.post<{ token: string; tenant_id: string }>('/auth/register', data),
+  forgotPassword: (email: string) =>
+    api.post<{ ok: boolean }>('/auth/forgot-password', { email }),
   deleteAccount: () => api.delete<{ deleted: boolean }>('/auth/account'),
 }
 

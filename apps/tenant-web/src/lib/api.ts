@@ -65,6 +65,10 @@ export const authApi = {
     api.get<{ token: string; verified: boolean }>(`/auth/verify-email?token=${encodeURIComponent(token)}`),
   googleAuth: (data: { id_token: string; business_name?: string; phone?: string; referral_code?: string }) =>
     api.post<{ token: string; tenant_id: string; is_new: boolean }>('/auth/google', data),
+  forgotPassword: (email: string) =>
+    api.post<{ ok: boolean }>('/auth/forgot-password', { email }),
+  resetPassword: (token: string, password: string) =>
+    api.post<{ ok: boolean }>('/auth/reset-password', { token, password }),
   deleteAccount: () => api.delete<{ deleted: boolean }>('/auth/account'),
   me: () => api.get<{ id: string; name: string; email: string; role: string }>('/auth/me'),
 }
