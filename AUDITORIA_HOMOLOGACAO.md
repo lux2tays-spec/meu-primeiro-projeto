@@ -5,6 +5,34 @@
 
 ---
 
+## ✅ STATUS ATUAL — 2026-07-13 (re-auditado contra o código)
+
+Grande parte do backlog abaixo já foi resolvida. **Resolvidos:** webhook WhatsApp
+autenticado (secret + `?token=`), hash scrypt (era SHA-256), Google valida `aud`/`iss`,
+isolamento de tenant/IDOR (appointments/hours/slots), AES-256 nos segredos (tenant **e**
+plataforma — mp_access_token/webhook_secret/api_key criptografados + mascarados no painel),
+planGuard + bot bloqueia inadimplente, webhook MP com HMAC + re-fetch + idempotência,
+checkout transparente (cartão nunca toca o backend), índices multi-tenant, Next 14.2.35 +
+security headers + CSP, redação de logs, rate limit por rota (google/whatsapp) + por
+remetente no bot, teto rígido de custo de IA, limite de tamanho/tipo de mídia, validação de
+e-mail, reset de senha (forgot/reset/resend), **backup diário do Postgres** (serviço
+db-backup + rotação + restore documentado), exclusão de conta in-app, Privacidade/Termos,
+paginação (parcial), erros amigáveis (nunca stack trace ao usuário), fix de fuso na agenda,
+"Cancelar assinatura" honesto, timeout de upload, remoção de expo-camera, buildNumber/versionCode.
+
+**Ainda PENDENTE — código (menor prioridade):** JWT em localStorage → cookie httpOnly +
+`middleware.ts` (arquitetural, os 2 webs); revogação de JWT/refresh; paginação em algumas
+listas; PKCE no OAuth Calendar; endpoint real de cancelar assinatura MP.
+
+**Ainda PENDENTE — depende de você (VPS/contas/domínio):** ver `CHECKLIST_PRODUCAO.md` na
+raiz — envs da VPS (EVOLUTION_WEBHOOK_SECRET, NODE_ENV, senha Postgres), ligar o db-backup +
+offsite S3, TLS/stack hardened (precisa domínio), MP webhook secret, credenciais EAS/lojas,
+Sign in with Apple, decisão de billing iOS (IAP), Expo SDK 51→53, dados legais dos Termos.
+
+Os itens abaixo são o backlog original de 2026-07-11 (mantido como histórico).
+
+---
+
 ## 🟩 SESSÃO 2026-07-11 — IMPLEMENTADO (sem custo, só código/config)
 
 Tudo abaixo foi **implementado e validado** nesta sessão. Backend, tenant-web e admin-web passam `tsc --noEmit` com **0 erros**. Nenhuma dependência nova (usei APIs nativas do Node — `scrypt`, `AES-256-GCM`, headers via hook). **Ainda não commitado** — revisar e commitar numa branch.
