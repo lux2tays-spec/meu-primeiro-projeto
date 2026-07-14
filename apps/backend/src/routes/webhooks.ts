@@ -2,12 +2,13 @@ import { FastifyPluginAsync } from 'fastify'
 import crypto from 'node:crypto'
 import { db } from '../lib/db'
 import { redis, QR_CODE_TTL } from '../lib/redis'
-import { isDuplicateMessage, scheduleReply } from '../services/botDispatcher'
+import { isDuplicateMessage, isSenderRateLimited, scheduleReply } from '../services/botDispatcher'
 import { getPaymentConfig } from '../lib/paymentConfig'
 import { applyPreapproval } from '../lib/subscriptionState'
 import { tenantMediaEnabled } from '../lib/planMedia'
 import { transcribeAudio } from '../lib/transcription'
 import { evolutionGetMediaBase64, evolutionSend } from '../services/evolution'
+import { base64Bytes, isAllowedAudioType, normalizeImageType, MAX_AUDIO_BYTES, MAX_IMAGE_BYTES } from '../lib/mediaGuard'
 
 // Validate the shared secret Evolution must send with every webhook.
 // Enabled only when EVOLUTION_WEBHOOK_SECRET is set — so existing instances keep
@@ -113,6 +114,12 @@ export const webhookRoutes: FastifyPluginAsync = async (app) => {
         (tenantStatus.status === 'trial' && tenantStatus.trial_ends_at && new Date(tenantStatus.trial_ends_at) < new Date())
       if (botBlocked) return reply.send({ ok: true, skipped: 'tenant_inactive' })
 
+      // Per-sender rate limit: a single abusive number can't burn the AI budget
+      // (40 bot runs/hour per customer per tenant). Exceeded → drop silently.
+      if (await isSenderRateLimited(tenantId, customerPhone)) {
+        return reply.send({ ok: true, skipped: 'rate_limited' })
+      }
+
       // Find or create customer — never overwrite a real name with the phone number
       let customer: { id: string; name: string; phone: string }
       const existing = await db.query(
@@ -169,12 +176,26 @@ export const webhookRoutes: FastifyPluginAsync = async (app) => {
         }
         // Evolution may return a data URI; Claude and Buffer need raw base64.
         const rawB64 = media.base64.replace(/^data:[^;]+;base64,/, '')
+        const mediaType = (media.mimetype || imageMsg?.mimetype || audioMsg?.mimetype || '') as string
+
+        // Type allowlist — never feed unexpected formats to Claude/Whisper.
+        const imageType = kind === 'image' ? normalizeImageType(mediaType) : null
+        if ((kind === 'image' && !imageType) || (kind === 'audio' && !isAllowedAudioType(mediaType))) {
+          await evolutionSend(instanceId, customerPhone, 'Não consigo abrir esse tipo de arquivo 😊 Pode me mandar por texto?')
+          return reply.send({ ok: true, media: 'type_not_allowed' })
+        }
+
+        // Size ceiling — reject oversized media before it costs anything (image 5 MB, audio 12 MB).
+        if (base64Bytes(rawB64) > (kind === 'image' ? MAX_IMAGE_BYTES : MAX_AUDIO_BYTES)) {
+          await evolutionSend(instanceId, customerPhone, 'Seu arquivo é muito grande 😅 Me manda por texto o que você precisa?')
+          return reply.send({ ok: true, media: 'too_large' })
+        }
 
         if (kind === 'image') {
-          botImage = { base64: rawB64, mediaType: media.mimetype || imageMsg?.mimetype || 'image/jpeg' }
+          botImage = { base64: rawB64, mediaType: imageType! }
           finalText = imageMsg?.caption || ''
         } else {
-          const transcript = await transcribeAudio(rawB64, media.mimetype || audioMsg?.mimetype || 'audio/ogg')
+          const transcript = await transcribeAudio(rawB64, mediaType)
           if (!transcript) {
             await evolutionSend(instanceId, customerPhone, 'Recebi seu áudio, mas não consegui entender agora 😊 Pode me mandar por texto?')
             return reply.send({ ok: true, media: 'transcribe_failed' })

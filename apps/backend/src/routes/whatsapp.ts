@@ -12,8 +12,11 @@ export const whatsappRoutes: FastifyPluginAsync = async (app) => {
   app.addHook('preHandler', (app as any).authenticate)
   app.addHook('preHandler', (app as any).planGuard)
 
-  // Connect WhatsApp — creates Evolution instance (idempotent) then polls for QR
-  app.post('/connect', async (request, reply) => {
+  // Connect WhatsApp — creates Evolution instance (idempotent) then polls for QR.
+  // Stricter rate limit: each call holds a slow (~18s) QR poll upstream.
+  app.post('/connect', {
+    config: { rateLimit: { max: 5, timeWindow: '1 minute' } },
+  }, async (request, reply) => {
     const { tenant_id } = request.user
     if (!tenant_id) return reply.status(400).send({ error: 'No tenant' })
 

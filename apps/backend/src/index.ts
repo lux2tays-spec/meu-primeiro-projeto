@@ -46,7 +46,32 @@ if (isProd && !process.env.ALLOWED_ORIGINS) {
 }
 
 // trustProxy so per-IP rate limiting and HTTPS detection work behind the proxy.
-const app = Fastify({ logger: true, trustProxy: true })
+// Logger redaction: secrets and PII must never reach the logs (pino redact).
+const app = Fastify({
+  logger: {
+    redact: {
+      paths: [
+        'req.headers.authorization',
+        'req.headers.apikey',
+        'req.headers.cookie',
+        'password',
+        'password_hash',
+        'mp_access_token',
+        'mp_webhook_secret',
+        'api_key',
+        'token',
+        'id_token',
+        'card_token_id',
+        'access_token',
+        'refresh_token',
+        'phone',
+        'customer_phone',
+      ],
+      censor: '[REDACTED]',
+    },
+  },
+  trustProxy: true,
+})
 
 async function start() {
   // CORS — restrict to known origins in production via ALLOWED_ORIGINS env

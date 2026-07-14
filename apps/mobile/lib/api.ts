@@ -119,11 +119,21 @@ export const agentApi = {
     const token = await getToken()
     const body = new FormData()
     body.append('file', { uri, name: filename, type: mimeType } as any)
-    const res = await fetch(`${BASE_URL}/agent/config/upload`, {
-      method: 'POST',
-      headers: token ? { Authorization: `Bearer ${token}` } : {},
-      body,
-    })
+    let res: Response
+    try {
+      res = await fetch(`${BASE_URL}/agent/config/upload`, {
+        method: 'POST',
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+        body,
+        // Uploads são mais lentos que requests normais — timeout maior que os 15s do request()
+        signal: AbortSignal.timeout(60000),
+      })
+    } catch (e: any) {
+      if (e?.name === 'TimeoutError' || e?.name === 'AbortError') {
+        throw new Error('Tempo de envio esgotado. Verifique sua internet e tente novamente.')
+      }
+      throw new Error('Falha de conexão. Verifique sua internet.')
+    }
     if (!res.ok) {
       const err = await res.json().catch(() => ({}))
       throw new Error((err as any).error ?? 'Upload falhou')

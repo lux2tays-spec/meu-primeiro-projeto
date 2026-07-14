@@ -4,6 +4,7 @@ import {
   Modal, KeyboardAvoidingView, Platform, ActivityIndicator,
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
+import { useRouter } from 'expo-router'
 import { Ionicons } from '@expo/vector-icons'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Card } from '@/components/ui/Card'
@@ -54,6 +55,7 @@ const emptyCard = { number: '', name: '', expiry: '', cvv: '', cpf: '' }
 
 export default function SubscriptionScreen() {
   const queryClient = useQueryClient()
+  const router = useRouter()
   const toast = useToast()
 
   const { data: tenant } = useQuery({ queryKey: ['tenant'], queryFn: tenantApi.me })
@@ -229,17 +231,21 @@ export default function SubscriptionScreen() {
           )
         })}
 
-        {/* Cancel */}
+        {/* Cancel — o backend ainda não expõe cancelamento self-service, então
+            direcionamos para o suporte em vez de mostrar um botão sem ação. */}
         {tenant?.plan !== 'free' && (
           <Button
             label="Cancelar assinatura"
             variant="ghost"
             onPress={() => Alert.alert(
               'Cancelar assinatura',
-              'Você perderá o acesso ao final do período pago. Deseja continuar?',
+              'O cancelamento é feito com a nossa equipe de suporte, sem burocracia. Você mantém o acesso até o final do período já pago.',
               [
-                { text: 'Manter assinatura', style: 'cancel' },
-                { text: 'Cancelar', style: 'destructive', onPress: () => {} },
+                { text: 'Voltar', style: 'cancel' },
+                {
+                  text: 'Falar com o suporte',
+                  onPress: () => router.push('/(app)/settings/support'),
+                },
               ]
             )}
           />

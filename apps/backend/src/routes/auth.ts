@@ -1,7 +1,7 @@
 import { FastifyPluginAsync } from 'fastify'
 import { z, ZodError } from 'zod'
 import { db } from '../lib/db'
-import { sendVerificationEmail } from '../lib/email'
+import { sendPasswordResetEmail, sendVerificationEmail } from '../lib/email'
 import { hashPassword, verifyPassword } from '../lib/password'
 import crypto from 'node:crypto'
 
@@ -18,6 +18,19 @@ const loginSchema = z.object({
   email: z.string().email(),
   password: z.string(),
 })
+
+const emailOnlySchema = z.object({
+  email: z.string().email(),
+})
+
+const resetPasswordSchema = z.object({
+  token: z.string().min(1),
+  password: z.string().min(8),
+})
+
+function sha256Hex(value: string): string {
+  return crypto.createHash('sha256').update(value).digest('hex')
+}
 
 function zodErrorMessage(err: ZodError): string {
   const fieldMessages: Record<string, string> = {
@@ -189,6 +202,164 @@ export const authRoutes: FastifyPluginAsync = async (app) => {
     )
 
     return reply.send({ token })
+  })
+
+  // ── Password reset: request ──────────────────────────────────────────────────
+  // Anti-enumeration: always responds 200 with the same generic message,
+  // whether or not the e-mail exists. Only the sha256 hash of the token is
+  // stored; the raw token goes out by e-mail and expires in 1 hour.
+  app.post('/forgot-password', {
+    config: { rateLimit: { max: 5, timeWindow: '15 minutes' } },
+  }, async (request, reply) => {
+    const genericResponse = {
+      message: 'Se o e-mail estiver cadastrado, você receberá um link para redefinir sua senha.',
+    }
+
+    let body: z.infer<typeof emailOnlySchema>
+    try {
+      body = emailOnlySchema.parse(request.body)
+    } catch (err) {
+      if (err instanceof ZodError) {
+        return reply.status(400).send({ error: 'E-mail inválido' })
+      }
+      throw err
+    }
+
+    const { rows: [user] } = await db.query(
+      'SELECT id, name, email FROM users WHERE email = $1',
+      [body.email]
+    )
+    if (!user) return reply.send(genericResponse)
+
+    const rawToken = crypto.randomBytes(32).toString('hex')
+    const expiresAt = new Date(Date.now() + 60 * 60 * 1000).toISOString()
+    await db.query(
+      'INSERT INTO password_reset_tokens (user_id, token_hash, expires_at) VALUES ($1, $2, $3)',
+      [user.id, sha256Hex(rawToken), expiresAt]
+    )
+
+    const baseUrl = process.env.TENANT_WEB_URL ?? 'http://localhost:3002'
+    const link = `${baseUrl}/redefinir-senha?token=${rawToken}`
+    try {
+      await sendPasswordResetEmail(user.email, user.name, link)
+    } catch (emailErr) {
+      console.error('Falha ao enviar e-mail de redefinição de senha:', emailErr)
+    }
+
+    return reply.send(genericResponse)
+  })
+
+  // ── Password reset: confirm ──────────────────────────────────────────────────
+  app.post('/reset-password', {
+    config: { rateLimit: { max: 5, timeWindow: '15 minutes' } },
+  }, async (request, reply) => {
+    let body: z.infer<typeof resetPasswordSchema>
+    try {
+      body = resetPasswordSchema.parse(request.body)
+    } catch (err) {
+      if (err instanceof ZodError) {
+        const first = err.issues[0]
+        const msg = first.path[0] === 'password'
+          ? 'A senha deve ter pelo menos 8 caracteres'
+          : 'Token inválido'
+        return reply.status(400).send({ error: msg })
+      }
+      throw err
+    }
+
+    const tokenHash = sha256Hex(body.token)
+    const client = await db.connect()
+    try {
+      await client.query('BEGIN')
+
+      const { rows: [record] } = await client.query(
+        `SELECT id, user_id, expires_at, used_at
+           FROM password_reset_tokens
+          WHERE token_hash = $1
+          FOR UPDATE`,
+        [tokenHash]
+      )
+
+      if (!record || record.used_at || new Date(record.expires_at) < new Date()) {
+        await client.query('ROLLBACK')
+        return reply.status(400).send({ error: 'Link inválido ou expirado. Solicite uma nova redefinição de senha.' })
+      }
+
+      await client.query(
+        'UPDATE users SET password_hash = $1 WHERE id = $2',
+        [hashPassword(body.password), record.user_id]
+      )
+      await client.query(
+        'UPDATE password_reset_tokens SET used_at = NOW() WHERE id = $1',
+        [record.id]
+      )
+      // Invalidate any other outstanding reset tokens for this user
+      await client.query(
+        'UPDATE password_reset_tokens SET used_at = NOW() WHERE user_id = $1 AND used_at IS NULL',
+        [record.user_id]
+      )
+
+      await client.query('COMMIT')
+    } catch (err) {
+      await client.query('ROLLBACK')
+      throw err
+    } finally {
+      client.release()
+    }
+
+    return reply.send({ message: 'Senha redefinida com sucesso. Faça login com a nova senha.' })
+  })
+
+  // ── Resend verification e-mail ───────────────────────────────────────────────
+  // Anti-enumeration: always responds 200 with the same generic message.
+  app.post('/resend-verification', {
+    config: { rateLimit: { max: 5, timeWindow: '15 minutes' } },
+  }, async (request, reply) => {
+    const genericResponse = {
+      message: 'Se o e-mail estiver cadastrado e ainda não confirmado, você receberá um novo link de confirmação.',
+    }
+
+    let body: z.infer<typeof emailOnlySchema>
+    try {
+      body = emailOnlySchema.parse(request.body)
+    } catch (err) {
+      if (err instanceof ZodError) {
+        return reply.status(400).send({ error: 'E-mail inválido' })
+      }
+      throw err
+    }
+
+    const { rows: [user] } = await db.query(
+      'SELECT id, name, email, email_verified FROM users WHERE email = $1',
+      [body.email]
+    )
+    if (!user || user.email_verified) return reply.send(genericResponse)
+
+    const verificationToken = crypto.randomBytes(32).toString('hex')
+    const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString()
+    const client = await db.connect()
+    try {
+      await client.query('BEGIN')
+      await client.query('DELETE FROM email_verifications WHERE user_id = $1', [user.id])
+      await client.query(
+        'INSERT INTO email_verifications (user_id, token, expires_at) VALUES ($1, $2, $3)',
+        [user.id, verificationToken, expiresAt]
+      )
+      await client.query('COMMIT')
+    } catch (err) {
+      await client.query('ROLLBACK')
+      throw err
+    } finally {
+      client.release()
+    }
+
+    try {
+      await sendVerificationEmail(user.email, user.name, verificationToken)
+    } catch (emailErr) {
+      console.error('Falha ao reenviar e-mail de verificação:', emailErr)
+    }
+
+    return reply.send(genericResponse)
   })
 
   // ── Current user profile ─────────────────────────────────────────────────────

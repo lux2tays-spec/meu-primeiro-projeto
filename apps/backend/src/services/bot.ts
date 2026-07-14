@@ -277,6 +277,10 @@ const TOOLS: Anthropic.Tool[] = [
 
 type ExecCtx = { tenantId: string; customerId?: string }
 
+// Simple sanity check — the stored email is later used to send calendar
+// invites, so a malformed one must never reach the database.
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/
+
 /** Logging wrapper: EVERY tool call is logged (tenant, tool, input, outcome). */
 async function executeTool(name: string, input: any, ctx: ExecCtx): Promise<any> {
   console.log(`[bot:tool] CHAMADA tenant=${ctx.tenantId} customer=${ctx.customerId ?? 'AUSENTE'} tool=${name} input=${JSON.stringify(input)}`)
@@ -305,7 +309,13 @@ async function runTool(name: string, input: any, ctx: ExecCtx): Promise<any> {
       const vals: any[] = []
       let i = 1
       if (input.name) { sets.push(`name = $${i++}`); vals.push(String(input.name).slice(0, 120)) }
-      if (input.email) { sets.push(`email = $${i++}`); vals.push(String(input.email).slice(0, 200)) }
+      // Only store a well-formed email; invalid → skip it (name/interest still saved).
+      let emailInvalido = false
+      if (input.email) {
+        const email = String(input.email).trim().slice(0, 200)
+        if (EMAIL_RE.test(email)) { sets.push(`email = $${i++}`); vals.push(email) }
+        else emailInvalido = true
+      }
       if (sets.length) {
         vals.push(customerId, tenantId)
         await db.query(`UPDATE customers SET ${sets.join(', ')} WHERE id = $${i++} AND tenant_id = $${i}`, vals)
@@ -318,6 +328,9 @@ async function runTool(name: string, input: any, ctx: ExecCtx): Promise<any> {
             [String(input.interested_service).slice(0, 300), customerId, tenantId]
           )
         } catch { /* migration 013 not applied yet */ }
+      }
+      if (emailInvalido) {
+        return { ok: true, email_salvo: false, detalhe: 'O e-mail informado é INVÁLIDO e NÃO foi salvo (nome/interesse foram salvos normalmente). Peça ao cliente para confirmar o e-mail correto e chame save_customer_info de novo.' }
       }
       return { ok: true }
     }
@@ -429,10 +442,17 @@ export async function runBot(params: {
     ...(aiConfig.base_url ? { baseURL: aiConfig.base_url } : {}),
   })
   let model = resolveModel(aiConfig, customerMessage)
-  // Monthly cost cap per plan (0 = unlimited): downgrade to the cheapest model when over.
+  // Monthly cost cap per plan (0 = unlimited): downgrade to the cheapest model
+  // when over the cap, and HARD-STOP (no model call at all) at 1.5× the cap so
+  // a runaway/abused tenant can never generate unbounded spend.
   const cap = Number(aiConfig.caps?.[context.plan] ?? 0)
-  if (cap > 0 && (await monthlySpend(tenantId)) >= cap) {
-    model = 'claude-haiku-4-5'
+  if (cap > 0) {
+    const spend = await monthlySpend(tenantId)
+    if (spend >= cap * 1.5) {
+      console.warn(`[bot] HARD-STOP tenant=${tenantId} plano=${context.plan}: gasto mensal US$ ${spend.toFixed(4)} >= 1.5x o cap (US$ ${cap}) — modelo NÃO será chamado`)
+      return 'Estou com muitas conversas agora 😊 Já te respondo em instantes — se for urgente, me chama de novo daqui a pouco.'
+    }
+    if (spend >= cap) model = 'claude-haiku-4-5'
   }
   // Keep the bot fast/cheap: no extended thinking (haiku has none; disable it on others).
   const thinkingOff = !model.startsWith('claude-haiku')

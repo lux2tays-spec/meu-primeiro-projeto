@@ -8,7 +8,10 @@ import crypto from 'node:crypto'
 
 export const googleRoutes: FastifyPluginAsync = async (app) => {
   // ── Auth: login/register via Google ID token ────────────────────────────────
-  app.post('/auth/google', async (request, reply) => {
+  // Stricter rate limit — this route can create tenants.
+  app.post('/auth/google', {
+    config: { rateLimit: { max: 10, timeWindow: '15 minutes' } },
+  }, async (request, reply) => {
     const { id_token, business_name, phone, referral_code } = request.body as {
       id_token: string
       business_name?: string

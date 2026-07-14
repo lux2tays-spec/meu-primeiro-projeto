@@ -228,6 +228,18 @@ For Cloudflare R2: set `S3_ENDPOINT` to your R2 endpoint and use `us-east-1` as 
 
 ---
 
+## 9. Database backups (VPS)
+
+The VPS stack (`docker-compose.vps.yml` / `docker-compose.vps.hardened.yml`)
+includes a `db-backup` service: a daily `pg_dump -Fc` of the `agendabot`
+database, gzipped into the `pg_backups` volume, keeping the last 14 dumps,
+with optional S3/rclone offsite upload.
+
+Full details — restore procedure, offsite setup, operational checklist — in
+**[`infra/BACKUP.md`](infra/BACKUP.md)** (pt-BR). Test the restore periodically.
+
+---
+
 ## Local development
 
 ```bash

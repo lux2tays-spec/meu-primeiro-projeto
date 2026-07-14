@@ -1,4 +1,5 @@
 import { FastifyPluginAsync } from 'fastify'
+import { z } from 'zod'
 import { randomBytes } from 'crypto'
 import { db } from '../lib/db'
 import { hashPassword } from '../lib/password'
@@ -141,8 +142,18 @@ export const rootRoutes: FastifyPluginAsync = async (app) => {
     return reply.send({ ...tenant, staff, appointment_stats: appointments })
   })
 
+  // Validated body for root tenant updates — 'status' is part of the tenant
+  // state machine, so only known values are accepted (ZodError → 400 globally).
+  const tenantPatchSchema = z.object({
+    plan: z.string().min(1).max(64).optional().nullable(),
+    status: z.enum(['trial', 'active', 'suspended', 'cancelled']).optional().nullable(),
+    max_agendas: z.number().int().min(1).optional().nullable(),
+    max_users: z.number().int().min(1).optional().nullable(),
+    trial_ends_at: z.string().datetime({ offset: true }).optional().nullable(),
+  })
+
   app.patch<{ Params: { id: string } }>('/tenants/:id', async (request, reply) => {
-    const { plan, status, max_agendas, max_users, trial_ends_at } = request.body as any
+    const { plan, status, max_agendas, max_users, trial_ends_at } = tenantPatchSchema.parse(request.body ?? {})
     const { rows: [tenant] } = await db.query(`
       UPDATE tenants SET
         plan = COALESCE($1, plan),

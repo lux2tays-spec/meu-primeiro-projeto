@@ -14,6 +14,7 @@
     "ios": {
       "supportsTablet": false,
       "bundleIdentifier": "com.agendabot.app",
+      "buildNumber": "1",
       "config": {
         "usesNonExemptEncryption": false
       }
@@ -23,7 +24,8 @@
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#6C47FF"
       },
-      "package": "com.agendabot.app"
+      "package": "com.agendabot.app",
+      "versionCode": 1
     },
     "plugins": [
       "expo-router",

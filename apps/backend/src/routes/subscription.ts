@@ -57,7 +57,7 @@ export const subscriptionRoutes: FastifyPluginAsync = async (app) => {
     const cfg = await getPaymentConfig()
     if (cfg.provider !== 'mercadopago' || !cfg.mp_access_token) {
       request.log.error({ tenant_id }, 'checkout blocked: platform payment provider not configured')
-      return reply.status(503).send({ error: UNAVAILABLE_MSG, detail: 'payment_not_configured' })
+      return reply.status(503).send({ error: UNAVAILABLE_MSG })
     }
 
     // Mercado Pago rejects non-HTTPS back_url ("Invalid value for back_url"), so
@@ -65,7 +65,7 @@ export const subscriptionRoutes: FastifyPluginAsync = async (app) => {
     const backUrl = (cfg.back_url ?? '').trim()
     if (!backUrl.startsWith('https://')) {
       request.log.error({ tenant_id, back_url: backUrl }, 'checkout blocked: payment back_url missing or not HTTPS')
-      return reply.status(503).send({ error: UNAVAILABLE_MSG, detail: 'back_url_not_https' })
+      return reply.status(503).send({ error: UNAVAILABLE_MSG })
     }
 
     const { rows: [user] } = await db.query('SELECT email FROM users WHERE id = $1', [user_id])
@@ -85,11 +85,11 @@ export const subscriptionRoutes: FastifyPluginAsync = async (app) => {
       // Card-specific rejections (declined, invalid data) should nudge the user
       // to try another card; generic failures get the neutral message.
       const cardIssue = /card|tarjeta|cartão|payment|token|cvv|security|amount|invalid/i.test(result.reason)
+      // The raw MP reason goes only to logs (above) — never in the HTTP response.
       return reply.status(cardIssue ? 402 : 502).send({
         error: cardIssue
           ? 'Não conseguimos aprovar este cartão. Verifique os dados ou tente outro cartão.'
           : 'Não foi possível iniciar o pagamento. Tente novamente.',
-        detail: result.reason, // MP failure reason, for platform-admin diagnosis (not shown to user)
       })
     }
 
@@ -100,7 +100,6 @@ export const subscriptionRoutes: FastifyPluginAsync = async (app) => {
         request.log.error({ tenant_id, plan: planRow.slug, status: result.status }, 'transparent checkout not authorized')
         return reply.status(402).send({
           error: 'Não conseguimos aprovar este cartão. Verifique os dados ou tente outro cartão.',
-          detail: `status_${result.status}`,
         })
       }
       await applyPreapproval({

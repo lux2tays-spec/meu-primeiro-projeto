@@ -14,6 +14,8 @@ import { evolutionSend } from './evolution'
 
 const DEBOUNCE_MS = Number(process.env.BOT_DEBOUNCE_MS ?? 7000)
 const DEDUP_TTL = 60 * 60 // 1h
+const SENDER_RATE_LIMIT = 40 // max bot runs per customer phone per tenant per hour
+const SENDER_RATE_WINDOW = 60 * 60 // 1h
 
 const timers = new Map<string, NodeJS.Timeout>()
 
@@ -36,6 +38,21 @@ export async function isDuplicateMessage(messageId?: string): Promise<boolean> {
   if (!messageId) return false
   const set = await redis.set(`bot:msg:${messageId}`, '1', 'EX', DEDUP_TTL, 'NX')
   return set === null
+}
+
+/**
+ * Per-sender rate limit: true when this customer phone already triggered too
+ * many bot runs for this tenant in the last hour — the caller must DROP the
+ * message silently (no bot run, no reply). Logged once, on crossing the limit.
+ */
+export async function isSenderRateLimited(tenantId: string, customerPhone: string): Promise<boolean> {
+  const key = `bot:rl:${tenantId}:${customerPhone}`
+  const count = await redis.incr(key)
+  if (count === 1) await redis.expire(key, SENDER_RATE_WINDOW)
+  if (count === SENDER_RATE_LIMIT + 1) {
+    console.warn(`[bot] rate-limit: tenant=${tenantId} phone=${customerPhone} passou de ${SENDER_RATE_LIMIT} mensagens/hora — descartando em silêncio`)
+  }
+  return count > SENDER_RATE_LIMIT
 }
 
 /** Buffer an incoming message and (re)start the debounce window. */
