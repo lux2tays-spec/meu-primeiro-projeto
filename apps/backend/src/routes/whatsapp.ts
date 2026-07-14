@@ -22,7 +22,10 @@ export const whatsappRoutes: FastifyPluginAsync = async (app) => {
 
     const instanceName = `tenant_${tenant_id.replace(/-/g, '')}`
     const webhookBase = process.env.WEBHOOK_BASE_URL ?? process.env.BACKEND_URL ?? 'http://localhost:3000'
-    const webhookUrl = `${webhookBase}/webhook/whatsapp/${instanceName}`
+    // When a webhook secret is configured, embed it as ?token= so Evolution sends
+    // it back and webhookAuthorized() can reject forged/unauthenticated calls.
+    const secret = process.env.EVOLUTION_WEBHOOK_SECRET
+    const webhookUrl = `${webhookBase}/webhook/whatsapp/${instanceName}${secret ? `?token=${encodeURIComponent(secret)}` : ''}`
 
     // Upsert DB record
     await db.query(
