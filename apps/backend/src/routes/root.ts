@@ -24,6 +24,7 @@ import {
   invalidateGoogleConfig,
   getEvolutionConfig,
 } from '../lib/integrationConfig'
+import { invalidateBrandConfig } from '../lib/brandConfig'
 
 export const rootRoutes: FastifyPluginAsync = async (app) => {
   app.addHook('preHandler', (app as any).requireRoot)
@@ -363,6 +364,7 @@ export const rootRoutes: FastifyPluginAsync = async (app) => {
     if (key === 'evolution_config') await invalidateEvolutionConfig()
     if (key === 'smtp_config') await invalidateSmtpConfig()
     if (key === 'google_config') await invalidateGoogleConfig()
+    if (key === 'brand_config') await invalidateBrandConfig()
     // Governance: record WHO changed the config (secret values never logged).
     const changed = body && typeof body === 'object' ? Object.keys(body).join(', ') : ''
     await logAdminAction(auditFromRequest(request, 'settings.update', key, `campos: ${changed}`))

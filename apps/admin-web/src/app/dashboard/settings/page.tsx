@@ -3,7 +3,7 @@ import { useState, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { rootApi } from '@/lib/api'
 
-type Tab = 'email' | 'ai' | 'plans'
+type Tab = 'brand' | 'email' | 'ai' | 'plans'
 
 const EMAIL_TEMPLATE_LABELS: Record<string, string> = {
   welcome:                'Boas-vindas ao novo usuário',
@@ -17,18 +17,18 @@ const EMAIL_TEMPLATE_LABELS: Record<string, string> = {
 const PLAN_BLANK = { slug: '', name: '', description: '', price_cents: 0, max_agendas: 1, max_users: 1, trial_days: 0, features: [], is_active: true, sort_order: 0, media_enabled: false }
 
 export default function SettingsPage() {
-  const [tab, setTab] = useState<Tab>('email')
+  const [tab, setTab] = useState<Tab>('brand')
 
   return (
     <div className="p-8 space-y-6">
       <div>
         <h1 className="text-2xl font-bold text-gray-900">Configurações Gerais da Plataforma</h1>
-        <p className="text-gray-500 text-sm mt-1">E-mails e gestão de planos (a configuração de IA fica em <strong>IA &amp; Custos</strong>)</p>
+        <p className="text-gray-500 text-sm mt-1">Marca, e-mails e planos (a configuração de IA fica em <strong>IA &amp; Custos</strong>)</p>
       </div>
 
       {/* Tabs */}
       <div className="flex gap-1 bg-gray-100 rounded-xl p-1 w-fit">
-        {([['email', '📧 E-mails'], ['plans', '📦 Planos']] as [Tab, string][]).map(([key, label]) => (
+        {([['brand', '🏷️ Marca'], ['email', '📧 E-mails'], ['plans', '📦 Planos']] as [Tab, string][]).map(([key, label]) => (
           <button key={key} onClick={() => setTab(key)}
             className={`px-5 py-2 rounded-lg text-sm font-medium transition-colors ${tab === key ? 'bg-white shadow-sm text-gray-900' : 'text-gray-500 hover:text-gray-700'}`}>
             {label}
@@ -36,8 +36,90 @@ export default function SettingsPage() {
         ))}
       </div>
 
+      {tab === 'brand' && <BrandTab />}
       {tab === 'email' && <EmailTab />}
       {tab === 'plans' && <PlansTab />}
+    </div>
+  )
+}
+
+// ── Brand Tab ─────────────────────────────────────────────────────────────────
+const BRAND_DEFAULT = {
+  app_name: 'AiConfirma', tagline: 'Agendamento Inteligente', support_email: '', support_whatsapp: '',
+  company_name: '', cnpj: '', dpo_email: '', privacy_url: '', terms_url: '', email_from_name: 'AiConfirma',
+}
+
+function BrandTab() {
+  const qc = useQueryClient()
+  const [success, setSuccess] = useState('')
+  const [brand, setBrand] = useState<any>(BRAND_DEFAULT)
+
+  const { data: settings, isLoading, isError } = useQuery({ queryKey: ['root-settings'], queryFn: rootApi.settings })
+
+  useEffect(() => {
+    if (settings?.brand_config) setBrand({ ...BRAND_DEFAULT, ...settings.brand_config })
+  }, [settings])
+
+  const showSuccess = (msg: string) => { setSuccess(msg); setTimeout(() => setSuccess(''), 3000) }
+
+  const mutation = useMutation({
+    mutationFn: () => rootApi.updateSettings('brand_config', brand),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['root-settings'] }); showSuccess('Configurações de marca salvas!') },
+  })
+
+  if (isError) return <div className="text-red-500 text-sm py-4">Erro ao carregar configurações. Verifique se o backend está rodando.</div>
+  if (isLoading) return <div className="text-gray-400 text-sm py-4">Carregando...</div>
+
+  const set = (k: string) => (v: string) => setBrand((b: any) => ({ ...b, [k]: v }))
+
+  return (
+    <div className="space-y-6">
+      {success && <div className="bg-green-50 text-green-700 rounded-xl px-4 py-3 text-sm font-medium">{success}</div>}
+
+      {/* Identidade */}
+      <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100 space-y-4">
+        <div>
+          <h2 className="font-semibold text-gray-900">Identidade</h2>
+          <p className="text-xs text-gray-500 mt-1">Nome e frase usados nos e-mails, páginas e aplicativos.</p>
+        </div>
+        <div className="grid grid-cols-2 gap-4">
+          <SF label="Nome do app" value={brand.app_name} onChange={set('app_name')} placeholder="AiConfirma" />
+          <SF label="Frase (tagline)" value={brand.tagline} onChange={set('tagline')} placeholder="Agendamento Inteligente" />
+          <SF label="Nome do remetente de e-mail" value={brand.email_from_name} onChange={set('email_from_name')} placeholder="AiConfirma" />
+        </div>
+      </div>
+
+      {/* Contato / Suporte */}
+      <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100 space-y-4">
+        <div>
+          <h2 className="font-semibold text-gray-900">Contato &amp; Suporte</h2>
+          <p className="text-xs text-gray-500 mt-1">Exibidos aos usuários para pedir ajuda.</p>
+        </div>
+        <div className="grid grid-cols-2 gap-4">
+          <SF label="E-mail de suporte" value={brand.support_email} onChange={set('support_email')} placeholder="suporte@aiconfirma.com.br" />
+          <SF label="WhatsApp de suporte" value={brand.support_whatsapp} onChange={set('support_whatsapp')} placeholder="+55 11 90000-0000" />
+        </div>
+      </div>
+
+      {/* Legal */}
+      <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100 space-y-4">
+        <div>
+          <h2 className="font-semibold text-gray-900">Legal (LGPD)</h2>
+          <p className="text-xs text-gray-500 mt-1">Dados da empresa e links exigidos pelas lojas Apple/Google.</p>
+        </div>
+        <div className="grid grid-cols-2 gap-4">
+          <SF label="Razão social" value={brand.company_name} onChange={set('company_name')} placeholder="AiConfirma Tecnologia LTDA" />
+          <SF label="CNPJ" value={brand.cnpj} onChange={set('cnpj')} placeholder="00.000.000/0001-00" />
+          <SF label="E-mail do encarregado (DPO)" value={brand.dpo_email} onChange={set('dpo_email')} placeholder="dpo@aiconfirma.com.br" />
+          <SF label="URL da Política de Privacidade" value={brand.privacy_url} onChange={set('privacy_url')} placeholder="https://aiconfirma.com.br/privacidade" />
+          <SF label="URL dos Termos de Uso" value={brand.terms_url} onChange={set('terms_url')} placeholder="https://aiconfirma.com.br/termos" />
+        </div>
+      </div>
+
+      <button onClick={() => mutation.mutate()} disabled={mutation.isPending}
+        className="h-10 px-6 bg-primary text-white rounded-xl text-sm font-semibold hover:bg-primary-dark disabled:opacity-50 transition-colors">
+        {mutation.isPending ? 'Salvando...' : 'Salvar marca'}
+      </button>
     </div>
   )
 }
