@@ -4,6 +4,7 @@ import { Stack } from 'expo-router'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import * as SplashScreen from 'expo-splash-screen'
 import { useAuthStore } from '@/lib/store'
+import { useBrandingStore } from '@/lib/branding'
 import { StatusBar } from 'expo-status-bar'
 import { Toast } from '@/components/ui/Toast'
 import { ErrorBoundary } from '@/components/ErrorBoundary'
@@ -19,9 +20,12 @@ const queryClient = new QueryClient({
 export default function RootLayout() {
   const loadAuth = useAuthStore((s) => s.loadAuth)
   const isLoaded = useAuthStore((s) => s.isLoaded)
+  const loadBranding = useBrandingStore((s) => s.loadBranding)
 
   useEffect(() => {
     loadAuth()
+    // Non-blocking: runtime branding (name/logo/colors) with bundled fallback.
+    loadBranding()
   }, [])
 
   useEffect(() => {

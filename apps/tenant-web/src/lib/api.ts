@@ -1,6 +1,6 @@
 'use client'
 
-const BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3000'
+export const BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3000'
 
 export function getToken(): string | null {
   if (typeof window === 'undefined') return null
@@ -54,6 +54,24 @@ const api = {
   patch: <T>(path: string, body: unknown) =>
     request<T>(path, { method: 'PATCH', body: JSON.stringify(body) }),
   delete: <T>(path: string) => request<T>(path, { method: 'DELETE' }),
+}
+
+export type BrandingAssetSlot = 'logo' | 'logo_dark' | 'favicon' | 'icon' | 'logo_transparent'
+
+export interface Branding {
+  app_name: string
+  tagline: string
+  support_email: string
+  support_whatsapp: string
+  privacy_url: string
+  terms_url: string
+  colors: { primary: string; primary_dark: string; accent: string; sidebar: string }
+  // Only present slots; URLs are relative to the backend (prepend BASE_URL)
+  assets: Partial<Record<BrandingAssetSlot, string>>
+}
+
+export const brandingApi = {
+  get: () => api.get<Branding>('/branding'),
 }
 
 export const authApi = {

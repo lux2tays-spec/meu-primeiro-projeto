@@ -5,14 +5,14 @@ const config: Config = {
   theme: {
     extend: {
       colors: {
-        primary: '#6C47FF',
-        'primary-dark': '#5233CC',
-        'primary-light': '#EDE9FF',
+        primary: 'rgb(var(--brand-primary-rgb) / <alpha-value>)',
+        'primary-dark': 'rgb(var(--brand-primary-dark-rgb) / <alpha-value>)',
+        'primary-light': '#E7F7EF',
         success: '#22C55E',
         warning: '#F59E0B',
         danger: '#EF4444',
-        sidebar: '#1A1035',
-        'sidebar-hover': '#2D1E5A',
+        sidebar: 'rgb(var(--brand-sidebar-rgb) / <alpha-value>)',
+        'sidebar-hover': '#274D80',
       },
     },
   },

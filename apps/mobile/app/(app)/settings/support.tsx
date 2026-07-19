@@ -3,10 +3,12 @@ import { SafeAreaView } from 'react-native-safe-area-context'
 import { Card } from '@/components/ui/Card'
 import { SettingsRow } from '@/components/ui/SettingsRow'
 import { colors, font, spacing } from '@/lib/theme'
+import { useBrandingStore } from '@/lib/branding'
 
 const WHATSAPP_SUPPORT = 'https://wa.me/5511999999999?text=Oi!%20Preciso%20de%20suporte%20no%20AiConfirma.'
 
 export default function SupportScreen() {
+  const appName = useBrandingStore((s) => s.appName)
   return (
     <SafeAreaView style={styles.container} edges={[]}>
       <ScrollView contentContainerStyle={styles.content}>
@@ -52,7 +54,7 @@ export default function SupportScreen() {
         </Card>
 
         <Card style={styles.versionCard}>
-          <Text style={styles.versionText}>AiConfirma v1.0.0</Text>
+          <Text style={styles.versionText}>{`${appName} v1.0.0`}</Text>
           <Text style={styles.versionSub}>Feito com ❤️ para o Brasil</Text>
         </Card>
       </ScrollView>

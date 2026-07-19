@@ -2,6 +2,18 @@
 @tailwind components;
 @tailwind utilities;
 
+:root {
+  /* Bundled brand defaults — overridden at runtime by BrandingProvider */
+  --brand-primary: #2CB86E;
+  --brand-primary-dark: #1C9DAA;
+  --brand-sidebar: #1E3C66;
+  /* RGB triplets (mirrors of the vars above) so Tailwind opacity modifiers
+     like bg-primary/10 keep working with runtime-overridable colors */
+  --brand-primary-rgb: 44 184 110;
+  --brand-primary-dark-rgb: 28 157 170;
+  --brand-sidebar-rgb: 30 60 102;
+}
+
 body {
   background-color: #F8F7FF;
   color: #111827;

@@ -4,6 +4,7 @@ import { useRouter } from 'next/navigation'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { getToken, tenantApi, agentApi, whatsappApi } from '@/lib/api'
 import { isTenantToken } from '@/lib/auth'
+import { useBranding } from '@/components/BrandingProvider'
 import {
   Building2, Users, Tag, Clock, Bot, CreditCard, MessageCircle,
   Check, ChevronLeft, ArrowRight, Rocket, Trash2, Plus, type LucideIcon,
@@ -725,6 +726,7 @@ function StepWhatsApp({ onFinish, onBack, finishing }: { onFinish: () => void; o
 /* ── Página ────────────────────────────────────────────────────── */
 export default function OnboardingPage() {
   const router = useRouter()
+  const { appName } = useBranding()
   const qc = useQueryClient()
   const [ready, setReady] = useState(false)
   const [stepIndex, setStepIndex] = useState(0)
@@ -795,7 +797,7 @@ export default function OnboardingPage() {
               <Rocket size={18} strokeWidth={1.75} className="text-white" />
             </div>
             <div>
-              <p className="text-white font-bold text-sm leading-tight">Bem-vindo ao AiConfirma!</p>
+              <p className="text-white font-bold text-sm leading-tight">Bem-vindo ao {appName}!</p>
               <p className="text-gray-400 text-xs mt-0.5">Vamos configurar seu negócio em poucos passos</p>
             </div>
           </div>

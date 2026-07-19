@@ -3,6 +3,7 @@ import { Suspense, useState, FormEvent } from 'react'
 import Link from 'next/link'
 import { useSearchParams } from 'next/navigation'
 import { authApi } from '@/lib/api'
+import BrandLogo from '@/components/BrandLogo'
 
 function ResetPasswordForm() {
   const searchParams = useSearchParams()
@@ -113,9 +114,7 @@ export default function RedefinirSenhaPage() {
     <div className="min-h-screen bg-sidebar flex items-center justify-center p-4">
       <div className="w-full max-w-sm">
         <div className="text-center mb-8">
-          <div className="inline-flex w-16 h-16 rounded-2xl bg-primary items-center justify-center mb-4">
-            <span className="text-white text-2xl font-black">AB</span>
-          </div>
+          <BrandLogo variant="mark" size={64} className="mb-4" />
           <h1 className="text-white text-2xl font-bold">Redefinir senha</h1>
           <p className="text-gray-400 text-sm mt-1">Escolha uma nova senha para sua conta</p>
         </div>

@@ -3,6 +3,7 @@ import { useEffect, useState, Suspense } from 'react'
 import { useSearchParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { authApi, setToken } from '@/lib/api'
+import BrandLogo from '@/components/BrandLogo'
 
 function Content() {
   const params = useSearchParams()
@@ -32,9 +33,7 @@ function Content() {
 
   return (
     <div className="w-full max-w-sm text-center">
-      <div className="inline-flex w-16 h-16 rounded-2xl bg-primary items-center justify-center mb-6">
-        <span className="text-white text-2xl font-black">AB</span>
-      </div>
+      <BrandLogo variant="mark" size={64} className="mb-6" />
 
       {status === 'loading' && (
         <>

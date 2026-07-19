@@ -6,6 +6,7 @@ import {
 import { router } from 'expo-router'
 import { Input } from '@/components/ui/Input'
 import { Button } from '@/components/ui/Button'
+import { BrandLogo } from '@/components/BrandLogo'
 import { authApi } from '@/lib/api'
 import { useToast } from '@/lib/toast'
 import { colors, font, spacing } from '@/lib/theme'
@@ -44,9 +45,7 @@ export default function EsqueciSenhaScreen() {
     >
       <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
         <View style={styles.header}>
-          <View style={styles.logo}>
-            <Text style={styles.logoText}>AB</Text>
-          </View>
+          <BrandLogo variant="mark" size={72} />
           <Text style={styles.title}>Esqueci minha senha</Text>
           <Text style={styles.subtitle}>
             Informe seu e-mail e enviaremos um link para redefinir a senha
@@ -93,11 +92,6 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.background },
   scroll: { flexGrow: 1, padding: spacing.lg, justifyContent: 'center', gap: spacing.xl },
   header: { alignItems: 'center', gap: spacing.sm },
-  logo: {
-    width: 72, height: 72, borderRadius: 20,
-    backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center',
-  },
-  logoText: { color: '#fff', fontSize: 26, fontWeight: '800' },
   title: { fontSize: font.title, fontWeight: '800', color: colors.text },
   subtitle: { fontSize: font.md, color: colors.textSecondary, textAlign: 'center' },
   form: { gap: spacing.md },

@@ -9,7 +9,7 @@
     "splash": {
       "image": "./assets/splash.png",
       "resizeMode": "contain",
-      "backgroundColor": "#6C47FF"
+      "backgroundColor": "#F6F9FB"
     },
     "ios": {
       "supportsTablet": false,
@@ -22,7 +22,7 @@
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
-        "backgroundColor": "#6C47FF"
+        "backgroundColor": "#1C9DAA"
       },
       "package": "com.agendabot.app",
       "versionCode": 1

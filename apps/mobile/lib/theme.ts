@@ -1,7 +1,7 @@
 export const colors = {
-  primary: '#6C47FF',
-  primaryDark: '#5233CC',
-  primaryLight: '#EDE9FF',
+  primary: '#2CB86E',
+  primaryDark: '#1C9DAA',
+  primaryLight: '#E7F7EF',
   success: '#22C55E',
   warning: '#F59E0B',
   danger: '#EF4444',
@@ -16,7 +16,7 @@ export const colors = {
   textDisabled: '#9CA3AF',
 
   border: '#E5E7EB',
-  borderFocus: '#6C47FF',
+  borderFocus: '#2CB86E',
 
   whatsapp: '#25D366',
 }

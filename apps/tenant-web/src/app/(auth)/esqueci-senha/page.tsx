@@ -2,6 +2,7 @@
 import { useState, FormEvent } from 'react'
 import Link from 'next/link'
 import { authApi } from '@/lib/api'
+import BrandLogo from '@/components/BrandLogo'
 
 export default function EsqueciSenhaPage() {
   const [email, setEmail] = useState('')
@@ -27,9 +28,7 @@ export default function EsqueciSenhaPage() {
   return (
     <div className="w-full max-w-sm">
       <div className="text-center mb-8">
-        <div className="inline-flex w-16 h-16 rounded-2xl bg-primary items-center justify-center mb-4">
-          <span className="text-white text-2xl font-black">AB</span>
-        </div>
+        <BrandLogo variant="mark" size={64} className="mb-4" />
         <h1 className="text-white text-2xl font-bold">Esqueci minha senha</h1>
         <p className="text-gray-400 text-sm mt-1">Informe seu e-mail para receber o link de redefinição</p>
       </div>

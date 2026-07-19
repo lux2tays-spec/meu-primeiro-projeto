@@ -6,6 +6,7 @@ import {
 import { router } from 'expo-router'
 import { Input } from '@/components/ui/Input'
 import { Button } from '@/components/ui/Button'
+import { BrandLogo } from '@/components/BrandLogo'
 import { useAuthStore } from '@/lib/store'
 import { authApi, googleApi } from '@/lib/api'
 import { useGoogleAuth } from '@/lib/google-auth'
@@ -91,11 +92,7 @@ export default function LoginScreen() {
     >
       <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
         <View style={styles.header}>
-          <View style={styles.logo}>
-            <Text style={styles.logoText}>AB</Text>
-          </View>
-          <Text style={styles.title}>AiConfirma</Text>
-          <Text style={styles.subtitle}>Seu atendimento no piloto automático</Text>
+          <BrandLogo variant="full" />
         </View>
 
         <View style={styles.form}>
@@ -157,13 +154,6 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.background },
   scroll: { flexGrow: 1, padding: spacing.lg, justifyContent: 'center', gap: spacing.xl },
   header: { alignItems: 'center', gap: spacing.sm },
-  logo: {
-    width: 72, height: 72, borderRadius: 20,
-    backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center',
-  },
-  logoText: { color: '#fff', fontSize: 26, fontWeight: '800' },
-  title: { fontSize: font.title, fontWeight: '800', color: colors.text },
-  subtitle: { fontSize: font.md, color: colors.textSecondary, textAlign: 'center' },
   form: { gap: spacing.md },
   footer: { flexDirection: 'row', justifyContent: 'center', alignItems: 'center' },
   footerText: { color: colors.textSecondary, fontSize: font.md },

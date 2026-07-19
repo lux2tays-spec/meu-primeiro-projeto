@@ -5,6 +5,8 @@ import Link from 'next/link'
 import { getToken, clearToken, tenantApi, authApi } from '@/lib/api'
 import { isTenantToken, getTokenPayload } from '@/lib/auth'
 import { useQuery } from '@tanstack/react-query'
+import BrandLogo from '@/components/BrandLogo'
+import { useBranding } from '@/components/BrandingProvider'
 import {
   LayoutDashboard, CalendarDays, Users, Wallet, MessageCircle, Bot, Tag,
   UserCog, Clock, CreditCard, Package, Share2, LifeBuoy, LogOut, Trash2,
@@ -30,6 +32,7 @@ const NAV: { href: string; icon: LucideIcon; label: string }[] = [
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter()
   const pathname = usePathname()
+  const { appName } = useBranding()
   const [ready, setReady] = useState(false)
   const [sidebarOpen, setSidebarOpen] = useState(false)
 
@@ -99,9 +102,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         {/* Brand */}
         <div className="p-6 border-b border-white/10">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-primary flex items-center justify-center">
-              <span className="text-white font-black text-sm">AB</span>
-            </div>
+            <BrandLogo variant="mark" dark size={40} />
             <div>
               {canEditBusiness ? (
                 <Link
@@ -212,7 +213,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
           <button onClick={() => setSidebarOpen(true)} className="text-gray-500" aria-label="Abrir menu">
             <Menu size={22} strokeWidth={1.75} />
           </button>
-          <span className="font-bold text-gray-900">AiConfirma</span>
+          <span className="font-bold text-gray-900">{appName}</span>
         </header>
 
         <main className="flex-1 overflow-y-auto p-4 lg:p-8">

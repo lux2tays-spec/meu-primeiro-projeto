@@ -1,6 +1,6 @@
 import { getToken } from './storage'
 
-const BASE_URL = process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:3000'
+export const BASE_URL = process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:3000'
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const token = await getToken()
@@ -40,6 +40,32 @@ export const api = {
   patch: <T>(path: string, body: unknown) =>
     request<T>(path, { method: 'PATCH', body: JSON.stringify(body) }),
   delete: <T>(path: string) => request<T>(path, { method: 'DELETE' }),
+}
+
+// Branding (public — white-label name/logo/colors with bundled fallback)
+export interface BrandingResponse {
+  app_name: string
+  tagline?: string | null
+  support_email?: string | null
+  support_whatsapp?: string | null
+  privacy_url?: string | null
+  terms_url?: string | null
+  colors?: {
+    primary?: string
+    primary_dark?: string
+    accent?: string
+    sidebar?: string
+  }
+  assets?: {
+    logo?: string | null
+    logo_dark?: string | null
+    favicon?: string | null
+    icon?: string | null
+  }
+}
+
+export const brandingApi = {
+  get: () => api.get<BrandingResponse>('/branding'),
 }
 
 // Auth

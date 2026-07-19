@@ -3,6 +3,7 @@ import { useState, FormEvent, useEffect, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { authApi, setToken } from '@/lib/api'
+import BrandLogo from '@/components/BrandLogo'
 
 declare global {
   interface Window {
@@ -153,9 +154,7 @@ export default function RegisterPage() {
     return (
       <div className="w-full max-w-sm">
         <div className="text-center mb-8">
-          <div className="inline-flex w-16 h-16 rounded-2xl bg-primary items-center justify-center mb-4">
-            <span className="text-white text-2xl font-black">AB</span>
-          </div>
+          <BrandLogo variant="mark" size={64} className="mb-4" />
           <h1 className="text-white text-2xl font-bold">Quase lá!</h1>
           <p className="text-gray-400 text-sm mt-1">Só precisamos de mais algumas informações</p>
         </div>
@@ -212,9 +211,7 @@ export default function RegisterPage() {
   return (
     <div className="w-full max-w-sm">
       <div className="text-center mb-8">
-        <div className="inline-flex w-16 h-16 rounded-2xl bg-primary items-center justify-center mb-4">
-          <span className="text-white text-2xl font-black">AB</span>
-        </div>
+        <BrandLogo variant="mark" size={64} className="mb-4" />
         <h1 className="text-white text-2xl font-bold">Criar conta grátis</h1>
         <p className="text-gray-400 text-sm mt-1">5 dias de teste, sem cartão</p>
       </div>

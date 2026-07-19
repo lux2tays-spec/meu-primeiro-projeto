@@ -6,6 +6,7 @@ import { SettingsRow } from '@/components/ui/SettingsRow'
 import { Card } from '@/components/ui/Card'
 import { Badge } from '@/components/ui/Badge'
 import { useAuthStore } from '@/lib/store'
+import { useBrandingStore } from '@/lib/branding'
 import { tenantApi, authApi } from '@/lib/api'
 import { colors, font, spacing } from '@/lib/theme'
 
@@ -13,6 +14,7 @@ const WEB_URL = process.env.EXPO_PUBLIC_WEB_URL ?? 'https://aiconfirma.com.br'
 
 export default function SettingsScreen() {
   const clearAuth = useAuthStore((s) => s.clearAuth)
+  const appName = useBrandingStore((s) => s.appName)
   const role = useAuthStore((s) => s.role)
   const { data: tenant } = useQuery({ queryKey: ['tenant'], queryFn: tenantApi.me })
 
@@ -166,7 +168,7 @@ export default function SettingsScreen() {
           <SettingsRow icon="trash-outline" iconColor={colors.danger} label="Excluir conta" subtitle="Apagar permanentemente sua conta e dados" showChevron={false} onPress={handleDeleteAccount} />
         </Card>
 
-        <Text style={styles.version}>AiConfirma v1.0.0</Text>
+        <Text style={styles.version}>{`${appName} v1.0.0`}</Text>
       </ScrollView>
     </SafeAreaView>
   )

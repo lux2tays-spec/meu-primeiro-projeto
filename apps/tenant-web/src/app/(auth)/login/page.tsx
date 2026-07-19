@@ -4,6 +4,7 @@ import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { authApi, setToken } from '@/lib/api'
 import { isTenantToken } from '@/lib/auth'
+import BrandLogo from '@/components/BrandLogo'
 
 export default function LoginPage() {
   const router = useRouter()
@@ -38,11 +39,7 @@ export default function LoginPage() {
   return (
     <div className="w-full max-w-sm">
       <div className="text-center mb-8">
-        <div className="inline-flex w-16 h-16 rounded-2xl bg-primary items-center justify-center mb-4">
-          <span className="text-white text-2xl font-black">AB</span>
-        </div>
-        <h1 className="text-white text-2xl font-bold">AiConfirma</h1>
-        <p className="text-gray-400 text-sm mt-1">Seu atendimento no piloto automático</p>
+        <BrandLogo variant="full" dark />
       </div>
 
       <form onSubmit={handleSubmit} className="bg-white rounded-2xl p-8 shadow-xl space-y-4">
