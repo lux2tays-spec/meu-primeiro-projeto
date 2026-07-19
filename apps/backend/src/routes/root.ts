@@ -13,8 +13,16 @@ import { logAdminAction, auditFromRequest } from '../lib/auditLog'
 const SECRET_FIELDS: Record<string, string[]> = {
   payment_config: ['mp_access_token', 'mp_webhook_secret'],
   ai_config: ['api_key', 'transcription_api_key'],
+  evolution_config: ['key', 'webhook_secret'],
+  smtp_config: ['pass'],
+  google_config: ['client_secret'],
 }
 import { invalidatePaymentConfig } from '../lib/paymentConfig'
+import {
+  invalidateEvolutionConfig,
+  invalidateSmtpConfig,
+  invalidateGoogleConfig,
+} from '../lib/integrationConfig'
 
 export const rootRoutes: FastifyPluginAsync = async (app) => {
   app.addHook('preHandler', (app as any).requireRoot)
@@ -351,6 +359,9 @@ export const rootRoutes: FastifyPluginAsync = async (app) => {
     )
     if (key === 'ai_config') await invalidateAiConfig()
     if (key === 'payment_config') await invalidatePaymentConfig()
+    if (key === 'evolution_config') await invalidateEvolutionConfig()
+    if (key === 'smtp_config') await invalidateSmtpConfig()
+    if (key === 'google_config') await invalidateGoogleConfig()
     // Governance: record WHO changed the config (secret values never logged).
     const changed = body && typeof body === 'object' ? Object.keys(body).join(', ') : ''
     await logAdminAction(auditFromRequest(request, 'settings.update', key, `campos: ${changed}`))

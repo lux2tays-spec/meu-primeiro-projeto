@@ -9,13 +9,15 @@ import { tenantMediaEnabled } from '../lib/planMedia'
 import { transcribeAudio } from '../lib/transcription'
 import { evolutionGetMediaBase64, evolutionSend } from '../services/evolution'
 import { base64Bytes, isAllowedAudioType, normalizeImageType, MAX_AUDIO_BYTES, MAX_IMAGE_BYTES } from '../lib/mediaGuard'
+import { getEvolutionConfig } from '../lib/integrationConfig'
 
 // Validate the shared secret Evolution must send with every webhook.
-// Enabled only when EVOLUTION_WEBHOOK_SECRET is set — so existing instances keep
-// working until they are re-registered with the token. Accepts the secret via
+// Enabled only when a webhook secret is configured (Root Admin panel, with
+// EVOLUTION_WEBHOOK_SECRET env fallback) — so existing instances keep working
+// until they are re-registered with the token. Accepts the secret via
 // ?token= query, or the `apikey` / `x-webhook-token` header.
-function webhookAuthorized(request: any): boolean {
-  const secret = process.env.EVOLUTION_WEBHOOK_SECRET
+async function webhookAuthorized(request: any): Promise<boolean> {
+  const { webhook_secret: secret } = await getEvolutionConfig()
   if (!secret) return true // not configured yet — allow (logged as a warning at boot)
   const provided =
     (request.query as any)?.token ||
@@ -28,14 +30,23 @@ function webhookAuthorized(request: any): boolean {
 }
 
 export const webhookRoutes: FastifyPluginAsync = async (app) => {
-  if (!process.env.EVOLUTION_WEBHOOK_SECRET) {
-    app.log.warn('EVOLUTION_WEBHOOK_SECRET not set — WhatsApp webhook is UNAUTHENTICATED. Set it and re-register instances.')
-  }
+  // Boot-time warning (non-blocking): checks the effective secret (panel + env fallback).
+  getEvolutionConfig()
+    .then((cfg) => {
+      if (!cfg.webhook_secret) {
+        app.log.warn('Evolution webhook secret not set (panel/EVOLUTION_WEBHOOK_SECRET) — WhatsApp webhook is UNAUTHENTICATED. Set it and re-register instances.')
+      }
+    })
+    .catch(() => {
+      if (!process.env.EVOLUTION_WEBHOOK_SECRET) {
+        app.log.warn('EVOLUTION_WEBHOOK_SECRET not set — WhatsApp webhook is UNAUTHENTICATED. Set it and re-register instances.')
+      }
+    })
 
   // Evolution API webhook — receives WhatsApp events
   // Evolution sends to /:instanceId OR /:instanceId/event-name regardless of byEvents setting
   const whatsappHandler = async (request: any, reply: any) => {
-      if (!webhookAuthorized(request)) return reply.status(401).send({ error: 'unauthorized' })
+      if (!(await webhookAuthorized(request))) return reply.status(401).send({ error: 'unauthorized' })
       const instanceId = (request.params as any).instanceId
       const body = request.body as any
 

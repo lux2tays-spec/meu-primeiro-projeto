@@ -1,12 +1,14 @@
-const EVOLUTION_URL = process.env.EVOLUTION_API_URL!
-const EVOLUTION_KEY = process.env.EVOLUTION_API_KEY!
+import { getEvolutionConfig } from '../lib/integrationConfig'
 
+// URL and key are resolved per request via getEvolutionConfig() (Root Admin
+// panel with env fallback) instead of frozen at module load.
 async function evolutionRequest(path: string, body?: unknown, method = body ? 'POST' : 'GET') {
-  const res = await fetch(`${EVOLUTION_URL}${path}`, {
+  const { url, key } = await getEvolutionConfig()
+  const res = await fetch(`${url}${path}`, {
     method,
     headers: {
       'Content-Type': 'application/json',
-      apikey: EVOLUTION_KEY,
+      apikey: key,
     },
     body: body ? JSON.stringify(body) : undefined,
     signal: AbortSignal.timeout(15_000),

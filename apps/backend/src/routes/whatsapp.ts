@@ -7,6 +7,7 @@ import {
   evolutionGetStatus,
   evolutionDeleteInstance,
 } from '../services/evolution'
+import { getEvolutionConfig } from '../lib/integrationConfig'
 
 export const whatsappRoutes: FastifyPluginAsync = async (app) => {
   app.addHook('preHandler', (app as any).authenticate)
@@ -21,10 +22,11 @@ export const whatsappRoutes: FastifyPluginAsync = async (app) => {
     if (!tenant_id) return reply.status(400).send({ error: 'No tenant' })
 
     const instanceName = `tenant_${tenant_id.replace(/-/g, '')}`
-    const webhookBase = process.env.WEBHOOK_BASE_URL ?? process.env.BACKEND_URL ?? 'http://localhost:3000'
+    const evoCfg = await getEvolutionConfig()
+    const webhookBase = evoCfg.webhook_base
     // When a webhook secret is configured, embed it as ?token= so Evolution sends
     // it back and webhookAuthorized() can reject forged/unauthenticated calls.
-    const secret = process.env.EVOLUTION_WEBHOOK_SECRET
+    const secret = evoCfg.webhook_secret
     const webhookUrl = `${webhookBase}/webhook/whatsapp/${instanceName}${secret ? `?token=${encodeURIComponent(secret)}` : ''}`
 
     // Upsert DB record

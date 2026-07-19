@@ -1,16 +1,18 @@
 import { db } from '../lib/db'
 import { encrypt, decrypt } from '../lib/crypto'
+import { getGoogleConfig } from '../lib/integrationConfig'
 
 const GOOGLE_TOKEN_URL = 'https://oauth2.googleapis.com/token'
 const GOOGLE_CALENDAR_API = 'https://www.googleapis.com/calendar/v3'
 
 async function refreshAccessToken(refreshToken: string): Promise<string> {
+  const google = await getGoogleConfig()
   const res = await fetch(GOOGLE_TOKEN_URL, {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body: new URLSearchParams({
-      client_id: process.env.GOOGLE_CLIENT_ID!,
-      client_secret: process.env.GOOGLE_CLIENT_SECRET!,
+      client_id: google.client_id,
+      client_secret: google.client_secret,
       refresh_token: refreshToken,
       grant_type: 'refresh_token',
     }),
@@ -153,7 +155,8 @@ export async function verifyGoogleIdToken(idToken: string) {
   }
 
   // Verify the token was issued FOR this application, not any Google OAuth app.
-  const allowed = (process.env.GOOGLE_CLIENT_IDS ?? process.env.GOOGLE_CLIENT_ID ?? '')
+  const google = await getGoogleConfig()
+  const allowed = (google.client_ids || google.client_id || '')
     .split(',').map((s) => s.trim()).filter(Boolean)
   if (allowed.length && !allowed.includes(data.aud)) {
     throw new Error('Google token audience mismatch')
@@ -166,13 +169,14 @@ export async function verifyGoogleIdToken(idToken: string) {
 }
 
 export async function exchangeCodeForTokens(code: string, redirectUri: string) {
+  const google = await getGoogleConfig()
   const res = await fetch(GOOGLE_TOKEN_URL, {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body: new URLSearchParams({
       code,
-      client_id: process.env.GOOGLE_CLIENT_ID!,
-      client_secret: process.env.GOOGLE_CLIENT_SECRET!,
+      client_id: google.client_id,
+      client_secret: google.client_secret,
       redirect_uri: redirectUri,
       grant_type: 'authorization_code',
     }),

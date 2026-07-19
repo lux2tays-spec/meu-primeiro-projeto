@@ -1,7 +1,9 @@
 import nodemailer from 'nodemailer'
 import { buildAppointmentIcs } from './ics'
+import { getSmtpConfig } from './integrationConfig'
 
 let _transporter: nodemailer.Transporter | null = null
+let _transporterSig = '' // config signature — rebuild when Root Admin changes SMTP
 
 function escapeHtml(s: string): string {
   return s.replace(/[&<>"']/g, (c) =>
@@ -9,38 +11,47 @@ function escapeHtml(s: string): string {
   )
 }
 
-async function getTransporter(): Promise<nodemailer.Transporter> {
-  if (_transporter) return _transporter
+const DEFAULT_FROM = 'AiConfirma <noreply@aiconfirma.com.br>'
 
-  if (process.env.SMTP_HOST) {
-    _transporter = nodemailer.createTransport({
-      host: process.env.SMTP_HOST,
-      port: Number(process.env.SMTP_PORT ?? 587),
-      secure: process.env.SMTP_SECURE === 'true',
-      auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS },
-    })
-  } else {
-    // Dev: Ethereal — cria conta de teste, e-mails visíveis em ethereal.email
-    const testAccount = await nodemailer.createTestAccount()
-    console.log('[EMAIL DEV] Conta Ethereal criada:', testAccount.user)
-    _transporter = nodemailer.createTransport({
-      host: 'smtp.ethereal.email',
-      port: 587,
-      secure: false,
-      auth: { user: testAccount.user, pass: testAccount.pass },
-    })
+type Mailer = { transporter: nodemailer.Transporter; hasSmtp: boolean; from: string }
+
+async function getMailer(): Promise<Mailer> {
+  // SMTP settings come from the Root Admin panel with SMTP_* env fallback.
+  const cfg = await getSmtpConfig()
+  const sig = JSON.stringify([cfg.host, cfg.port, cfg.user, cfg.pass, cfg.secure])
+
+  if (!_transporter || _transporterSig !== sig) {
+    if (cfg.host) {
+      _transporter = nodemailer.createTransport({
+        host: cfg.host,
+        port: cfg.port,
+        secure: cfg.secure,
+        auth: { user: cfg.user, pass: cfg.pass },
+      })
+    } else {
+      // Dev: Ethereal — cria conta de teste, e-mails visíveis em ethereal.email
+      const testAccount = await nodemailer.createTestAccount()
+      console.log('[EMAIL DEV] Conta Ethereal criada:', testAccount.user)
+      _transporter = nodemailer.createTransport({
+        host: 'smtp.ethereal.email',
+        port: 587,
+        secure: false,
+        auth: { user: testAccount.user, pass: testAccount.pass },
+      })
+    }
+    _transporterSig = sig
   }
 
-  return _transporter
+  return { transporter: _transporter, hasSmtp: !!cfg.host, from: cfg.from || DEFAULT_FROM }
 }
 
 export async function sendVerificationEmail(to: string, name: string, token: string) {
   const baseUrl = process.env.TENANT_WEB_URL ?? 'http://localhost:3002'
   const link = `${baseUrl}/confirmar-email?token=${token}`
 
-  const transporter = await getTransporter()
+  const { transporter, hasSmtp, from } = await getMailer()
   const info = await transporter.sendMail({
-    from: process.env.EMAIL_FROM ?? 'AiConfirma <noreply@aiconfirma.com.br>',
+    from,
     to,
     subject: 'Confirme seu e-mail — AiConfirma',
     html: `
@@ -57,15 +68,15 @@ export async function sendVerificationEmail(to: string, name: string, token: str
     `,
   })
 
-  if (!process.env.SMTP_HOST) {
+  if (!hasSmtp) {
     console.log('[EMAIL DEV] Preview URL:', nodemailer.getTestMessageUrl(info))
   }
 }
 
 export async function sendPasswordResetEmail(to: string, name: string, link: string) {
-  const transporter = await getTransporter()
+  const { transporter, hasSmtp, from } = await getMailer()
   const info = await transporter.sendMail({
-    from: process.env.EMAIL_FROM ?? 'AiConfirma <noreply@aiconfirma.com.br>',
+    from,
     to,
     subject: 'Redefinição de senha — AiConfirma',
     html: `
@@ -82,7 +93,7 @@ export async function sendPasswordResetEmail(to: string, name: string, link: str
     `,
   })
 
-  if (!process.env.SMTP_HOST) {
+  if (!hasSmtp) {
     console.log('[EMAIL DEV] Preview URL:', nodemailer.getTestMessageUrl(info))
   }
 }
@@ -115,6 +126,8 @@ export async function sendAppointmentInvite(inv: AppointmentInvite): Promise<boo
   const title = `${inv.serviceName} — ${inv.businessName}`
   const description = `Agendamento de ${inv.serviceName} com ${inv.professionalName} na ${inv.businessName}.`
 
+  const { transporter, hasSmtp, from } = await getMailer()
+
   const ics = buildAppointmentIcs({
     uid: inv.uid,
     start: inv.start,
@@ -124,12 +137,11 @@ export async function sendAppointmentInvite(inv: AppointmentInvite): Promise<boo
     description,
     location: inv.location,
     organizerName: inv.businessName,
-    organizerEmail: (process.env.EMAIL_FROM ?? 'noreply@aiconfirma.com.br').replace(/.*<|>.*/g, '') || 'noreply@aiconfirma.com.br',
+    organizerEmail: from.replace(/.*<|>.*/g, '') || 'noreply@aiconfirma.com.br',
   })
 
-  const transporter = await getTransporter()
   const info = await transporter.sendMail({
-    from: process.env.EMAIL_FROM ?? 'AiConfirma <noreply@aiconfirma.com.br>',
+    from,
     to: inv.to,
     subject: `Seu agendamento: ${inv.serviceName} — ${dateFmt} às ${timeFmt}`,
     html: `
@@ -149,8 +161,8 @@ export async function sendAppointmentInvite(inv: AppointmentInvite): Promise<boo
     attachments: [{ filename: 'agendamento.ics', content: ics, contentType: 'text/calendar; method=REQUEST' }],
   })
 
-  if (!process.env.SMTP_HOST) {
+  if (!hasSmtp) {
     console.log('[EMAIL DEV] Invite preview URL:', nodemailer.getTestMessageUrl(info))
   }
-  return !!info?.accepted?.length || !process.env.SMTP_HOST
+  return !!info?.accepted?.length || !hasSmtp
 }
