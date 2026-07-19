@@ -43,7 +43,6 @@ export default function SettingsPage() {
 }
 
 // ── Email Tab ─────────────────────────────────────────────────────────────────
-const SMTP_DEFAULT = { host: '', port: 587, user: '', pass: '', from_name: 'AiConfirma', from_email: '', secure: false }
 const TMPL_DEFAULT = Object.fromEntries(
   Object.keys(EMAIL_TEMPLATE_LABELS).map((k) => [k, { subject: '', enabled: true }])
 )
@@ -51,22 +50,15 @@ const TMPL_DEFAULT = Object.fromEntries(
 function EmailTab() {
   const qc = useQueryClient()
   const [success, setSuccess] = useState('')
-  const [smtp, setSmtp] = useState<any>(SMTP_DEFAULT)
   const [templates, setTemplates] = useState<any>(TMPL_DEFAULT)
 
   const { data: settings, isLoading, isError } = useQuery({ queryKey: ['root-settings'], queryFn: rootApi.settings })
 
   useEffect(() => {
-    if (settings?.email_smtp)      setSmtp({ ...SMTP_DEFAULT, ...settings.email_smtp })
     if (settings?.email_templates) setTemplates({ ...TMPL_DEFAULT, ...settings.email_templates })
   }, [settings])
 
   const showSuccess = (msg: string) => { setSuccess(msg); setTimeout(() => setSuccess(''), 3000) }
-
-  const smtpMutation = useMutation({
-    mutationFn: () => rootApi.updateSettings('email_smtp', smtp),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['root-settings'] }); showSuccess('Configurações SMTP salvas!') },
-  })
 
   const templatesMutation = useMutation({
     mutationFn: () => rootApi.updateSettings('email_templates', templates),
@@ -80,31 +72,8 @@ function EmailTab() {
     <div className="space-y-6">
       {success && <div className="bg-green-50 text-green-700 rounded-xl px-4 py-3 text-sm font-medium">{success}</div>}
 
-      {/* SMTP */}
-      <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100 space-y-4">
-        <h2 className="font-semibold text-gray-900">Configurações SMTP</h2>
-        <p className="text-xs text-gray-500">Configure o servidor de e-mail para envio das mensagens automáticas da plataforma.</p>
-
-        <div className="grid grid-cols-2 gap-4">
-          <SF label="Servidor SMTP (host)" value={smtp.host} onChange={(v: string) => setSmtp((s: any) => ({ ...s, host: v }))} placeholder="smtp.gmail.com" />
-          <SF label="Porta" value={smtp.port} onChange={(v: string) => setSmtp((s: any) => ({ ...s, port: Number(v) }))} type="number" placeholder="587" />
-          <SF label="Usuário (e-mail)" value={smtp.user} onChange={(v: string) => setSmtp((s: any) => ({ ...s, user: v }))} placeholder="noreply@seudominio.com" />
-          <SF label="Senha" value={smtp.pass} onChange={(v: string) => setSmtp((s: any) => ({ ...s, pass: v }))} type="password" placeholder="••••••••" />
-          <SF label="Nome do remetente" value={smtp.from_name} onChange={(v: string) => setSmtp((s: any) => ({ ...s, from_name: v }))} placeholder="AiConfirma" />
-          <SF label="E-mail do remetente" value={smtp.from_email} onChange={(v: string) => setSmtp((s: any) => ({ ...s, from_email: v }))} placeholder="noreply@aiconfirma.com.br" />
-        </div>
-
-        <div className="flex items-center gap-3 pt-2">
-          <label className="flex items-center gap-2 text-sm text-gray-600 cursor-pointer">
-            <input type="checkbox" checked={smtp.secure} onChange={(e) => setSmtp((s: any) => ({ ...s, secure: e.target.checked }))} className="rounded" />
-            Usar SSL/TLS (porta 465)
-          </label>
-        </div>
-
-        <button onClick={() => smtpMutation.mutate()} disabled={smtpMutation.isPending}
-          className="h-10 px-6 bg-primary text-white rounded-xl text-sm font-semibold hover:bg-primary-dark disabled:opacity-50 transition-colors">
-          {smtpMutation.isPending ? 'Salvando...' : 'Salvar SMTP'}
-        </button>
+      <div className="bg-blue-50 text-blue-700 rounded-xl px-4 py-3 text-sm">
+        ⚙️ A configuração do servidor SMTP agora fica em <strong>Integrações › E-mail</strong>.
       </div>
 
       {/* Email templates */}

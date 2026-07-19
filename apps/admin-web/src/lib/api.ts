@@ -91,6 +91,9 @@ export const rootApi = {
   // AI usage & cost
   aiUsage: (days = 30) => api.get<any>(`/root/ai-usage?days=${days}`),
 
+  // Audit log
+  auditLog: (limit = 100, offset = 0) => api.get<any>(`/root/audit-log?limit=${limit}&offset=${offset}`),
+
   // Plans
   plans: () => api.get<any[]>('/root/plans'),
   createPlan: (data: any) => api.post<any>('/root/plans', data),

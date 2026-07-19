@@ -13,6 +13,8 @@ const nav = [
   { href: '/dashboard/ai-templates', icon: '🤖', label: 'Templates IA' },
   { href: '/dashboard/ai',          icon: '⚡', label: 'IA & Custos' },
   { href: '/dashboard/payments',    icon: '💳', label: 'Pagamentos' },
+  { href: '/dashboard/integracoes', icon: '🔌', label: 'Integrações' },
+  { href: '/dashboard/auditoria',   icon: '📋', label: 'Auditoria' },
   { href: '/dashboard/support',     icon: '🎧', label: 'Suporte' },
   { href: '/dashboard/settings',    icon: '⚙️', label: 'Configurações' },
 ]
