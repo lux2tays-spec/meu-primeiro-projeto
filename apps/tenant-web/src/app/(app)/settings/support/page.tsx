@@ -10,15 +10,15 @@ export default function SupportPage() {
             title: 'WhatsApp',
             desc: 'Fale diretamente com nossa equipe de suporte',
             action: 'Abrir WhatsApp',
-            href: 'https://wa.me/5511999999999?text=Olá, preciso de ajuda com o AgendaBot',
+            href: 'https://wa.me/5511999999999?text=Olá, preciso de ajuda com o AiConfirma',
             color: 'bg-green-50 border-green-200 hover:border-green-300',
           },
           {
             icon: '📧',
             title: 'E-mail',
-            desc: 'suporte@agendabot.com.br — respondemos em até 24h',
+            desc: 'suporte@aiconfirma.com.br — respondemos em até 24h',
             action: 'Enviar e-mail',
-            href: 'mailto:suporte@agendabot.com.br',
+            href: 'mailto:suporte@aiconfirma.com.br',
             color: 'bg-blue-50 border-blue-200 hover:border-blue-300',
           },
           {

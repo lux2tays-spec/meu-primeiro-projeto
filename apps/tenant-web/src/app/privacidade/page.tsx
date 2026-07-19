@@ -1,8 +1,8 @@
 import Link from 'next/link'
 
 export const metadata = {
-  title: 'Política de Privacidade — AgendaBot',
-  description: 'Como o AgendaBot coleta, usa, compartilha e protege dados pessoais, conforme a LGPD.',
+  title: 'Política de Privacidade — AiConfirma',
+  description: 'Como o AiConfirma coleta, usa, compartilha e protege dados pessoais, conforme a LGPD.',
 }
 
 // NOTA: preencha os campos entre colchetes com os dados reais da empresa
@@ -20,10 +20,10 @@ export default function PrivacidadePage() {
         <section>
           <h2 className="text-xl font-semibold">1. Quem somos</h2>
           <p>
-            O AgendaBot é uma plataforma que oferece assistentes de atendimento por WhatsApp com
+            O AiConfirma é uma plataforma que oferece assistentes de atendimento por WhatsApp com
             inteligência artificial para pequenos negócios. O controlador dos dados tratados nesta
-            plataforma é <strong>[RAZÃO SOCIAL], CNPJ [CNPJ]</strong> (&quot;AgendaBot&quot;, &quot;nós&quot;).
-            Dúvidas sobre privacidade e exercício de direitos: <strong>[encarregado@agendabot.com.br]</strong>.
+            plataforma é <strong>[RAZÃO SOCIAL], CNPJ [CNPJ]</strong> (&quot;AiConfirma&quot;, &quot;nós&quot;).
+            Dúvidas sobre privacidade e exercício de direitos: <strong>[encarregado@aiconfirma.com.br]</strong>.
           </p>
         </section>
 
@@ -33,7 +33,7 @@ export default function PrivacidadePage() {
             Em relação aos dados dos <strong>donos de negócio</strong> (nossos clientes/usuários do app),
             atuamos como <strong>controlador</strong>. Em relação aos dados dos <strong>clientes finais</strong>
             que conversam com o negócio pelo WhatsApp, o dono do negócio é o <strong>controlador</strong> e o
-            AgendaBot atua como <strong>operador</strong>, tratando os dados conforme as instruções dele e desta
+            AiConfirma atua como <strong>operador</strong>, tratando os dados conforme as instruções dele e desta
             política.
           </p>
         </section>
@@ -98,7 +98,7 @@ export default function PrivacidadePage() {
             Você pode solicitar acesso, correção, portabilidade, anonimização e eliminação dos seus dados,
             além de revogar consentimentos. Donos de negócio podem excluir a conta e todos os dados
             diretamente no aplicativo (Configurações → Excluir conta). Para solicitações de clientes finais
-            ou outras requisições, escreva para <strong>[encarregado@agendabot.com.br]</strong> — responderemos
+            ou outras requisições, escreva para <strong>[encarregado@aiconfirma.com.br]</strong> — responderemos
             no prazo legal.
           </p>
         </section>
@@ -116,7 +116,7 @@ export default function PrivacidadePage() {
           <h2 className="text-xl font-semibold">9. Alterações e contato</h2>
           <p>
             Podemos atualizar esta política; a data acima indica a última revisão. Encarregado de Proteção de
-            Dados (DPO): <strong>[Nome do Encarregado]</strong> — <strong>[encarregado@agendabot.com.br]</strong>.
+            Dados (DPO): <strong>[Nome do Encarregado]</strong> — <strong>[encarregado@aiconfirma.com.br]</strong>.
           </p>
           <p className="mt-4">
             Veja também nossos <Link href="/termos" className="text-primary hover:underline">Termos de Uso</Link>.

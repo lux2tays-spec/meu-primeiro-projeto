@@ -13,12 +13,12 @@ export default function AffiliateScreen() {
     queryFn: () => api.get<any>('/affiliate/me'),
   })
 
-  const referralLink = `https://agendabot.com.br/r/${affiliate?.referral_code ?? '...'}`
+  const referralLink = `https://aiconfirma.com.br/r/${affiliate?.referral_code ?? '...'}`
 
   async function handleShare() {
     try {
       await Share.share({
-        message: `🤖 Automatize o atendimento do seu negócio com IA no WhatsApp!\n\nCrie sua conta grátis no AgendaBot: ${referralLink}`,
+        message: `🤖 Automatize o atendimento do seu negócio com IA no WhatsApp!\n\nCrie sua conta grátis no AiConfirma: ${referralLink}`,
         url: referralLink,
       })
     } catch {}

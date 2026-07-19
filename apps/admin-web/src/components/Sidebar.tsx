@@ -35,7 +35,7 @@ export function Sidebar() {
             <span className="text-white font-black text-sm">AB</span>
           </div>
           <div>
-            <div className="text-white font-bold text-sm">AgendaBot</div>
+            <div className="text-white font-bold text-sm">AiConfirma</div>
             <div className="text-gray-400 text-xs">Root Admin</div>
           </div>
         </div>

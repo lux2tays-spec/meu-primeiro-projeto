@@ -4,7 +4,7 @@ import { Card } from '@/components/ui/Card'
 import { SettingsRow } from '@/components/ui/SettingsRow'
 import { colors, font, spacing } from '@/lib/theme'
 
-const WHATSAPP_SUPPORT = 'https://wa.me/5511999999999?text=Oi!%20Preciso%20de%20suporte%20no%20AgendaBot.'
+const WHATSAPP_SUPPORT = 'https://wa.me/5511999999999?text=Oi!%20Preciso%20de%20suporte%20no%20AiConfirma.'
 
 export default function SupportScreen() {
   return (
@@ -29,8 +29,8 @@ export default function SupportScreen() {
           <SettingsRow
             icon="mail-outline"
             label="E-mail"
-            subtitle="suporte@agendabot.com.br"
-            onPress={() => Linking.openURL('mailto:suporte@agendabot.com.br')}
+            subtitle="suporte@aiconfirma.com.br"
+            onPress={() => Linking.openURL('mailto:suporte@aiconfirma.com.br')}
           />
         </Card>
 
@@ -46,13 +46,13 @@ export default function SupportScreen() {
           <SettingsRow
             icon="videocam-outline"
             label="Vídeos tutoriais"
-            subtitle="Como configurar e usar o AgendaBot"
+            subtitle="Como configurar e usar o AiConfirma"
             onPress={() => Alert.alert('Em breve', 'Biblioteca de vídeos em construção')}
           />
         </Card>
 
         <Card style={styles.versionCard}>
-          <Text style={styles.versionText}>AgendaBot v1.0.0</Text>
+          <Text style={styles.versionText}>AiConfirma v1.0.0</Text>
           <Text style={styles.versionSub}>Feito com ❤️ para o Brasil</Text>
         </Card>
       </ScrollView>

@@ -3,7 +3,7 @@ import './globals.css'
 import { Providers } from './providers'
 
 export const metadata: Metadata = {
-  title: 'AgendaBot',
+  title: 'AiConfirma',
   description: 'Painel do estabelecimento',
 }
 

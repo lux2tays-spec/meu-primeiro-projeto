@@ -29,7 +29,7 @@ export async function createPreapproval(cfg: PaymentConfig, params: {
   const transparent = !!params.cardTokenId
 
   const body: Record<string, unknown> = {
-    reason: `AgendaBot — Plano ${params.planName}`,
+    reason: `AiConfirma — Plano ${params.planName}`,
     external_reference: `${params.tenantId}:${params.plan}`,
     payer_email: params.payerEmail,
     back_url: params.backUrl,

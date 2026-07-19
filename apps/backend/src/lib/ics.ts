@@ -56,7 +56,7 @@ export function buildAppointmentIcs(p: IcsParams): string {
   const lines = [
     'BEGIN:VCALENDAR',
     'VERSION:2.0',
-    'PRODID:-//AgendaBot//Agendamentos//PT-BR',
+    'PRODID:-//AiConfirma//Agendamentos//PT-BR',
     'CALSCALE:GREGORIAN',
     'METHOD:REQUEST',
     'BEGIN:VEVENT',

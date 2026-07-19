@@ -75,7 +75,7 @@ export const subscriptionRoutes: FastifyPluginAsync = async (app) => {
       plan: planRow.slug,
       planName: planRow.name,
       priceBrl: planRow.price_cents / 100,
-      payerEmail: user?.email ?? 'sem-email@agendabot.com.br',
+      payerEmail: user?.email ?? 'sem-email@aiconfirma.com.br',
       backUrl,
       cardTokenId: card_token_id,
     })

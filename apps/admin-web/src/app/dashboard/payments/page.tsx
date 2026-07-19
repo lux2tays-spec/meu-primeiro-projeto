@@ -58,7 +58,7 @@ export default function PaymentsPage() {
               <Field label="Segredo do Webhook (x-signature)" value={cfg.mp_webhook_secret} onChange={(v) => set('mp_webhook_secret', v)}
                 type="password" placeholder="Assinatura secreta do webhook" hint="Em Webhooks → sua integração → Chave secreta" />
               <Field label="URL de retorno após pagamento" value={cfg.back_url} onChange={(v) => set('back_url', v)}
-                placeholder="https://app.agendabot.com.br/settings/subscription"
+                placeholder="https://app.aiconfirma.com.br/settings/subscription"
                 hint="Obrigatório ser HTTPS — o Mercado Pago rejeita http:// e localhost. Sem uma URL HTTPS válida, o checkout dos tenants fica bloqueado." />
 
               <div className="bg-blue-50 rounded-xl p-4 text-xs text-blue-700 space-y-1">

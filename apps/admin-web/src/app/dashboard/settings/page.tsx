@@ -43,7 +43,7 @@ export default function SettingsPage() {
 }
 
 // ── Email Tab ─────────────────────────────────────────────────────────────────
-const SMTP_DEFAULT = { host: '', port: 587, user: '', pass: '', from_name: 'AgendaBot', from_email: '', secure: false }
+const SMTP_DEFAULT = { host: '', port: 587, user: '', pass: '', from_name: 'AiConfirma', from_email: '', secure: false }
 const TMPL_DEFAULT = Object.fromEntries(
   Object.keys(EMAIL_TEMPLATE_LABELS).map((k) => [k, { subject: '', enabled: true }])
 )
@@ -90,8 +90,8 @@ function EmailTab() {
           <SF label="Porta" value={smtp.port} onChange={(v: string) => setSmtp((s: any) => ({ ...s, port: Number(v) }))} type="number" placeholder="587" />
           <SF label="Usuário (e-mail)" value={smtp.user} onChange={(v: string) => setSmtp((s: any) => ({ ...s, user: v }))} placeholder="noreply@seudominio.com" />
           <SF label="Senha" value={smtp.pass} onChange={(v: string) => setSmtp((s: any) => ({ ...s, pass: v }))} type="password" placeholder="••••••••" />
-          <SF label="Nome do remetente" value={smtp.from_name} onChange={(v: string) => setSmtp((s: any) => ({ ...s, from_name: v }))} placeholder="AgendaBot" />
-          <SF label="E-mail do remetente" value={smtp.from_email} onChange={(v: string) => setSmtp((s: any) => ({ ...s, from_email: v }))} placeholder="noreply@agendabot.com.br" />
+          <SF label="Nome do remetente" value={smtp.from_name} onChange={(v: string) => setSmtp((s: any) => ({ ...s, from_name: v }))} placeholder="AiConfirma" />
+          <SF label="E-mail do remetente" value={smtp.from_email} onChange={(v: string) => setSmtp((s: any) => ({ ...s, from_email: v }))} placeholder="noreply@aiconfirma.com.br" />
         </div>
 
         <div className="flex items-center gap-3 pt-2">

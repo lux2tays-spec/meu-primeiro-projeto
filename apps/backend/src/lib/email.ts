@@ -40,13 +40,13 @@ export async function sendVerificationEmail(to: string, name: string, token: str
 
   const transporter = await getTransporter()
   const info = await transporter.sendMail({
-    from: process.env.EMAIL_FROM ?? 'AgendaBot <noreply@agendabot.com.br>',
+    from: process.env.EMAIL_FROM ?? 'AiConfirma <noreply@aiconfirma.com.br>',
     to,
-    subject: 'Confirme seu e-mail — AgendaBot',
+    subject: 'Confirme seu e-mail — AiConfirma',
     html: `
       <div style="font-family:sans-serif;max-width:480px;margin:0 auto">
         <h2 style="color:#111">Olá, ${escapeHtml(name)}!</h2>
-        <p>Obrigado por criar sua conta no <strong>AgendaBot</strong>.</p>
+        <p>Obrigado por criar sua conta no <strong>AiConfirma</strong>.</p>
         <p>Clique no botão abaixo para confirmar seu e-mail e ativar sua conta:</p>
         <a href="${link}"
            style="display:inline-block;margin:16px 0;padding:14px 28px;background:#6366f1;color:#fff;border-radius:10px;text-decoration:none;font-weight:700;font-size:16px">
@@ -65,13 +65,13 @@ export async function sendVerificationEmail(to: string, name: string, token: str
 export async function sendPasswordResetEmail(to: string, name: string, link: string) {
   const transporter = await getTransporter()
   const info = await transporter.sendMail({
-    from: process.env.EMAIL_FROM ?? 'AgendaBot <noreply@agendabot.com.br>',
+    from: process.env.EMAIL_FROM ?? 'AiConfirma <noreply@aiconfirma.com.br>',
     to,
-    subject: 'Redefinição de senha — AgendaBot',
+    subject: 'Redefinição de senha — AiConfirma',
     html: `
       <div style="font-family:sans-serif;max-width:480px;margin:0 auto">
         <h2 style="color:#111">Olá, ${escapeHtml(name)}!</h2>
-        <p>Recebemos um pedido para redefinir a senha da sua conta no <strong>AgendaBot</strong>.</p>
+        <p>Recebemos um pedido para redefinir a senha da sua conta no <strong>AiConfirma</strong>.</p>
         <p>Clique no botão abaixo para criar uma nova senha:</p>
         <a href="${link}"
            style="display:inline-block;margin:16px 0;padding:14px 28px;background:#6366f1;color:#fff;border-radius:10px;text-decoration:none;font-weight:700;font-size:16px">
@@ -124,12 +124,12 @@ export async function sendAppointmentInvite(inv: AppointmentInvite): Promise<boo
     description,
     location: inv.location,
     organizerName: inv.businessName,
-    organizerEmail: (process.env.EMAIL_FROM ?? 'noreply@agendabot.com.br').replace(/.*<|>.*/g, '') || 'noreply@agendabot.com.br',
+    organizerEmail: (process.env.EMAIL_FROM ?? 'noreply@aiconfirma.com.br').replace(/.*<|>.*/g, '') || 'noreply@aiconfirma.com.br',
   })
 
   const transporter = await getTransporter()
   const info = await transporter.sendMail({
-    from: process.env.EMAIL_FROM ?? 'AgendaBot <noreply@agendabot.com.br>',
+    from: process.env.EMAIL_FROM ?? 'AiConfirma <noreply@aiconfirma.com.br>',
     to: inv.to,
     subject: `Seu agendamento: ${inv.serviceName} — ${dateFmt} às ${timeFmt}`,
     html: `

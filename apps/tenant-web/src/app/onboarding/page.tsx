@@ -795,7 +795,7 @@ export default function OnboardingPage() {
               <Rocket size={18} strokeWidth={1.75} className="text-white" />
             </div>
             <div>
-              <p className="text-white font-bold text-sm leading-tight">Bem-vindo ao AgendaBot!</p>
+              <p className="text-white font-bold text-sm leading-tight">Bem-vindo ao AiConfirma!</p>
               <p className="text-gray-400 text-xs mt-0.5">Vamos configurar seu negócio em poucos passos</p>
             </div>
           </div>

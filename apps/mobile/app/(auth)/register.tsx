@@ -11,7 +11,7 @@ import { authApi, googleApi } from '@/lib/api'
 import { useToast } from '@/lib/toast'
 import { colors, font, spacing } from '@/lib/theme'
 
-const WEB_URL = process.env.EXPO_PUBLIC_WEB_URL ?? 'https://agendabot.com.br'
+const WEB_URL = process.env.EXPO_PUBLIC_WEB_URL ?? 'https://aiconfirma.com.br'
 
 function validateEmail(v: string) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v)

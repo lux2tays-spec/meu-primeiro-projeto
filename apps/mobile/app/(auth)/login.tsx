@@ -94,7 +94,7 @@ export default function LoginScreen() {
           <View style={styles.logo}>
             <Text style={styles.logoText}>AB</Text>
           </View>
-          <Text style={styles.title}>AgendaBot</Text>
+          <Text style={styles.title}>AiConfirma</Text>
           <Text style={styles.subtitle}>Seu atendimento no piloto automático</Text>
         </View>
 

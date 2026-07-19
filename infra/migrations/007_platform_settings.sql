@@ -38,16 +38,16 @@ INSERT INTO platform_settings (key, value) VALUES
     "secure": false,
     "user": "",
     "pass": "",
-    "from_name": "AgendaBot",
-    "from_email": "noreply@agendabot.com.br"
+    "from_name": "AiConfirma",
+    "from_email": "noreply@aiconfirma.com.br"
   }'),
   ('email_templates', '{
-    "welcome":        { "subject": "Bem-vindo ao AgendaBot!", "enabled": true },
-    "verify_email":   { "subject": "Confirme seu e-mail - AgendaBot", "enabled": true },
-    "reset_password": { "subject": "Redefinição de senha - AgendaBot", "enabled": true },
-    "new_staff":      { "subject": "Você foi adicionado como colaborador - AgendaBot", "enabled": true },
-    "trial_ending":   { "subject": "Seu período de teste está encerrando - AgendaBot", "enabled": true },
-    "subscription_confirmed": { "subject": "Assinatura confirmada - AgendaBot", "enabled": true }
+    "welcome":        { "subject": "Bem-vindo ao AiConfirma!", "enabled": true },
+    "verify_email":   { "subject": "Confirme seu e-mail - AiConfirma", "enabled": true },
+    "reset_password": { "subject": "Redefinição de senha - AiConfirma", "enabled": true },
+    "new_staff":      { "subject": "Você foi adicionado como colaborador - AiConfirma", "enabled": true },
+    "trial_ending":   { "subject": "Seu período de teste está encerrando - AiConfirma", "enabled": true },
+    "subscription_confirmed": { "subject": "Assinatura confirmada - AiConfirma", "enabled": true }
   }'),
   ('ai_config', '{
     "provider": "anthropic",

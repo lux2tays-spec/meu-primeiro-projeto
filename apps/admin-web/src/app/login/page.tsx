@@ -38,7 +38,7 @@ export default function LoginPage() {
           <div className="inline-flex w-16 h-16 rounded-2xl bg-primary items-center justify-center mb-4">
             <span className="text-white text-2xl font-black">AB</span>
           </div>
-          <h1 className="text-white text-2xl font-bold">AgendaBot</h1>
+          <h1 className="text-white text-2xl font-bold">AiConfirma</h1>
           <p className="text-gray-400 text-sm mt-1">Painel Root — Acesso restrito</p>
         </div>
 
@@ -50,7 +50,7 @@ export default function LoginPage() {
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               className="w-full h-11 px-4 rounded-xl border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
-              placeholder="admin@agendabot.com.br"
+              placeholder="admin@aiconfirma.com.br"
               required
             />
           </div>

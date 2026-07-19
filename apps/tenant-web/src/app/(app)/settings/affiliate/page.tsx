@@ -7,14 +7,14 @@ export default function AffiliatePage() {
 
   if (isLoading) return <div className="text-gray-400 text-sm">Carregando...</div>
 
-  const referralUrl = `${typeof window !== 'undefined' ? window.location.origin.replace(':3002', ':3002') : 'https://app.agendabot.com.br'}/register?ref=${affiliate?.referral_code}`
+  const referralUrl = `${typeof window !== 'undefined' ? window.location.origin.replace(':3002', ':3002') : 'https://app.aiconfirma.com.br'}/register?ref=${affiliate?.referral_code}`
 
   return (
     <div className="max-w-2xl space-y-6">
       <h1 className="text-2xl font-bold text-gray-900">Programa de Afiliados</h1>
 
       <div className="bg-primary-light border border-primary/20 rounded-2xl p-5">
-        <p className="text-primary font-semibold">💰 Ganhe indicando o AgendaBot</p>
+        <p className="text-primary font-semibold">💰 Ganhe indicando o AiConfirma</p>
         <p className="text-primary/80 text-sm mt-1">Receba comissão por cada cliente que assinar usando seu link de indicação.</p>
       </div>
 
@@ -38,11 +38,11 @@ export default function AffiliatePage() {
         <div className="flex gap-2">
           <input
             readOnly
-            value={`https://app.agendabot.com.br/register?ref=${affiliate?.referral_code}`}
+            value={`https://app.aiconfirma.com.br/register?ref=${affiliate?.referral_code}`}
             className="flex-1 h-11 px-4 rounded-xl border border-gray-200 text-sm bg-gray-50 text-gray-600"
           />
           <button
-            onClick={() => navigator.clipboard.writeText(`https://app.agendabot.com.br/register?ref=${affiliate?.referral_code}`)}
+            onClick={() => navigator.clipboard.writeText(`https://app.aiconfirma.com.br/register?ref=${affiliate?.referral_code}`)}
             className="px-4 h-11 bg-primary hover:bg-primary-dark text-white text-sm font-semibold rounded-xl transition-colors"
           >
             Copiar

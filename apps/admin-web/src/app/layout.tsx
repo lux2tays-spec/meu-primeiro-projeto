@@ -3,7 +3,7 @@ import './globals.css'
 import { Providers } from '@/lib/providers'
 
 export const metadata: Metadata = {
-  title: 'AgendaBot — Admin Root',
+  title: 'AiConfirma — Admin Root',
   description: 'Painel administrativo do proprietário da plataforma',
 }
 
