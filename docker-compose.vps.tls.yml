@@ -1,0 +1,36 @@
+# TLS-only overlay — adds Caddy (automatic HTTPS via Let's Encrypt) IN FRONT of
+# the existing, already-running stack, WITHOUT changing Postgres/Redis or their
+# passwords. Use it alongside the current compose (does not replace it):
+#
+#   docker compose -f docker-compose.vps.yml -f docker-compose.vps.tls.yml up -d
+#
+# Requires API_DOMAIN in the repo-root .env (e.g. API_DOMAIN=api.aiconfirma.com.br)
+# and that domain's DNS A record pointing to this VPS. Caddy proxies HTTPS →
+# backend:3000 over the shared compose network. Lower risk than the fully
+# hardened stack: no Redis auth / Postgres password rotation. Once you're ready
+# for the full hardening, migrate to docker-compose.vps.hardened.yml instead.
+
+services:
+  caddy:
+    image: caddy:2-alpine
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      API_DOMAIN: ${API_DOMAIN:?set API_DOMAIN in the repo-root .env}
+    volumes:
+      - ./infra/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - backend
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  caddy_data:
+  caddy_config:
