@@ -6,6 +6,7 @@ import { hashPassword } from '../lib/password'
 import { invalidateAiConfig } from '../lib/botConfig'
 import { redis } from '../lib/redis'
 import { encrypt, decrypt, maskSecret } from '../lib/crypto'
+import { logAdminAction, auditFromRequest } from '../lib/auditLog'
 
 // Secret fields (per platform_settings key) that must be encrypted at rest and
 // never returned in full to the admin panel.
@@ -350,7 +351,24 @@ export const rootRoutes: FastifyPluginAsync = async (app) => {
     )
     if (key === 'ai_config') await invalidateAiConfig()
     if (key === 'payment_config') await invalidatePaymentConfig()
+    // Governance: record WHO changed the config (secret values never logged).
+    const changed = body && typeof body === 'object' ? Object.keys(body).join(', ') : ''
+    await logAdminAction(auditFromRequest(request, 'settings.update', key, `campos: ${changed}`))
     return reply.send({ ok: true })
+  })
+
+  // Audit trail (governance) — who changed what in the Root Admin, when.
+  app.get('/audit-log', async (request, reply) => {
+    const { limit = '100', offset = '0' } = request.query as { limit?: string; offset?: string }
+    const lim = Math.min(Math.max(Number(limit) || 100, 1), 500)
+    const off = Math.max(Number(offset) || 0, 0)
+    const { rows } = await db.query(
+      `SELECT actor_email, action, target, summary, ip,
+              to_char(created_at AT TIME ZONE 'America/Sao_Paulo', 'DD/MM/YYYY HH24:MI') AS at
+       FROM admin_audit_log ORDER BY created_at DESC LIMIT $1 OFFSET $2`,
+      [lim, off]
+    )
+    return reply.send(rows)
   })
 
   // ── AI usage & cost dashboard ─────────────────────────────────────────────
