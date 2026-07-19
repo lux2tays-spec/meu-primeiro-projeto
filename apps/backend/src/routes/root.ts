@@ -22,6 +22,7 @@ import {
   invalidateEvolutionConfig,
   invalidateSmtpConfig,
   invalidateGoogleConfig,
+  getEvolutionConfig,
 } from '../lib/integrationConfig'
 
 export const rootRoutes: FastifyPluginAsync = async (app) => {
@@ -380,6 +381,70 @@ export const rootRoutes: FastifyPluginAsync = async (app) => {
       [lim, off]
     )
     return reply.send(rows)
+  })
+
+  // Infra status (read-only) — health of DB, Redis, Evolution and last backup.
+  // NEVER returns any secret (URLs/keys/passwords) — only up/down + metrics.
+  app.get('/infra-status', async (_request, reply) => {
+    // DB ping
+    const db_ = await (async () => {
+      const t = Date.now()
+      try { await db.query('SELECT 1'); return { ok: true, latency_ms: Date.now() - t } }
+      catch { return { ok: false, latency_ms: null as number | null } }
+    })()
+
+    // Redis ping
+    const redis_ = await (async () => {
+      const t = Date.now()
+      try { await redis.ping(); return { ok: true, latency_ms: Date.now() - t } }
+      catch { return { ok: false, latency_ms: null as number | null } }
+    })()
+
+    // Evolution — count instances (never expose url/key)
+    const evolution_ = await (async () => {
+      const cfg = await getEvolutionConfig()
+      const configured = !!(cfg.url && cfg.key)
+      if (!configured) return { ok: false, configured: false, total: 0, connected: 0 }
+      try {
+        const res = await fetch(`${cfg.url}/instance/fetchInstances`, {
+          headers: { apikey: cfg.key }, signal: AbortSignal.timeout(6000),
+        })
+        if (!res.ok) return { ok: false, configured: true, total: 0, connected: 0 }
+        const list: any[] = await res.json().catch(() => [])
+        const arr = Array.isArray(list) ? list : []
+        const stateOf = (i: any) => i?.connectionStatus ?? i?.instance?.state ?? i?.state ?? ''
+        const connected = arr.filter((i) => stateOf(i) === 'open').length
+        return { ok: true, configured: true, total: arr.length, connected }
+      } catch { return { ok: false, configured: true, total: 0, connected: 0 } }
+    })()
+
+    // Last backup (from backup_log — written by infra/backup.sh)
+    const backup_ = await (async () => {
+      try {
+        const { rows: [b] } = await db.query(
+          `SELECT filename, size_bytes,
+                  to_char(created_at AT TIME ZONE 'America/Sao_Paulo', 'DD/MM/YYYY HH24:MI') AS at,
+                  EXTRACT(EPOCH FROM (NOW() - created_at)) / 3600 AS age_hours,
+                  (SELECT COUNT(*) FROM backup_log) AS total
+           FROM backup_log ORDER BY created_at DESC LIMIT 1`
+        )
+        if (!b) return { ok: false, last_at: null, age_hours: null, total: 0 }
+        const ageHours = Number(b.age_hours)
+        return {
+          // Consider healthy if the last backup ran within ~26h (daily + margin)
+          ok: ageHours <= 26,
+          last_at: b.at,
+          age_hours: Math.round(ageHours * 10) / 10,
+          size_bytes: b.size_bytes ? Number(b.size_bytes) : null,
+          total: Number(b.total),
+        }
+      } catch {
+        // Table may not exist yet (migration not applied) — report as unknown
+        return { ok: false, last_at: null, age_hours: null, total: 0 }
+      }
+    })()
+
+    return reply.send({ db: db_, redis: redis_, evolution: evolution_, backup: backup_ })
   })
 
   // ── AI usage & cost dashboard ─────────────────────────────────────────────

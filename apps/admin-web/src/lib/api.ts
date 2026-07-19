@@ -94,6 +94,9 @@ export const rootApi = {
   // Audit log
   auditLog: (limit = 100, offset = 0) => api.get<any>(`/root/audit-log?limit=${limit}&offset=${offset}`),
 
+  // Infra status (read-only health)
+  infraStatus: () => api.get<any>('/root/infra-status'),
+
   // Plans
   plans: () => api.get<any[]>('/root/plans'),
   createPlan: (data: any) => api.post<any>('/root/plans', data),

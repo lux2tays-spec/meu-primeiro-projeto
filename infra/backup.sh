@@ -84,6 +84,18 @@ fi
 SIZE="$(du -h "$OUT_FILE" 2>/dev/null | cut -f1)"
 log "backup OK: ${OUT_FILE} (${SIZE:-?})"
 
+# Registro no banco (best-effort): permite ao painel de Infra do Root Admin
+# mostrar quando foi o ultimo backup. NUNCA falha o backup se o INSERT falhar.
+SIZE_BYTES="$(stat -c '%s' "$OUT_FILE" 2>/dev/null || wc -c < "$OUT_FILE" 2>/dev/null || echo '')"
+if command -v psql >/dev/null 2>&1; then
+  if printf "INSERT INTO backup_log (filename, size_bytes) VALUES ('%s', NULLIF('%s','')::bigint);" \
+       "$BASENAME" "$SIZE_BYTES" | psql -v ON_ERROR_STOP=1 -q "$PGDATABASE" >/dev/null 2>&1; then
+    log "registro em backup_log OK"
+  else
+    log "AVISO: nao foi possivel registrar em backup_log (backup local mantido)"
+  fi
+fi
+
 # --- 2. Rotacao (mantem os BACKUP_KEEP mais recentes) ------------------------
 # Nomes controlados por este script (sem espacos), entao ls -1t e seguro aqui.
 ls -1t "$BACKUP_DIR"/agendabot_*.dump.gz 2>/dev/null \
