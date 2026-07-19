@@ -25,6 +25,7 @@ import {
   getEvolutionConfig,
 } from '../lib/integrationConfig'
 import { invalidateBrandConfig } from '../lib/brandConfig'
+import { ASSET_SLOTS } from './branding'
 
 export const rootRoutes: FastifyPluginAsync = async (app) => {
   app.addHook('preHandler', (app as any).requireRoot)
@@ -447,6 +448,64 @@ export const rootRoutes: FastifyPluginAsync = async (app) => {
     })()
 
     return reply.send({ db: db_, redis: redis_, evolution: evolution_, backup: backup_ })
+  })
+
+  // ── Branding (dynamic logo/favicon/colors) ────────────────────────────────
+  // Current branding state for the admin panel: which asset slots exist + when.
+  app.get('/branding', async (_request, reply) => {
+    const { rows } = await db.query(
+      `SELECT slot, content_type,
+              to_char(updated_at AT TIME ZONE 'America/Sao_Paulo', 'DD/MM/YYYY HH24:MI') AS at
+       FROM branding_assets`
+    )
+    const assets: Record<string, any> = {}
+    for (const r of rows as any[]) assets[r.slot] = { content_type: r.content_type, at: r.at, url: `/branding/asset/${r.slot}` }
+    return reply.send({ slots: ASSET_SLOTS, assets })
+  })
+
+  const ALLOWED_IMG = new Set([
+    'image/png', 'image/jpeg', 'image/svg+xml', 'image/webp',
+    'image/x-icon', 'image/vnd.microsoft.icon',
+  ])
+  const MAX_ASSET_BYTES = 2 * 1024 * 1024 // 2 MB
+
+  // Upload/replace a branding asset (base64 data URL in JSON — no multipart needed).
+  app.put<{ Params: { slot: string } }>('/branding/asset/:slot', async (request, reply) => {
+    const slot = request.params.slot
+    if (!(ASSET_SLOTS as readonly string[]).includes(slot)) {
+      return reply.status(400).send({ error: 'Slot inválido' })
+    }
+    const { data_url } = (request.body ?? {}) as { data_url?: string }
+    const m = typeof data_url === 'string' && data_url.match(/^data:([^;]+);base64,(.+)$/s)
+    if (!m) return reply.status(400).send({ error: 'Imagem inválida (envie um data URL base64)' })
+    const contentType = m[1].toLowerCase()
+    if (!ALLOWED_IMG.has(contentType)) {
+      return reply.status(400).send({ error: 'Formato não suportado (use PNG, JPG, SVG, WEBP ou ICO)' })
+    }
+    let buf: Buffer
+    try { buf = Buffer.from(m[2], 'base64') } catch { return reply.status(400).send({ error: 'Base64 inválido' }) }
+    if (buf.length === 0) return reply.status(400).send({ error: 'Arquivo vazio' })
+    if (buf.length > MAX_ASSET_BYTES) return reply.status(413).send({ error: 'Arquivo muito grande (máx. 2 MB)' })
+
+    await db.query(
+      `INSERT INTO branding_assets (slot, content_type, data, updated_at)
+       VALUES ($1, $2, $3, NOW())
+       ON CONFLICT (slot) DO UPDATE SET content_type = $2, data = $3, updated_at = NOW()`,
+      [slot, contentType, buf]
+    )
+    await logAdminAction(auditFromRequest(request, 'branding.upload', slot, `${contentType}, ${buf.length} bytes`))
+    return reply.send({ ok: true })
+  })
+
+  // Remove a branding asset (apps fall back to the bundled default).
+  app.delete<{ Params: { slot: string } }>('/branding/asset/:slot', async (request, reply) => {
+    const slot = request.params.slot
+    if (!(ASSET_SLOTS as readonly string[]).includes(slot)) {
+      return reply.status(400).send({ error: 'Slot inválido' })
+    }
+    await db.query('DELETE FROM branding_assets WHERE slot = $1', [slot])
+    await logAdminAction(auditFromRequest(request, 'branding.delete', slot))
+    return reply.send({ ok: true })
   })
 
   // ── AI usage & cost dashboard ─────────────────────────────────────────────

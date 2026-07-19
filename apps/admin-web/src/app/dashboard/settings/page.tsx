@@ -3,7 +3,9 @@ import { useState, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { rootApi } from '@/lib/api'
 
-type Tab = 'brand' | 'email' | 'ai' | 'plans'
+type Tab = 'brand' | 'appearance' | 'email' | 'ai' | 'plans'
+
+const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3000'
 
 const EMAIL_TEMPLATE_LABELS: Record<string, string> = {
   welcome:                'Boas-vindas ao novo usuário',
@@ -28,7 +30,7 @@ export default function SettingsPage() {
 
       {/* Tabs */}
       <div className="flex gap-1 bg-gray-100 rounded-xl p-1 w-fit">
-        {([['brand', '🏷️ Marca'], ['email', '📧 E-mails'], ['plans', '📦 Planos']] as [Tab, string][]).map(([key, label]) => (
+        {([['brand', '🏷️ Marca'], ['appearance', '🎨 Aparência'], ['email', '📧 E-mails'], ['plans', '📦 Planos']] as [Tab, string][]).map(([key, label]) => (
           <button key={key} onClick={() => setTab(key)}
             className={`px-5 py-2 rounded-lg text-sm font-medium transition-colors ${tab === key ? 'bg-white shadow-sm text-gray-900' : 'text-gray-500 hover:text-gray-700'}`}>
             {label}
@@ -37,6 +39,7 @@ export default function SettingsPage() {
       </div>
 
       {tab === 'brand' && <BrandTab />}
+      {tab === 'appearance' && <AppearanceTab />}
       {tab === 'email' && <EmailTab />}
       {tab === 'plans' && <PlansTab />}
     </div>
@@ -120,6 +123,147 @@ function BrandTab() {
         className="h-10 px-6 bg-primary text-white rounded-xl text-sm font-semibold hover:bg-primary-dark disabled:opacity-50 transition-colors">
         {mutation.isPending ? 'Salvando...' : 'Salvar marca'}
       </button>
+    </div>
+  )
+}
+
+// ── Appearance Tab (logos, favicon, colors) ───────────────────────────────────
+const THEME_DEFAULT = { primary: '#2CB86E', primary_dark: '#1C9DAA', accent: '#1D62B5', sidebar: '#1E3C66' }
+const ASSET_SLOTS: [string, string, string][] = [
+  ['logo',             'Logo principal',        'Fundo claro (cabeçalhos, login)'],
+  ['logo_dark',        'Logo para fundo escuro','Usado sobre fundos escuros'],
+  ['logo_transparent', 'Logo transparente',     'PNG sem fundo'],
+  ['favicon',          'Favicon',               'Ícone da aba do navegador (32×32 ou .ico)'],
+  ['icon',             'Ícone do app',          'App icon quadrado (1024×1024) — Apple/Google'],
+]
+
+function AppearanceTab() {
+  const qc = useQueryClient()
+  const [success, setSuccess] = useState('')
+  const [err, setErr] = useState('')
+  const [colors, setColors] = useState<any>(THEME_DEFAULT)
+
+  const { data: settings } = useQuery({ queryKey: ['root-settings'], queryFn: rootApi.settings })
+  const { data: branding, isLoading, isError } = useQuery({ queryKey: ['root-branding'], queryFn: rootApi.branding })
+
+  useEffect(() => {
+    if (settings?.branding_theme) setColors({ ...THEME_DEFAULT, ...settings.branding_theme })
+  }, [settings])
+
+  const flash = (setter: (m: string) => void, msg: string) => { setter(msg); setTimeout(() => setter(''), 3500) }
+
+  const colorsMutation = useMutation({
+    mutationFn: () => rootApi.updateSettings('branding_theme', colors),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['root-settings'] }); flash(setSuccess, 'Cores salvas!') },
+  })
+
+  const uploadMutation = useMutation({
+    mutationFn: ({ slot, dataUrl }: { slot: string; dataUrl: string }) => rootApi.uploadBrandingAsset(slot, dataUrl),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['root-branding'] }); flash(setSuccess, 'Imagem enviada!') },
+    onError: (e: any) => flash(setErr, e.message ?? 'Falha no upload'),
+  })
+
+  const deleteMutation = useMutation({
+    mutationFn: (slot: string) => rootApi.deleteBrandingAsset(slot),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['root-branding'] }); flash(setSuccess, 'Imagem removida!') },
+  })
+
+  const onFile = (slot: string) => (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    e.target.value = '' // allow re-selecting the same file
+    if (!file) return
+    if (file.size > 2 * 1024 * 1024) { flash(setErr, 'Arquivo muito grande (máx. 2 MB)'); return }
+    const reader = new FileReader()
+    reader.onload = () => uploadMutation.mutate({ slot, dataUrl: String(reader.result) })
+    reader.onerror = () => flash(setErr, 'Não foi possível ler o arquivo')
+    reader.readAsDataURL(file)
+  }
+
+  if (isError) return <div className="text-red-500 text-sm py-4">Erro ao carregar. Verifique se o backend está rodando.</div>
+  if (isLoading) return <div className="text-gray-400 text-sm py-4">Carregando...</div>
+
+  const assets = branding?.assets ?? {}
+  const setC = (k: string) => (v: string) => setColors((c: any) => ({ ...c, [k]: v }))
+
+  return (
+    <div className="space-y-6">
+      {success && <div className="bg-green-50 text-green-700 rounded-xl px-4 py-3 text-sm font-medium">{success}</div>}
+      {err && <div className="bg-red-50 text-red-600 rounded-xl px-4 py-3 text-sm font-medium">{err}</div>}
+
+      {/* Logos / favicon */}
+      <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100 space-y-4">
+        <div>
+          <h2 className="font-semibold text-gray-900">Logos &amp; Ícones</h2>
+          <p className="text-xs text-gray-500 mt-1">Formatos: PNG, JPG, SVG, WEBP ou ICO. Máx. 2 MB. Os apps usam o logo padrão embutido quando não há upload.</p>
+        </div>
+        <div className="space-y-3">
+          {ASSET_SLOTS.map(([slot, label, hint]) => {
+            const a = assets[slot]
+            const isFavicon = slot === 'favicon'
+            return (
+              <div key={slot} className="flex items-center gap-4 p-4 rounded-xl border border-gray-100">
+                <div className={`flex-shrink-0 w-16 h-16 rounded-lg border border-gray-100 flex items-center justify-center overflow-hidden ${slot === 'logo_dark' ? 'bg-gray-800' : 'bg-gray-50'}`}>
+                  {a ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={`${API_BASE}${a.url}?t=${encodeURIComponent(a.at ?? '')}`} alt={label}
+                      className={isFavicon ? 'w-8 h-8 object-contain' : 'max-w-full max-h-full object-contain'} />
+                  ) : (
+                    <span className="text-[10px] text-gray-300 text-center px-1">sem imagem</span>
+                  )}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="text-sm font-medium text-gray-800">{label}</div>
+                  <div className="text-xs text-gray-400">{hint}</div>
+                  {a?.at && <div className="text-[11px] text-gray-400 mt-0.5">Atualizado em {a.at}</div>}
+                </div>
+                <div className="flex items-center gap-2 flex-shrink-0">
+                  <label className="h-9 px-4 inline-flex items-center bg-gray-100 hover:bg-gray-200 rounded-xl text-xs font-medium text-gray-700 cursor-pointer transition-colors">
+                    {a ? 'Trocar' : 'Enviar'}
+                    <input type="file" accept="image/png,image/jpeg,image/svg+xml,image/webp,image/x-icon,.ico" className="hidden" onChange={onFile(slot)} />
+                  </label>
+                  {a && (
+                    <button onClick={() => deleteMutation.mutate(slot)} className="text-xs text-red-400 hover:text-red-600 font-medium">
+                      Remover
+                    </button>
+                  )}
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      </div>
+
+      {/* Colors */}
+      <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100 space-y-4">
+        <div>
+          <h2 className="font-semibold text-gray-900">Cores da Marca</h2>
+          <p className="text-xs text-gray-500 mt-1">Aplicadas nos apps e páginas. Deixe no padrão para usar a paleta AiConfirma.</p>
+        </div>
+        <div className="grid grid-cols-2 gap-4">
+          <ColorField label="Cor primária" value={colors.primary} onChange={setC('primary')} />
+          <ColorField label="Primária (escura)" value={colors.primary_dark} onChange={setC('primary_dark')} />
+          <ColorField label="Destaque (accent)" value={colors.accent} onChange={setC('accent')} />
+          <ColorField label="Barra lateral" value={colors.sidebar} onChange={setC('sidebar')} />
+        </div>
+        <button onClick={() => colorsMutation.mutate()} disabled={colorsMutation.isPending}
+          className="h-10 px-6 bg-primary text-white rounded-xl text-sm font-semibold hover:bg-primary-dark disabled:opacity-50 transition-colors">
+          {colorsMutation.isPending ? 'Salvando...' : 'Salvar cores'}
+        </button>
+      </div>
+    </div>
+  )
+}
+
+function ColorField({ label, value, onChange }: any) {
+  return (
+    <div>
+      <label className="block text-sm font-medium text-gray-700 mb-1">{label}</label>
+      <div className="flex items-center gap-2">
+        <input type="color" value={value ?? '#000000'} onChange={(e) => onChange(e.target.value)}
+          className="w-10 h-10 rounded-lg border border-gray-200 cursor-pointer bg-white p-0.5" />
+        <input type="text" value={value ?? ''} onChange={(e) => onChange(e.target.value)} placeholder="#000000"
+          className="flex-1 h-10 px-3 rounded-xl border border-gray-200 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-primary" />
+      </div>
     </div>
   )
 }

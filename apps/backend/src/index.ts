@@ -21,6 +21,7 @@ import { rootRoutes } from './routes/root'
 import { affiliateRoutes } from './routes/affiliate'
 import { financeiroRoutes } from './routes/financeiro'
 import { subscriptionRoutes } from './routes/subscription'
+import { brandingRoutes } from './routes/branding'
 import { startReminderJob } from './jobs/reminders'
 import { startAppointmentReminders } from './jobs/appointmentReminders'
 import { startSubscriptionEnforcer } from './jobs/subscriptionEnforcer'
@@ -104,6 +105,9 @@ async function start() {
   await app.register(authRoutes, { prefix: '/auth' })
   await app.register(googleRoutes)
   await app.register(webhookRoutes, { prefix: '/webhook' })
+
+  // Public branding (no auth) — apps fetch name/colors/logo at runtime
+  await app.register(brandingRoutes)
 
   // Tenant-scoped routes (require JWT)
   await app.register(tenantRoutes, { prefix: '/tenant' })

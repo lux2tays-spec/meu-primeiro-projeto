@@ -43,6 +43,8 @@ export const api = {
     request<T>(path, { method: 'POST', body: JSON.stringify(body ?? {}) }),
   patch: <T>(path: string, body: unknown) =>
     request<T>(path, { method: 'PATCH', body: JSON.stringify(body) }),
+  put: <T>(path: string, body?: unknown) =>
+    request<T>(path, { method: 'PUT', body: JSON.stringify(body ?? {}) }),
   delete: <T>(path: string) => request<T>(path, { method: 'DELETE' }),
 }
 
@@ -96,6 +98,11 @@ export const rootApi = {
 
   // Infra status (read-only health)
   infraStatus: () => api.get<any>('/root/infra-status'),
+
+  // Branding (dynamic logo/favicon/colors)
+  branding: () => api.get<any>('/root/branding'),
+  uploadBrandingAsset: (slot: string, data_url: string) => api.put<any>(`/root/branding/asset/${slot}`, { data_url }),
+  deleteBrandingAsset: (slot: string) => api.delete(`/root/branding/asset/${slot}`),
 
   // Plans
   plans: () => api.get<any[]>('/root/plans'),
