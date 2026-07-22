@@ -1,4 +1,5 @@
 import { View, Text, StyleSheet, ScrollView, Linking, Alert } from 'react-native'
+import { router } from 'expo-router'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { Card } from '@/components/ui/Card'
 import { SettingsRow } from '@/components/ui/SettingsRow'
@@ -16,6 +17,24 @@ export default function SupportScreen() {
         <Card style={styles.heroCard}>
           <Text style={styles.heroTitle}>Como podemos ajudar?</Text>
           <Text style={styles.heroSub}>Nossa equipe está disponível de segunda a sexta, das 9h às 18h.</Text>
+        </Card>
+
+        <Text style={styles.section}>Atendimento</Text>
+        <Card style={styles.group}>
+          <SettingsRow
+            icon="sparkles-outline"
+            iconColor={colors.primary}
+            label="Assistente de suporte (IA)"
+            subtitle="Tire dúvidas agora, resposta imediata"
+            onPress={() => router.push('/(app)/settings/support-chat')}
+          />
+          <View style={styles.divider} />
+          <SettingsRow
+            icon="file-tray-full-outline"
+            label="Meus chamados"
+            subtitle="Acompanhe e abra solicitações para a equipe"
+            onPress={() => router.push('/(app)/settings/tickets')}
+          />
         </Card>
 
         <Text style={styles.section}>Fale conosco</Text>

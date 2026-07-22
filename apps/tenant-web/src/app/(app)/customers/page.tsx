@@ -1,7 +1,13 @@
 'use client'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { tenantApi } from '@/lib/api'
+import { tenantApi, getToken } from '@/lib/api'
+import { getTokenPayload } from '@/lib/auth'
+
+// Full display name: "Nome Sobrenome" (last_name is optional).
+function fullName(c: { name?: string | null; last_name?: string | null }) {
+  return [c?.name, c?.last_name].filter(Boolean).join(' ')
+}
 
 const STATUS_LABEL: Record<string, string> = {
   pending: 'Pendente',
@@ -16,15 +22,17 @@ const STATUS_COLOR: Record<string, string> = {
   cancelled: 'bg-red-50 text-red-600',
 }
 
-function NewCustomerModal({ onClose }: { onClose: () => void }) {
+function NewCustomerModal({ onClose, initialName = '' }: { onClose: () => void; initialName?: string }) {
   const qc = useQueryClient()
-  const [form, setForm] = useState({ name: '', phone: '', email: '' })
+  // Prefill Nome with whatever the user typed in the search box (#7).
+  const [form, setForm] = useState({ name: initialName, last_name: '', phone: '', email: '' })
   const [error, setError] = useState('')
 
   const createMutation = useMutation({
     mutationFn: () =>
       tenantApi.addCustomer({
         name: form.name.trim(),
+        last_name: form.last_name.trim() || undefined,
         phone: form.phone.trim(),
         email: form.email.trim() || undefined,
       }),
@@ -58,6 +66,15 @@ function NewCustomerModal({ onClose }: { onClose: () => void }) {
             onChange={e => setForm(f => ({ ...f, name: e.target.value }))}
             className="w-full h-10 px-3 rounded-xl border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary"
             placeholder="Nome do cliente"
+          />
+        </div>
+        <div>
+          <label className="block text-xs font-medium text-gray-600 mb-1">Sobrenome</label>
+          <input
+            value={form.last_name}
+            onChange={e => setForm(f => ({ ...f, last_name: e.target.value }))}
+            className="w-full h-10 px-3 rounded-xl border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+            placeholder="Sobrenome do cliente"
           />
         </div>
         <div>
@@ -101,7 +118,7 @@ function NewCustomerModal({ onClose }: { onClose: () => void }) {
   )
 }
 
-function CustomerDrawer({ customerId, onClose }: { customerId: string; onClose: () => void }) {
+function CustomerDrawer({ customerId, canDelete, onClose }: { customerId: string; canDelete: boolean; onClose: () => void }) {
   const qc = useQueryClient()
   const { data: customer, isLoading } = useQuery({
     queryKey: ['customer', customerId],
@@ -109,18 +126,19 @@ function CustomerDrawer({ customerId, onClose }: { customerId: string; onClose: 
   })
 
   const [editing, setEditing] = useState(false)
-  const [form, setForm] = useState({ name: '', email: '' })
+  const [form, setForm] = useState({ name: '', last_name: '', email: '' })
   const [error, setError] = useState('')
+  const [deleteError, setDeleteError] = useState('')
   const [success, setSuccess] = useState(false)
 
   function openEdit() {
-    setForm({ name: customer?.name ?? '', email: customer?.email ?? '' })
+    setForm({ name: customer?.name ?? '', last_name: customer?.last_name ?? '', email: customer?.email ?? '' })
     setEditing(true)
     setError('')
   }
 
   const updateMutation = useMutation({
-    mutationFn: (data: { name?: string; email?: string }) => tenantApi.updateCustomer(customerId, data),
+    mutationFn: (data: { name?: string; last_name?: string; email?: string }) => tenantApi.updateCustomer(customerId, data),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['customer', customerId] })
       qc.invalidateQueries({ queryKey: ['customers'] })
@@ -130,6 +148,30 @@ function CustomerDrawer({ customerId, onClose }: { customerId: string; onClose: 
     },
     onError: (e: any) => setError(e.message),
   })
+
+  const deleteMutation = useMutation({
+    mutationFn: () => tenantApi.deleteCustomer(customerId),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['customers'] })
+      qc.removeQueries({ queryKey: ['customer', customerId] })
+      onClose()
+    },
+    onError: (e: any) => {
+      // 403 (staff) or any other failure — friendly message, never a raw stack.
+      const msg = String(e?.message ?? '')
+      setDeleteError(
+        msg.includes('403') || /permiss|forbidden/i.test(msg)
+          ? 'Você não tem permissão para excluir clientes.'
+          : msg || 'Não foi possível excluir o cliente. Tente novamente.'
+      )
+    },
+  })
+
+  function handleDelete() {
+    setDeleteError('')
+    if (!confirm('Excluir este cliente e todo o histórico dele? Não pode ser desfeito.')) return
+    deleteMutation.mutate()
+  }
 
   const nameIsPhone = customer && customer.name === customer.phone
 
@@ -155,7 +197,7 @@ function CustomerDrawer({ customerId, onClose }: { customerId: string; onClose: 
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2 flex-wrap">
                     <p className="text-lg font-bold text-gray-900">
-                      {nameIsPhone ? <span className="text-gray-400 italic">Nome não informado</span> : customer.name}
+                      {nameIsPhone ? <span className="text-gray-400 italic">Nome não informado</span> : fullName(customer)}
                     </p>
                     {nameIsPhone && (
                       <span className="text-xs bg-amber-50 text-amber-600 border border-amber-200 px-2 py-0.5 rounded-full">
@@ -194,6 +236,15 @@ function CustomerDrawer({ customerId, onClose }: { customerId: string; onClose: 
                     />
                   </div>
                   <div>
+                    <label className="block text-xs font-medium text-gray-600 mb-1">Sobrenome</label>
+                    <input
+                      value={form.last_name}
+                      onChange={e => setForm(f => ({ ...f, last_name: e.target.value }))}
+                      className="w-full h-10 px-3 rounded-xl border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+                      placeholder="Sobrenome do cliente"
+                    />
+                  </div>
+                  <div>
                     <label className="block text-xs font-medium text-gray-600 mb-1">E-mail</label>
                     <input
                       type="email"
@@ -206,7 +257,7 @@ function CustomerDrawer({ customerId, onClose }: { customerId: string; onClose: 
                   {error && <p className="text-red-500 text-xs">{error}</p>}
                   <div className="flex gap-2">
                     <button
-                      onClick={() => updateMutation.mutate({ name: form.name || undefined, email: form.email || undefined })}
+                      onClick={() => updateMutation.mutate({ name: form.name.trim() || undefined, last_name: form.last_name.trim(), email: form.email.trim() || undefined })}
                       disabled={updateMutation.isPending}
                       className="flex-1 h-9 bg-primary text-white text-sm font-semibold rounded-xl disabled:opacity-50"
                     >
@@ -274,6 +325,21 @@ function CustomerDrawer({ customerId, onClose }: { customerId: string; onClose: 
                 </div>
               )}
             </div>
+
+            {/* Danger zone — only owner/admin/root can delete (#8) */}
+            {canDelete && (
+              <div className="border-t border-gray-100 pt-4">
+                <button
+                  onClick={handleDelete}
+                  disabled={deleteMutation.isPending}
+                  className="text-red-600 text-sm font-medium hover:underline disabled:opacity-50"
+                >
+                  {deleteMutation.isPending ? 'Excluindo...' : 'Excluir cliente'}
+                </button>
+                <p className="text-xs text-gray-400 mt-1">Remove o cliente e todo o histórico dele. Não pode ser desfeito.</p>
+                {deleteError && <p className="text-red-500 text-xs mt-2">{deleteError}</p>}
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -285,6 +351,13 @@ export default function CustomersPage() {
   const [search, setSearch] = useState('')
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [showNew, setShowNew] = useState(false)
+
+  // Role is read from the JWT in localStorage — only available on the client.
+  const [role, setRole] = useState<string | null>(null)
+  useEffect(() => {
+    setRole(getTokenPayload(getToken())?.role ?? null)
+  }, [])
+  const canDelete = role === 'owner' || role === 'admin' || role === 'root'
 
   const { data: customers = [], isLoading } = useQuery({
     queryKey: ['customers', search],
@@ -340,7 +413,7 @@ export default function CustomersPage() {
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-2">
                         <span className={nameIsPhone ? 'text-gray-400 italic text-xs' : 'font-medium text-gray-900'}>
-                          {nameIsPhone ? 'Não informado' : c.name}
+                          {nameIsPhone ? 'Não informado' : fullName(c)}
                         </span>
                         {nameIsPhone && (
                           <span className="text-xs bg-amber-50 text-amber-600 px-1.5 py-0.5 rounded-full border border-amber-200">
@@ -373,10 +446,10 @@ export default function CustomersPage() {
         </div>
       )}
 
-      {showNew && <NewCustomerModal onClose={() => setShowNew(false)} />}
+      {showNew && <NewCustomerModal initialName={search} onClose={() => setShowNew(false)} />}
 
       {selectedId && (
-        <CustomerDrawer customerId={selectedId} onClose={() => setSelectedId(null)} />
+        <CustomerDrawer customerId={selectedId} canDelete={canDelete} onClose={() => setSelectedId(null)} />
       )}
     </div>
   )

@@ -35,6 +35,14 @@ const BLANK = {
   reminder2_minutes: 30,
   catalog_files: [] as { name: string; url: string }[],
   language: 'pt-BR',
+  handoff_enabled: true,
+  handoff_pause_on_owner_reply: true,
+  handoff_timeout_min: 30,
+  handoff_offer_message: '',
+  handoff_button_label: '',
+  handoff_ack_message: '',
+  handoff_resume_message: '',
+  handoff_owner_resume_keyword: '',
 }
 
 export default function AgentScreen() {
@@ -65,6 +73,14 @@ export default function AgentScreen() {
       reminder2_minutes:    config.reminder2_minutes ?? 30,
       catalog_files:        config.catalog_files ?? [],
       language:             config.language ?? 'pt-BR',
+      handoff_enabled:              config.handoff_enabled ?? true,
+      handoff_pause_on_owner_reply: config.handoff_pause_on_owner_reply ?? true,
+      handoff_timeout_min:          config.handoff_timeout_min ?? 30,
+      handoff_offer_message:        config.handoff_offer_message ?? '',
+      handoff_button_label:         config.handoff_button_label ?? '',
+      handoff_ack_message:          config.handoff_ack_message ?? '',
+      handoff_resume_message:       config.handoff_resume_message ?? '',
+      handoff_owner_resume_keyword: config.handoff_owner_resume_keyword ?? '',
     })
   }, [config])
 
@@ -297,6 +313,121 @@ export default function AgentScreen() {
               )}
             </View>
 
+            {/* ── Atendimento humano ── */}
+            <View style={s.handoffSection}>
+              <View>
+                <Text style={s.label}>Atendimento humano</Text>
+                <Text style={s.hint}>
+                  Controle como o bot passa a conversa para um humano e quando volta a atender.
+                </Text>
+              </View>
+
+              <View style={s.switchRow}>
+                <View style={{ flex: 1 }}>
+                  <Text style={s.label}>Atendimento humano ativado</Text>
+                  <Text style={s.hint}>
+                    Quando ligado, o bot pausa se um humano assumir e volta sozinho depois.
+                  </Text>
+                </View>
+                <Switch
+                  value={form.handoff_enabled}
+                  onValueChange={(v) => set('handoff_enabled', v)}
+                  trackColor={{ true: colors.primary, false: colors.border }}
+                  thumbColor="#fff"
+                />
+              </View>
+
+              {form.handoff_enabled && (
+                <>
+                  <View style={s.switchRow}>
+                    <View style={{ flex: 1 }}>
+                      <Text style={s.label}>Pausar o bot quando eu responder</Text>
+                      <Text style={s.hint}>
+                        Se você responder o cliente pelo seu próprio WhatsApp, o bot para de responder automaticamente.
+                      </Text>
+                    </View>
+                    <Switch
+                      value={form.handoff_pause_on_owner_reply}
+                      onValueChange={(v) => set('handoff_pause_on_owner_reply', v)}
+                      trackColor={{ true: colors.primary, false: colors.border }}
+                      thumbColor="#fff"
+                    />
+                  </View>
+
+                  <View>
+                    <Label hint="Minutos sem resposta do humano até o bot voltar a atender sozinho.">
+                      Tempo de retorno do bot (min)
+                    </Label>
+                    <Input
+                      value={String(form.handoff_timeout_min)}
+                      onChangeText={(v) => set('handoff_timeout_min', Math.max(1, parseInt(v, 10) || 1))}
+                      keyboardType="number-pad"
+                      placeholder="30"
+                    />
+                  </View>
+
+                  <View>
+                    <Label hint="Pergunta que o bot envia quando não consegue resolver, oferecendo um especialista.">
+                      Frase de ativação (pergunta do bot)
+                    </Label>
+                    <Input
+                      value={form.handoff_offer_message}
+                      onChangeText={(v) => set('handoff_offer_message', v)}
+                      placeholder="Quer que eu encaminhe para um especialista?"
+                    />
+                  </View>
+
+                  <View>
+                    <Label hint="O que o cliente toca/responde para pedir um humano.">
+                      Texto do botão
+                    </Label>
+                    <Input
+                      value={form.handoff_button_label}
+                      onChangeText={(v) => set('handoff_button_label', v)}
+                      placeholder="Quero ajuda de um especialista"
+                    />
+                  </View>
+
+                  <View>
+                    <Label hint="Mensagem enviada ao cliente logo depois que ele pede o especialista.">
+                      Confirmação ao cliente
+                    </Label>
+                    <Input
+                      value={form.handoff_ack_message}
+                      onChangeText={(v) => set('handoff_ack_message', v)}
+                      placeholder="Perfeito! Já avisei a equipe 🙌 Em breve um especialista continua seu atendimento por aqui."
+                      multiline
+                      numberOfLines={3}
+                      style={s.textarea}
+                    />
+                  </View>
+
+                  <View>
+                    <Label hint="Enviada quando o bot volta a atender após o tempo. Deixe vazio para voltar sem avisar.">
+                      Mensagem de retorno (opcional)
+                    </Label>
+                    <Input
+                      value={form.handoff_resume_message}
+                      onChangeText={(v) => set('handoff_resume_message', v)}
+                      placeholder=""
+                    />
+                  </View>
+
+                  <View>
+                    <Label hint="Digite essa palavra no chat para devolver o atendimento ao bot na hora. Deixe vazio para desativar.">
+                      Palavra para devolver ao bot (opcional)
+                    </Label>
+                    <Input
+                      value={form.handoff_owner_resume_keyword}
+                      onChangeText={(v) => set('handoff_owner_resume_keyword', v)}
+                      placeholder=""
+                      autoCapitalize="none"
+                    />
+                  </View>
+                </>
+              )}
+            </View>
+
             <Button label="Salvar comportamento" onPress={handleSave} loading={saveMutation.isPending} />
           </>
         )}
@@ -379,6 +510,8 @@ const s = StyleSheet.create({
   toneBtnDescActive: { color: colors.primaryDark },
   remindersSection:  { borderTopWidth: 1, borderTopColor: colors.border, paddingTop: spacing.md, gap: spacing.md },
   remindersHeader:   { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+  handoffSection:    { borderTopWidth: 1, borderTopColor: colors.border, paddingTop: spacing.md, gap: spacing.md },
+  switchRow:         { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
   emptyText:         { textAlign: 'center', color: colors.textSecondary, fontSize: font.sm, paddingVertical: spacing.xl },
   fileRow:           { flexDirection: 'row', alignItems: 'center', backgroundColor: colors.surface, borderRadius: radius.md, padding: spacing.md, gap: spacing.sm, borderWidth: 1, borderColor: colors.border },
   fileIcon:          { fontSize: 22 },

@@ -5,6 +5,7 @@ import { useParams } from 'next/navigation'
 import Link from 'next/link'
 import { rootApi } from '@/lib/api'
 import { Badge } from '@/components/ui/Badge'
+import { RemoteSupport } from './RemoteSupport'
 
 const planVariant: Record<string, any> = { free: 'default', basico: 'info', premium: 'purple', profissional: 'success' }
 const planLabel: Record<string, string> = { free: 'Free', basico: 'Básico', premium: 'Premium', profissional: 'Profissional' }
@@ -21,6 +22,8 @@ export default function TenantDetailPage() {
   const [editing, setEditing] = useState(false)
   const [form, setForm] = useState<any>(null)
   const [successMsg, setSuccessMsg] = useState('')
+  const [handoff, setHandoff] = useState<any>(null)
+  const [agent, setAgent] = useState<any>(null)
 
   // Staff modal state: null | 'add' | user obj (edit)
   const [staffModal, setStaffModal] = useState<null | 'add' | any>(null)
@@ -45,6 +48,34 @@ export default function TenantDetailPage() {
     }
   }, [tenant])
 
+  useEffect(() => {
+    if (tenant && !handoff) {
+      setHandoff({
+        handoff_enabled: tenant.handoff_enabled ?? true,
+        handoff_pause_on_owner_reply: tenant.handoff_pause_on_owner_reply ?? true,
+        handoff_timeout_min: tenant.handoff_timeout_min ?? 30,
+        handoff_offer_message: tenant.handoff_offer_message ?? '',
+        handoff_button_label: tenant.handoff_button_label ?? '',
+        handoff_ack_message: tenant.handoff_ack_message ?? '',
+        handoff_resume_message: tenant.handoff_resume_message ?? '',
+        handoff_owner_resume_keyword: tenant.handoff_owner_resume_keyword ?? '',
+      })
+    }
+  }, [tenant])
+
+  useEffect(() => {
+    if (tenant && !agent) {
+      setAgent({
+        business_type: tenant.business_type ?? '',
+        tone: tenant.tone ?? '',
+        language: tenant.language ?? '',
+        business_info: tenant.business_info ?? '',
+        system_prompt: tenant.system_prompt ?? '',
+        custom_instructions: tenant.custom_instructions ?? '',
+      })
+    }
+  }, [tenant])
+
   const showSuccess = (msg: string) => { setSuccessMsg(msg); setTimeout(() => setSuccessMsg(''), 3000) }
 
   const updateMutation = useMutation({
@@ -55,6 +86,25 @@ export default function TenantDetailPage() {
   const extendMutation = useMutation({
     mutationFn: (days: number) => rootApi.extendTrial(id, days),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['root-tenant', id] }); showSuccess('Trial estendido!') },
+  })
+
+  const handoffMutation = useMutation({
+    mutationFn: () => rootApi.updateTenantHandoff(id, {
+      ...handoff,
+      handoff_timeout_min: Math.max(1, parseInt(String(handoff.handoff_timeout_min), 10) || 30),
+    }),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['root-tenant', id] }); showSuccess('Atendimento humano atualizado!') },
+  })
+
+  const agentMutation = useMutation({
+    mutationFn: () => {
+      // Only send fields that are defined (backend accepts any subset)
+      const payload = Object.fromEntries(
+        Object.entries(agent ?? {}).filter(([, v]) => v !== undefined)
+      )
+      return rootApi.updateTenantAgent(id, payload)
+    },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['root-tenant', id] }); showSuccess('Configuração da IA atualizada!') },
   })
 
   const addStaffMutation = useMutation({
@@ -161,7 +211,15 @@ export default function TenantDetailPage() {
                   </div>
                 </div>
                 <button
-                  onClick={() => updateMutation.mutate(form)}
+                  onClick={() => updateMutation.mutate({
+                    plan: form.plan,
+                    status: form.status,
+                    max_agendas: Number(form.max_agendas) || 1,
+                    max_users: Number(form.max_users) || 1,
+                    // Backend expects a full ISO datetime (or null to keep current);
+                    // the date input gives YYYY-MM-DD — send noon local as ISO.
+                    trial_ends_at: form.trial_ends_at ? new Date(`${form.trial_ends_at}T12:00:00`).toISOString() : null,
+                  })}
                   disabled={updateMutation.isPending}
                   className="h-10 px-6 bg-primary text-white rounded-xl text-sm font-semibold hover:bg-primary-dark disabled:opacity-50 transition-colors"
                 >
@@ -208,16 +266,211 @@ export default function TenantDetailPage() {
             </div>
           </div>
 
-          {tenant.business_info && (
-            <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100">
-              <h2 className="font-semibold text-gray-900 mb-3">Configuração do agente IA</h2>
-              <Info label="Tom" value={tenant.tone ?? '—'} />
-              <div className="mt-2">
-                <span className="text-xs font-medium text-gray-500 uppercase tracking-wide">Informações do negócio</span>
-                <p className="text-sm text-gray-700 mt-1 whitespace-pre-wrap bg-gray-50 rounded-xl p-3">{tenant.business_info}</p>
+          {/* AI agent config */}
+          <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100">
+            <h2 className="font-semibold text-gray-900">Configuração da IA (bot)</h2>
+            <p className="text-sm text-gray-500 mt-1 mb-4">Ajuste os prompts e o comportamento do assistente desta empresa (útil para corrigir respostas no WhatsApp).</p>
+
+            {agent && (
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Tipo de negócio</label>
+                  <input
+                    type="text"
+                    value={agent.business_type}
+                    onChange={(e) => setAgent((a: any) => ({ ...a, business_type: e.target.value }))}
+                    className="w-full h-10 px-3 rounded-xl border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+                  />
+                  <p className="text-xs text-gray-400 mt-1">Ex: salão de beleza, clínica, pet shop. Ajuda o bot a se comportar conforme o segmento.</p>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Tom de voz</label>
+                  <input
+                    type="text"
+                    value={agent.tone}
+                    onChange={(e) => setAgent((a: any) => ({ ...a, tone: e.target.value }))}
+                    className="w-full h-10 px-3 rounded-xl border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+                  />
+                  <p className="text-xs text-gray-400 mt-1">Como o assistente fala (ex: amigável e caloroso, formal, descontraído).</p>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Idioma</label>
+                  <input
+                    type="text"
+                    value={agent.language}
+                    onChange={(e) => setAgent((a: any) => ({ ...a, language: e.target.value }))}
+                    className="w-full h-10 px-3 rounded-xl border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+                  />
+                  <p className="text-xs text-gray-400 mt-1">Idioma das respostas (padrão: Português do Brasil).</p>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Informações do negócio</label>
+                  <textarea
+                    value={agent.business_info}
+                    onChange={(e) => setAgent((a: any) => ({ ...a, business_info: e.target.value }))}
+                    rows={3}
+                    className="w-full px-3 py-2 rounded-xl border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary resize-y"
+                  />
+                  <p className="text-xs text-gray-400 mt-1">Dados que o bot pode usar (diferenciais, políticas, observações).</p>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Prompt do sistema</label>
+                  <textarea
+                    value={agent.system_prompt}
+                    onChange={(e) => setAgent((a: any) => ({ ...a, system_prompt: e.target.value }))}
+                    rows={5}
+                    className="w-full px-3 py-2 rounded-xl border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary resize-y font-mono"
+                  />
+                  <p className="text-xs text-gray-400 mt-1">Instruções base do assistente. Cuidado ao editar — define a personalidade e as regras.</p>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Instruções personalizadas</label>
+                  <textarea
+                    value={agent.custom_instructions}
+                    onChange={(e) => setAgent((a: any) => ({ ...a, custom_instructions: e.target.value }))}
+                    rows={4}
+                    className="w-full px-3 py-2 rounded-xl border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary resize-y"
+                  />
+                  <p className="text-xs text-gray-400 mt-1">Regras específicas desta empresa, somadas ao prompt do sistema.</p>
+                </div>
+
+                {agentMutation.isError && (
+                  <p className="text-sm text-red-600 bg-red-50 rounded-xl px-4 py-2">{(agentMutation.error as any)?.message ?? 'Erro ao salvar'}</p>
+                )}
+
+                <button
+                  onClick={() => agentMutation.mutate()}
+                  disabled={agentMutation.isPending}
+                  className="h-10 px-6 bg-primary text-white rounded-xl text-sm font-semibold hover:bg-primary-dark disabled:opacity-50 transition-colors"
+                >
+                  {agentMutation.isPending ? 'Salvando...' : 'Salvar'}
+                </button>
               </div>
-            </div>
-          )}
+            )}
+          </div>
+
+          {/* Human handoff */}
+          <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100">
+            <h2 className="font-semibold text-gray-900">Atendimento humano</h2>
+            <p className="text-sm text-gray-500 mt-1 mb-4">Como o bot passa a conversa para um humano nesta empresa (mesmas opções que o dono vê no app).</p>
+
+            {handoff && (
+              <div className="space-y-4">
+                <div>
+                  <label className="flex items-center gap-2 text-sm font-medium text-gray-700 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={handoff.handoff_enabled}
+                      onChange={(e) => setHandoff((h: any) => ({ ...h, handoff_enabled: e.target.checked }))}
+                      className="w-4 h-4 rounded border-gray-300 text-primary focus:ring-primary"
+                    />
+                    Atendimento humano ativado
+                  </label>
+                  <p className="text-xs text-gray-400 mt-1">Quando ligado, o bot pausa se um humano assumir e volta sozinho depois.</p>
+                </div>
+
+                <div>
+                  <label className="flex items-center gap-2 text-sm font-medium text-gray-700 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={handoff.handoff_pause_on_owner_reply}
+                      onChange={(e) => setHandoff((h: any) => ({ ...h, handoff_pause_on_owner_reply: e.target.checked }))}
+                      className="w-4 h-4 rounded border-gray-300 text-primary focus:ring-primary"
+                    />
+                    Pausar o bot quando o dono responder
+                  </label>
+                  <p className="text-xs text-gray-400 mt-1">Se o dono responder o cliente pelo WhatsApp dele, o bot para de responder automaticamente.</p>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Tempo de retorno do bot (min)</label>
+                  <input
+                    type="number"
+                    min={1}
+                    value={handoff.handoff_timeout_min}
+                    onChange={(e) => setHandoff((h: any) => ({ ...h, handoff_timeout_min: e.target.value }))}
+                    className="w-full h-10 px-3 rounded-xl border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+                  />
+                  <p className="text-xs text-gray-400 mt-1">Minutos sem resposta do humano até o bot voltar a atender sozinho.</p>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Frase de ativação (pergunta do bot)</label>
+                  <input
+                    type="text"
+                    value={handoff.handoff_offer_message}
+                    onChange={(e) => setHandoff((h: any) => ({ ...h, handoff_offer_message: e.target.value }))}
+                    placeholder="Quer que eu encaminhe para um especialista?"
+                    className="w-full h-10 px-3 rounded-xl border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+                  />
+                  <p className="text-xs text-gray-400 mt-1">Pergunta que o bot envia quando não consegue resolver, oferecendo um especialista.</p>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Texto do botão</label>
+                  <input
+                    type="text"
+                    value={handoff.handoff_button_label}
+                    onChange={(e) => setHandoff((h: any) => ({ ...h, handoff_button_label: e.target.value }))}
+                    placeholder="Quero ajuda de um especialista"
+                    className="w-full h-10 px-3 rounded-xl border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+                  />
+                  <p className="text-xs text-gray-400 mt-1">O que o cliente toca/responde para pedir um humano.</p>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Confirmação ao cliente</label>
+                  <textarea
+                    value={handoff.handoff_ack_message}
+                    onChange={(e) => setHandoff((h: any) => ({ ...h, handoff_ack_message: e.target.value }))}
+                    placeholder="Perfeito! Já avisei a equipe 🙌 …"
+                    rows={3}
+                    className="w-full px-3 py-2 rounded-xl border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary resize-y"
+                  />
+                  <p className="text-xs text-gray-400 mt-1">Mensagem enviada ao cliente logo depois que ele pede o especialista.</p>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Mensagem de retorno (opcional)</label>
+                  <input
+                    type="text"
+                    value={handoff.handoff_resume_message}
+                    onChange={(e) => setHandoff((h: any) => ({ ...h, handoff_resume_message: e.target.value }))}
+                    className="w-full h-10 px-3 rounded-xl border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+                  />
+                  <p className="text-xs text-gray-400 mt-1">Enviada quando o bot volta a atender após o tempo. Deixe vazio para voltar sem avisar.</p>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Palavra para devolver ao bot (opcional)</label>
+                  <input
+                    type="text"
+                    value={handoff.handoff_owner_resume_keyword}
+                    onChange={(e) => setHandoff((h: any) => ({ ...h, handoff_owner_resume_keyword: e.target.value }))}
+                    className="w-full h-10 px-3 rounded-xl border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+                  />
+                  <p className="text-xs text-gray-400 mt-1">O dono digita essa palavra no chat para devolver o atendimento ao bot na hora. Deixe vazio para desativar.</p>
+                </div>
+
+                {handoffMutation.isError && (
+                  <p className="text-sm text-red-600 bg-red-50 rounded-xl px-4 py-2">{(handoffMutation.error as any)?.message ?? 'Erro ao salvar'}</p>
+                )}
+
+                <button
+                  onClick={() => handoffMutation.mutate()}
+                  disabled={handoffMutation.isPending}
+                  className="h-10 px-6 bg-primary text-white rounded-xl text-sm font-semibold hover:bg-primary-dark disabled:opacity-50 transition-colors"
+                >
+                  {handoffMutation.isPending ? 'Salvando...' : 'Salvar'}
+                </button>
+              </div>
+            )}
+          </div>
         </div>
 
         {/* Right column */}
@@ -247,6 +500,9 @@ export default function TenantDetailPage() {
           </div>
         </div>
       </div>
+
+      {/* Remote support toolkit */}
+      <RemoteSupport tenantId={id} showSuccess={showSuccess} />
 
       {/* Staff modal (add or edit) */}
       {staffModal !== null && (

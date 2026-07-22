@@ -6,12 +6,13 @@ import fs from 'fs'
 import path from 'path'
 import { pipeline } from 'stream/promises'
 import crypto from 'crypto'
+import { handoffUpdateSchema, invalidateHandoffConfig } from '../lib/handoffConfig'
 
 const UPLOADS_DIR = path.join(process.cwd(), 'uploads', 'catalogs')
 
 const updateSchema = z.object({
   system_prompt:        z.string().optional(),
-  tone:                 z.enum(['formal', 'friendly', 'casual']).optional(),
+  tone:                 z.string().max(60).optional(),
   language:             z.string().optional(),
   business_info:        z.string().optional(),
   business_type:        z.string().optional(),
@@ -29,7 +30,7 @@ const updateSchema = z.object({
   appointment_reminders_enabled: z.boolean().optional(),
   reminder1_minutes:    z.number().int().min(0).optional(),
   reminder2_minutes:    z.number().int().min(0).optional(),
-})
+}).merge(handoffUpdateSchema)
 
 export const agentRoutes: FastifyPluginAsync = async (app) => {
   app.addHook('preHandler', (app as any).authenticate)
@@ -69,6 +70,8 @@ export const agentRoutes: FastifyPluginAsync = async (app) => {
     )
 
     await redis.del(`tenant:config:${tenant_id}`)
+    // The tenant's own save can change handoff_* fields — drop the handoff cache too.
+    await invalidateHandoffConfig(tenant_id!)
     return reply.send(config)
   })
 

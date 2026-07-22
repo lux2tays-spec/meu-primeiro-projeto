@@ -77,6 +77,7 @@ export default function AppLayout() {
 
       {/* Rotas de navegação interna — não aparecem na tab bar */}
       <Tabs.Screen name="appointments" options={{ tabBarButton: () => null, headerShown: false }} />
+      <Tabs.Screen name="comissoes" options={{ tabBarButton: () => null, headerShown: false }} />
     </Tabs>
   )
 }

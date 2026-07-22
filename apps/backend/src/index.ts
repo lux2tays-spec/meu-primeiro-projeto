@@ -17,9 +17,11 @@ import { appointmentRoutes } from './routes/appointments'
 import { whatsappRoutes } from './routes/whatsapp'
 import { webhookRoutes } from './routes/webhooks'
 import { agentRoutes } from './routes/agent'
+import { supportRoutes } from './routes/support'
 import { rootRoutes } from './routes/root'
 import { affiliateRoutes } from './routes/affiliate'
 import { financeiroRoutes } from './routes/financeiro'
+import { commissionRoutes } from './routes/commissions'
 import { subscriptionRoutes } from './routes/subscription'
 import { brandingRoutes } from './routes/branding'
 import { startReminderJob } from './jobs/reminders'
@@ -114,12 +116,16 @@ async function start() {
   await app.register(appointmentRoutes, { prefix: '/appointments' })
   await app.register(whatsappRoutes, { prefix: '/whatsapp' })
   await app.register(agentRoutes, { prefix: '/agent' })
+  await app.register(supportRoutes, { prefix: '/support' })
 
   // Affiliate routes (any authenticated user)
   await app.register(affiliateRoutes, { prefix: '/affiliate' })
 
   // Financial routes (tenant-scoped)
   await app.register(financeiroRoutes, { prefix: '/financeiro' })
+
+  // Commissions per professional (tenant-scoped; staff see only their own)
+  await app.register(commissionRoutes, { prefix: '/commissions' })
 
   // Subscription/checkout (authenticated, NOT plan-guarded — expired tenants must subscribe)
   await app.register(subscriptionRoutes, { prefix: '/subscription' })

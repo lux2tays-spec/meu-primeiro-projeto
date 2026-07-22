@@ -3,6 +3,8 @@ import { z } from 'zod'
 import { db } from '../lib/db'
 import { syncAppointmentToCalendar, deleteCalendarEvent } from '../services/google-calendar'
 import { findAvailableSlots } from '../services/scheduling'
+import { syncCommissionForAppointment } from '../lib/commissions'
+import { evolutionSend } from '../services/evolution'
 
 const createSchema = z.object({
   customer_id: z.string().uuid(),
@@ -48,10 +50,11 @@ export const appointmentRoutes: FastifyPluginAsync = async (app) => {
   // ── List ────────────────────────────────────────────────────────────────────
   app.get('/', async (request, reply) => {
     const { tenant_id, user_id, role } = request.user
-    const { date } = request.query as { date?: string }
+    const { date, from, to, search, professional_id, service_id } =
+      request.query as { date?: string; from?: string; to?: string; search?: string; professional_id?: string; service_id?: string }
 
     let query = `
-      SELECT a.*, c.name as customer_name, c.phone as customer_phone,
+      SELECT a.*, c.name as customer_name, c.last_name as customer_last_name, c.phone as customer_phone,
              p.name as professional_name, s.name as service_name,
              s.duration_minutes, s.price,
              u.name as created_by_name
@@ -72,11 +75,31 @@ export const appointmentRoutes: FastifyPluginAsync = async (app) => {
       paramIdx++
     }
 
+    // Single-day filter (agenda "dia") — kept for backward compatibility.
+    // Expressed as a half-open instant range for that São Paulo day so the
+    // planner can use idx_appointments_tenant_starts (sargable on starts_at).
     if (date) {
-      query += ` AND DATE(a.starts_at AT TIME ZONE 'America/Sao_Paulo') = $${paramIdx}`
+      query += ` AND a.starts_at >= ($${paramIdx}::date::timestamp AT TIME ZONE 'America/Sao_Paulo')`
+      query += ` AND a.starts_at < (($${paramIdx}::date + INTERVAL '1 day') AT TIME ZONE 'America/Sao_Paulo')`
       params.push(date)
       paramIdx++
     }
+
+    // Date range (agenda "semana"/"mês" — the calendar fetches a window). Inclusive
+    // from, exclusive to; both are ISO instants.
+    if (from) { query += ` AND a.starts_at >= $${paramIdx}`; params.push(from); paramIdx++ }
+    if (to)   { query += ` AND a.starts_at < $${paramIdx}`;  params.push(to);   paramIdx++ }
+
+    // Search by customer name / last name / phone (#4).
+    if (search) {
+      query += ` AND (c.name ILIKE $${paramIdx} OR c.last_name ILIKE $${paramIdx} OR c.phone ILIKE $${paramIdx})`
+      params.push(`%${search}%`)
+      paramIdx++
+    }
+
+    // Filters by professional / service (#4).
+    if (professional_id) { query += ` AND a.professional_id = $${paramIdx}`; params.push(professional_id); paramIdx++ }
+    if (service_id)      { query += ` AND a.service_id = $${paramIdx}`;      params.push(service_id);      paramIdx++ }
 
     query += ` ORDER BY a.starts_at ASC`
 
@@ -86,7 +109,7 @@ export const appointmentRoutes: FastifyPluginAsync = async (app) => {
 
   // ── Get single ──────────────────────────────────────────────────────────────
   app.get<{ Params: { id: string } }>('/:id', async (request, reply) => {
-    const { tenant_id } = request.user
+    const { tenant_id, user_id, role } = request.user
     const { rows: [appt] } = await db.query(
       `SELECT a.*, c.name as customer_name, c.phone as customer_phone,
               p.name as professional_name, p.user_id as professional_user_id,
@@ -99,6 +122,11 @@ export const appointmentRoutes: FastifyPluginAsync = async (app) => {
       [request.params.id, tenant_id]
     )
     if (!appt) return reply.status(404).send({ error: 'Not found' })
+    // Staff only see their own appointments (creator or assigned professional) —
+    // same rule as the list handler. 404 (not 403) to avoid confirming existence.
+    if (role === 'staff' && appt.created_by !== user_id && appt.professional_user_id !== user_id) {
+      return reply.status(404).send({ error: 'Not found' })
+    }
     return reply.send(appt)
   })
 
@@ -237,6 +265,11 @@ export const appointmentRoutes: FastifyPluginAsync = async (app) => {
       syncAppointmentToCalendar(appointmentId).catch(console.error)
     }
 
+    // Status changed → keep the professional's commission in sync (fire-and-forget)
+    if (body.status !== undefined) {
+      syncCommissionForAppointment(appointmentId).catch(console.error)
+    }
+
     return reply.send(updated)
   })
 
@@ -259,6 +292,9 @@ export const appointmentRoutes: FastifyPluginAsync = async (app) => {
     if (status === 'cancelled') deleteCalendarEvent(request.params.id).catch(console.error)
     else syncAppointmentToCalendar(request.params.id).catch(console.error)
 
+    // Keep the professional's commission in sync with the new status
+    syncCommissionForAppointment(request.params.id).catch(console.error)
+
     return reply.send(appt)
   })
 
@@ -279,5 +315,103 @@ export const appointmentRoutes: FastifyPluginAsync = async (app) => {
 
     // Frontend expects `${date}T${HH}:${MM}:00` strings.
     return reply.send(result.slots.map((hm) => `${date}T${hm}:00`))
+  })
+
+  // ── Bulk reschedule (#5a) ────────────────────────────────────────────────────
+  // Urgency tool: for every active appointment in a period (optionally of one
+  // professional), cancel it (freeing the slot) and message the customer via
+  // WhatsApp asking to reschedule — the bot then handles the rebooking naturally.
+  // Owner/admin only.
+  const bulkRescheduleSchema = z.object({
+    from: z.string().datetime(),
+    to: z.string().datetime(),
+    professional_id: z.string().uuid().optional(),
+    message: z.string().max(1000).optional(), // may contain {quando} placeholder
+  })
+
+  const BULK_MAX_WINDOW_DAYS = 31
+  const BULK_MAX_APPOINTMENTS = 200
+  const BULK_NOTIFY_CONCURRENCY = 5
+
+  app.post('/bulk-reschedule', async (request, reply) => {
+    const { tenant_id, role } = request.user
+    if (!['owner', 'admin', 'root'].includes(role)) return reply.status(403).send({ error: 'Sem permissão' })
+    const body = bulkRescheduleSchema.parse(request.body)
+
+    // Bound the window — an accidental "from 2020 to 2030" must never mass-cancel.
+    const windowMs = new Date(body.to).getTime() - new Date(body.from).getTime()
+    if (windowMs <= 0) {
+      return reply.status(400).send({ error: 'Período inválido: a data final deve ser depois da inicial.' })
+    }
+    if (windowMs > BULK_MAX_WINDOW_DAYS * 24 * 60 * 60 * 1000) {
+      return reply.status(400).send({ error: `Período muito longo: escolha um intervalo de até ${BULK_MAX_WINDOW_DAYS} dias.` })
+    }
+
+    // WhatsApp must be connected to notify anyone.
+    const { rows: [inst] } = await db.query(
+      `SELECT instance_name, status FROM whatsapp_instances WHERE tenant_id = $1`, [tenant_id]
+    )
+    if (!inst || inst.status !== 'connected') {
+      return reply.status(400).send({ error: 'WhatsApp não está conectado — conecte antes de avisar os clientes.' })
+    }
+
+    const scopeWhere = `
+      a.tenant_id = $1 AND a.status IN ('pending','confirmed')
+        AND a.starts_at >= $2 AND a.starts_at < $3` +
+      (body.professional_id ? ` AND a.professional_id = $4` : '')
+    const params: unknown[] = [tenant_id, body.from, body.to]
+    if (body.professional_id) params.push(body.professional_id)
+
+    // Hard ceiling on scope — refuse instead of silently truncating.
+    const { rows: [{ total }] } = await db.query(
+      `SELECT COUNT(*)::int AS total FROM appointments a WHERE ${scopeWhere}`, params
+    )
+    if (total > BULK_MAX_APPOINTMENTS) {
+      return reply.status(400).send({
+        error: `São ${total} agendamentos no período (máximo ${BULK_MAX_APPOINTMENTS}). Reduza o período ou filtre por profissional.`,
+      })
+    }
+
+    const { rows: appts } = await db.query(
+      `SELECT a.id, c.phone, c.name AS customer_name,
+              to_char(a.starts_at AT TIME ZONE 'America/Sao_Paulo', 'DD/MM às HH24:MI') AS quando
+       FROM appointments a JOIN customers c ON c.id = a.customer_id
+       WHERE ${scopeWhere}
+       ORDER BY a.starts_at
+       LIMIT ${BULK_MAX_APPOINTMENTS}`,
+      params
+    )
+    if (appts.length === 0) return reply.send({ affected: 0, notified: 0 })
+
+    // Cancel everything FIRST in one idempotent statement — slots are freed even
+    // if notifications fail halfway, and a retry never double-cancels.
+    const ids = appts.map((a) => a.id)
+    await db.query(
+      `UPDATE appointments SET status = 'cancelled' WHERE id = ANY($1::uuid[]) AND tenant_id = $2`,
+      [ids, tenant_id]
+    )
+
+    // Then notify, in small chunks with limited concurrency — a serial-but-instant
+    // burst of hundreds of messages is a WhatsApp ban risk.
+    let notified = 0
+    for (let i = 0; i < appts.length; i += BULK_NOTIFY_CONCURRENCY) {
+      const chunk = appts.slice(i, i + BULK_NOTIFY_CONCURRENCY)
+      await Promise.all(chunk.map(async (a) => {
+        deleteCalendarEvent(a.id).catch(() => {})           // remove from Google Calendar
+        syncCommissionForAppointment(a.id).catch(() => {})  // void any pending commission
+        const text = (body.message?.trim()
+          ? body.message.trim()
+          : `Oi! Tivemos um imprevisto e precisaremos remarcar seu horário de {quando}. 🙏 Quando fica melhor pra você? Me diga um dia e horário que eu já reagendo 😊`
+        ).replace(/\{quando\}/g, a.quando)
+        try {
+          await evolutionSend(inst.instance_name, a.phone, text)
+          notified++
+        } catch (err) {
+          request.log.error({ err, appt: a.id }, 'bulk-reschedule: falha ao avisar cliente')
+        }
+      }))
+    }
+
+    return reply.send({ affected: appts.length, notified })
   })
 }

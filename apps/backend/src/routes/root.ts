@@ -3,8 +3,16 @@ import { z } from 'zod'
 import { randomBytes } from 'crypto'
 import { db } from '../lib/db'
 import { hashPassword } from '../lib/password'
-import { invalidateAiConfig } from '../lib/botConfig'
-import { redis } from '../lib/redis'
+import { invalidateAiConfig, getAiConfig } from '../lib/botConfig'
+import { redis, QR_CODE_TTL } from '../lib/redis'
+import { monthlySpend } from '../lib/aiUsage'
+import { testBotReply } from '../services/bot'
+import {
+  evolutionConnectionState,
+  evolutionCreateInstance,
+  evolutionGetQR,
+  evolutionLogout,
+} from '../services/evolution'
 import { encrypt, decrypt, maskSecret } from '../lib/crypto'
 import { logAdminAction, auditFromRequest } from '../lib/auditLog'
 
@@ -26,6 +34,7 @@ import {
 } from '../lib/integrationConfig'
 import { invalidateBrandConfig } from '../lib/brandConfig'
 import { ASSET_SLOTS } from './branding'
+import { handoffUpdateSchema, invalidateHandoffConfig } from '../lib/handoffConfig'
 
 export const rootRoutes: FastifyPluginAsync = async (app) => {
   app.addHook('preHandler', (app as any).requireRoot)
@@ -128,6 +137,10 @@ export const rootRoutes: FastifyPluginAsync = async (app) => {
         u.name as owner_name, u.email as owner_email, u.id as owner_id,
         wi.status as whatsapp_status, wi.phone_number as whatsapp_phone,
         ac.system_prompt, ac.tone, ac.business_info,
+        ac.business_type, ac.custom_instructions, ac.language,
+        ac.handoff_enabled, ac.handoff_pause_on_owner_reply, ac.handoff_timeout_min,
+        ac.handoff_offer_message, ac.handoff_button_label, ac.handoff_ack_message,
+        ac.handoff_resume_message, ac.handoff_owner_resume_keyword,
         s.status as subscription_status, s.next_billing_date, s.mp_subscription_id
       FROM tenants t
       LEFT JOIN user_roles ur2 ON ur2.tenant_id = t.id AND ur2.role = 'owner'
@@ -165,7 +178,8 @@ export const rootRoutes: FastifyPluginAsync = async (app) => {
   })
 
   app.patch<{ Params: { id: string } }>('/tenants/:id', async (request, reply) => {
-    const { plan, status, max_agendas, max_users, trial_ends_at } = tenantPatchSchema.parse(request.body ?? {})
+    const body = tenantPatchSchema.parse(request.body ?? {})
+    const { plan, status, max_agendas, max_users, trial_ends_at } = body
     const { rows: [tenant] } = await db.query(`
       UPDATE tenants SET
         plan = COALESCE($1, plan),
@@ -176,23 +190,106 @@ export const rootRoutes: FastifyPluginAsync = async (app) => {
       WHERE id = $6 RETURNING *
     `, [plan, status, max_agendas, max_users, trial_ends_at, request.params.id])
     if (!tenant) return reply.status(404).send({ error: 'Not found' })
+    const changed = Object.entries(body)
+      .filter(([, v]) => v !== undefined && v !== null)
+      .map(([k, v]) => `${k}=${v}`)
+    await logAdminAction(auditFromRequest(request, 'tenant.update', request.params.id, `campos: ${changed.join(', ')}`))
     return reply.send(tenant)
+  })
+
+  // Root Admin edits a tenant's human-handoff settings (same fields the owner
+  // sees in the app). agent_config values → code defaults in lib/handoffConfig.
+  app.patch<{ Params: { id: string } }>('/tenants/:id/handoff', async (request, reply) => {
+    const body = handoffUpdateSchema.parse(request.body ?? {})
+    const sets: string[] = []
+    const values: unknown[] = []
+    let i = 1
+    for (const [k, v] of Object.entries(body)) {
+      if (v !== undefined) { sets.push(`${k} = $${i++}`); values.push(v) }
+    }
+    if (!sets.length) return reply.status(400).send({ error: 'Nada para atualizar' })
+    sets.push('updated_at = NOW()')
+    values.push(request.params.id)
+    const { rows: [ac] } = await db.query(
+      `UPDATE agent_config SET ${sets.join(', ')} WHERE tenant_id = $${i} RETURNING tenant_id`,
+      values
+    )
+    if (!ac) return reply.status(404).send({ error: 'Tenant sem configuração de agente' })
+    await redis.del(`tenant:config:${request.params.id}`)
+    await invalidateHandoffConfig(request.params.id)
+    await logAdminAction(auditFromRequest(request, 'tenant.handoff.update', request.params.id, `campos: ${Object.keys(body).join(', ')}`))
+    return reply.send({ ok: true })
+  })
+
+  // Root Admin edits a tenant's AI agent prompt/config (same fields the owner
+  // edits via PATCH /agent/config). Tone is free text (matches routes/agent.ts).
+  const agentPatchSchema = z.object({
+    system_prompt:       z.string().optional(),
+    tone:                z.string().max(60).optional(),
+    language:            z.string().optional(),
+    business_info:       z.string().optional(),
+    business_type:       z.string().optional(),
+    custom_instructions: z.string().optional(),
+  })
+
+  app.patch<{ Params: { id: string } }>('/tenants/:id/agent', async (request, reply) => {
+    const body = agentPatchSchema.parse(request.body ?? {})
+    const sets: string[] = []
+    const values: unknown[] = []
+    let i = 1
+    for (const [k, v] of Object.entries(body)) {
+      if (v !== undefined) { sets.push(`${k} = $${i++}`); values.push(v) }
+    }
+    if (!sets.length) return reply.status(400).send({ error: 'Nada para atualizar' })
+    sets.push('updated_at = NOW()')
+    values.push(request.params.id)
+    const { rows: [ac] } = await db.query(
+      `UPDATE agent_config SET ${sets.join(', ')} WHERE tenant_id = $${i} RETURNING tenant_id`,
+      values
+    )
+    if (!ac) return reply.status(404).send({ error: 'Tenant sem configuração de agente' })
+    await redis.del(`tenant:config:${request.params.id}`)
+    await logAdminAction(auditFromRequest(request, 'tenant.agent.update', request.params.id, `campos: ${Object.keys(body).join(', ')}`))
+    return reply.send({ ok: true })
+  })
+
+  // Tenant staff — role never accepts 'root': the root role is global and must
+  // not be assignable through tenant staff management (privilege escalation).
+  const staffAddSchema = z.object({
+    user_id: z.string().uuid(),
+    role: z.enum(['admin', 'staff', 'owner']),
+  })
+
+  const staffEditSchema = z.object({
+    name:  z.string().min(1).optional(),
+    email: z.string().email().optional(),
+    phone: z.string().max(30).nullable().optional(),
+    role:  z.enum(['admin', 'staff', 'owner']).optional(),
   })
 
   // Tenant staff: add
   app.post<{ Params: { id: string } }>('/tenants/:id/staff', async (request, reply) => {
-    const { user_id, role } = request.body as any
+    const { user_id, role } = staffAddSchema.parse(request.body ?? {})
     await db.query(
       `INSERT INTO user_roles (user_id, tenant_id, role) VALUES ($1, $2, $3)
        ON CONFLICT (user_id, tenant_id) DO UPDATE SET role = EXCLUDED.role`,
       [user_id, request.params.id, role]
     )
+    await logAdminAction(auditFromRequest(request, 'tenant.staff.add', request.params.id, `user ${user_id} → ${role}`))
     return reply.status(201).send({ ok: true })
   })
 
   // Tenant staff: edit user info + role
   app.patch<{ Params: { id: string; userId: string } }>('/tenants/:id/staff/:userId', async (request, reply) => {
-    const { name, email, phone, role } = request.body as any
+    const { name, email, phone, role } = staffEditSchema.parse(request.body ?? {})
+
+    // The user must belong to this tenant before we touch the GLOBAL users row.
+    const { rows: [link] } = await db.query(
+      `SELECT role FROM user_roles WHERE tenant_id = $1 AND user_id = $2`,
+      [request.params.id, request.params.userId]
+    )
+    if (!link) return reply.status(404).send({ error: 'Usuário não pertence a este tenant' })
+
     if (name || email || phone !== undefined) {
       await db.query(
         `UPDATE users SET
@@ -209,6 +306,9 @@ export const rootRoutes: FastifyPluginAsync = async (app) => {
         [role, request.params.id, request.params.userId]
       )
     }
+    const changed = Object.entries({ name, email, phone, role })
+      .filter(([, v]) => v !== undefined).map(([k]) => k)
+    await logAdminAction(auditFromRequest(request, 'tenant.staff.update', request.params.id, `user ${request.params.userId}, campos: ${changed.join(', ')}`))
     return reply.send({ ok: true })
   })
 
@@ -218,16 +318,20 @@ export const rootRoutes: FastifyPluginAsync = async (app) => {
       `DELETE FROM user_roles WHERE tenant_id = $1 AND user_id = $2 AND role != 'owner'`,
       [request.params.id, request.params.userId]
     )
+    await logAdminAction(auditFromRequest(request, 'tenant.staff.remove', request.params.id, `user ${request.params.userId}`))
     return reply.send({ ok: true })
   })
 
   // Extend tenant trial
   app.post<{ Params: { id: string } }>('/tenants/:id/extend-trial', async (request, reply) => {
-    const { days = 7 } = request.body as any
+    const { days } = z.object({
+      days: z.number().int().min(1).max(365).default(7),
+    }).parse(request.body ?? {})
     await db.query(
       `UPDATE tenants SET trial_ends_at = COALESCE(trial_ends_at, NOW()) + ($1 || ' days')::interval, status = 'trial' WHERE id = $2`,
       [days, request.params.id]
     )
+    await logAdminAction(auditFromRequest(request, 'tenant.trial_extend', request.params.id, `+${days} dias`))
     return reply.send({ ok: true })
   })
 
@@ -265,6 +369,8 @@ export const rootRoutes: FastifyPluginAsync = async (app) => {
          RETURNING id, name, email, phone, created_at`,
         [name, email, phone || null, password_hash]
       )
+      // NEVER log the password — only identifying, non-secret fields.
+      await logAdminAction(auditFromRequest(request, 'user.create', user.id, `${name} <${email}>`))
       return reply.status(201).send(user)
     } catch (e: any) {
       if (e.code === '23505') return reply.status(409).send({ error: 'E-mail já cadastrado' })
@@ -296,6 +402,14 @@ export const rootRoutes: FastifyPluginAsync = async (app) => {
         params
       )
       if (!user) return reply.status(404).send({ error: 'Usuário não encontrado' })
+      // NEVER log the password — only which fields changed (field names, no values).
+      const changed = [
+        name !== undefined && 'name',
+        email !== undefined && 'email',
+        phone !== undefined && 'phone',
+        password && 'password',
+      ].filter(Boolean)
+      await logAdminAction(auditFromRequest(request, 'user.update', request.params.id, `campos: ${changed.join(', ')}`))
       return reply.send(user)
     } catch (e: any) {
       if (e.code === '23505') return reply.status(409).send({ error: 'E-mail já cadastrado' })
@@ -305,9 +419,10 @@ export const rootRoutes: FastifyPluginAsync = async (app) => {
 
   // Delete user
   app.delete<{ Params: { id: string } }>('/users/:id', async (request, reply) => {
-    const { rows: [user] } = await db.query(`SELECT id FROM users WHERE id = $1`, [request.params.id])
+    const { rows: [user] } = await db.query(`SELECT id, email FROM users WHERE id = $1`, [request.params.id])
     if (!user) return reply.status(404).send({ error: 'Usuário não encontrado' })
     await db.query(`DELETE FROM users WHERE id = $1`, [request.params.id])
+    await logAdminAction(auditFromRequest(request, 'user.delete', request.params.id, `${user.email}`))
     return reply.send({ ok: true })
   })
 
@@ -577,6 +692,7 @@ export const rootRoutes: FastifyPluginAsync = async (app) => {
         [slug, name, description ?? null, price_cents ?? 0, max_agendas ?? 1, max_users ?? 1,
          trial_days ?? 0, JSON.stringify(features ?? []), is_active ?? true, sort_order ?? 0]
       )
+      await logAdminAction(auditFromRequest(request, 'plan.create', plan.id, `${slug} — ${name}`))
       return reply.status(201).send(plan)
     } catch (e: any) {
       if (e.code === '23505') return reply.status(409).send({ error: 'Slug já existe' })
@@ -606,7 +722,16 @@ export const rootRoutes: FastifyPluginAsync = async (app) => {
     )
     if (!plan) return reply.status(404).send({ error: 'Plano não encontrado' })
     // Plan capability changed → drop cached media flags so the bot re-reads it.
-    await redis.keys('tenant:media:*').then((keys) => keys.length && redis.del(...keys)).catch(() => {})
+    // SCAN (non-blocking) instead of KEYS, which is O(N) and blocks Redis.
+    try {
+      const stream = redis.scanStream({ match: 'tenant:media:*', count: 100 })
+      for await (const keys of stream as unknown as AsyncIterable<string[]>) {
+        if (keys.length) await redis.del(...keys)
+      }
+    } catch { /* cache cleanup is best-effort */ }
+    const changed = Object.entries({ name, description, price_cents, max_agendas, max_users, trial_days, features, is_active, sort_order, media_enabled })
+      .filter(([, v]) => v !== undefined).map(([k]) => k)
+    await logAdminAction(auditFromRequest(request, 'plan.update', request.params.id, `${plan.slug ?? plan.name} — campos: ${changed.join(', ')}`))
     return reply.send(plan)
   })
 
@@ -617,6 +742,7 @@ export const rootRoutes: FastifyPluginAsync = async (app) => {
       return reply.status(400).send({ error: 'Planos padrão não podem ser excluídos' })
     }
     await db.query(`DELETE FROM platform_plans WHERE id = $1`, [request.params.id])
+    await logAdminAction(auditFromRequest(request, 'plan.delete', request.params.id, `${plan.slug}`))
     return reply.send({ ok: true })
   })
 
@@ -634,6 +760,7 @@ export const rootRoutes: FastifyPluginAsync = async (app) => {
          VALUES ($1, $2, $3, $4, $5) RETURNING *`,
         [business_type, display_name, system_prompt ?? '', custom_instructions ?? '', tone ?? 'amigável e profissional']
       )
+      await logAdminAction(auditFromRequest(request, 'template.create', t.id, `${business_type} — ${display_name}`))
       return reply.status(201).send(t)
     } catch (e: any) {
       if (e.code === '23505') return reply.status(409).send({ error: 'Tipo de negócio já existe' })
@@ -654,11 +781,18 @@ export const rootRoutes: FastifyPluginAsync = async (app) => {
       [display_name, system_prompt, custom_instructions, tone, request.params.id]
     )
     if (!t) return reply.status(404).send({ error: 'Template não encontrado' })
+    const changed = Object.entries({ display_name, system_prompt, custom_instructions, tone })
+      .filter(([, v]) => v !== undefined).map(([k]) => k)
+    await logAdminAction(auditFromRequest(request, 'template.update', request.params.id, `${t.business_type} — campos: ${changed.join(', ')}`))
     return reply.send(t)
   })
 
   app.delete<{ Params: { id: string } }>('/business-type-templates/:id', async (request, reply) => {
-    await db.query(`DELETE FROM business_type_templates WHERE id = $1`, [request.params.id])
+    const { rows: [t] } = await db.query(
+      `DELETE FROM business_type_templates WHERE id = $1 RETURNING business_type`,
+      [request.params.id]
+    )
+    await logAdminAction(auditFromRequest(request, 'template.delete', request.params.id, t ? `${t.business_type}` : undefined))
     return reply.send({ ok: true })
   })
 
@@ -702,8 +836,319 @@ export const rootRoutes: FastifyPluginAsync = async (app) => {
   })
 
   app.post<{ Params: { id: string } }>('/affiliates/:id/pay', async (request, reply) => {
+    // Capture the amount being paid BEFORE zeroing it, for the audit trail.
+    const { rows: [aff] } = await db.query(
+      `SELECT pending_earnings FROM affiliates WHERE id = $1`, [request.params.id]
+    )
+    if (!aff) return reply.status(404).send({ error: 'Afiliado não encontrado' })
     await db.query(`UPDATE affiliate_referrals SET paid_at = NOW() WHERE affiliate_id = $1 AND paid_at IS NULL`, [request.params.id])
     await db.query(`UPDATE affiliates SET paid_earnings = paid_earnings + pending_earnings, pending_earnings = 0 WHERE id = $1`, [request.params.id])
+    await logAdminAction(auditFromRequest(request, 'affiliate.pay', request.params.id, `valor: ${aff.pending_earnings}`))
     return reply.send({ ok: true })
+  })
+
+  // ── Support tickets (all tenants) ────────────────────────────────────────────
+  app.get<{ Querystring: { status?: string } }>('/support/tickets', async (request, reply) => {
+    const status = request.query.status
+    if (status && !['open', 'resolved'].includes(status)) {
+      return reply.status(400).send({ error: 'Status inválido' })
+    }
+    const params: any[] = []
+    let where = ''
+    if (status) { params.push(status); where = `WHERE st.status = $1` }
+    const { rows } = await db.query(
+      `SELECT st.id, st.tenant_id, t.name AS tenant_name, u.name AS requester_name,
+              st.subject, st.status, st.priority, st.created_at, st.updated_at
+       FROM support_tickets st
+       JOIN tenants t ON t.id = st.tenant_id
+       LEFT JOIN users u ON u.id = st.user_id
+       ${where}
+       ORDER BY st.updated_at DESC`,
+      params
+    )
+    return reply.send(rows)
+  })
+
+  app.get<{ Params: { id: string } }>('/support/tickets/:id', async (request, reply) => {
+    const { rows: [ticket] } = await db.query(
+      `SELECT st.id, st.tenant_id, t.name AS tenant_name, u.name AS requester_name,
+              st.subject, st.status, st.priority, st.created_at, st.updated_at
+       FROM support_tickets st
+       JOIN tenants t ON t.id = st.tenant_id
+       LEFT JOIN users u ON u.id = st.user_id
+       WHERE st.id = $1`,
+      [request.params.id]
+    )
+    if (!ticket) return reply.status(404).send({ error: 'Chamado não encontrado' })
+
+    const { rows: messages } = await db.query(
+      `SELECT id, sender, body, created_at
+       FROM support_messages WHERE ticket_id = $1
+       ORDER BY created_at ASC`,
+      [ticket.id]
+    )
+    return reply.send({ ...ticket, messages })
+  })
+
+  app.post<{ Params: { id: string } }>('/support/tickets/:id/reply', async (request, reply) => {
+    const body = String((request.body as any)?.body ?? '').trim()
+    if (!body) return reply.status(400).send({ error: 'Mensagem obrigatória' })
+
+    const { rows: [ticket] } = await db.query(
+      `UPDATE support_tickets SET updated_at = NOW() WHERE id = $1
+       RETURNING id, subject, status, priority, created_at, updated_at`,
+      [request.params.id]
+    )
+    if (!ticket) return reply.status(404).send({ error: 'Chamado não encontrado' })
+
+    const { rows: [message] } = await db.query(
+      `INSERT INTO support_messages (ticket_id, sender, user_id, body)
+       VALUES ($1, 'admin', $2, $3)
+       RETURNING id, sender, body, created_at`,
+      [ticket.id, request.user.user_id, body.slice(0, 8000)]
+    )
+    logAdminAction(auditFromRequest(request, 'support.reply', ticket.id, `Resposta no chamado "${ticket.subject}"`))
+    return reply.status(201).send({ ticket, message })
+  })
+
+  app.patch<{ Params: { id: string } }>('/support/tickets/:id', async (request, reply) => {
+    const status = (request.body as any)?.status
+    if (!['open', 'resolved'].includes(status)) {
+      return reply.status(400).send({ error: 'Status inválido (use open ou resolved)' })
+    }
+    const { rows: [ticket] } = await db.query(
+      `UPDATE support_tickets SET status = $1, updated_at = NOW() WHERE id = $2
+       RETURNING id, tenant_id, subject, status, priority, created_at, updated_at`,
+      [status, request.params.id]
+    )
+    if (!ticket) return reply.status(404).send({ error: 'Chamado não encontrado' })
+    logAdminAction(auditFromRequest(request, 'support.status', ticket.id, `Chamado "${ticket.subject}" → ${status}`))
+    return reply.send(ticket)
+  })
+
+  // ── Remote support: diagnose/fix a tenant's bot remotely ────────────────────
+
+  // UUID guard for :id/:cid params — a malformed uuid must return 400, never
+  // bubble up as a Postgres cast error (500).
+  const isUuid = (v: string) => z.string().uuid().safeParse(v).success
+
+  const pageParams = (q: any, defLimit = 50, maxLimit = 200) => ({
+    limit: Math.min(Math.max(Number(q?.limit) || defLimit, 1), maxLimit),
+    offset: Math.max(Number(q?.offset) || 0, 0),
+  })
+
+  // Conversations viewer — LGPD-sensitive (customer personal data + message
+  // content), so EVERY access is audited.
+  app.get<{ Params: { id: string } }>('/tenants/:id/conversations', async (request, reply) => {
+    const { id } = request.params
+    if (!isUuid(id)) return reply.status(400).send({ error: 'ID inválido' })
+    const { limit, offset } = pageParams(request.query)
+
+    const { rows: [tenant] } = await db.query(`SELECT id FROM tenants WHERE id = $1`, [id])
+    if (!tenant) return reply.status(404).send({ error: 'Tenant não encontrado' })
+
+    const { rows } = await db.query(
+      `SELECT c.id, c.customer_id,
+              cu.name AS customer_name, cu.last_name AS customer_last_name,
+              cu.phone AS customer_phone,
+              c.bot_paused_until,
+              (c.bot_paused_until IS NOT NULL AND c.bot_paused_until > NOW()) AS bot_paused,
+              c.updated_at,
+              (SELECT LEFT(m.content, 160) FROM messages m
+                WHERE m.conversation_id = c.id
+                ORDER BY m.created_at DESC LIMIT 1) AS last_message
+       FROM conversations c
+       JOIN customers cu ON cu.id = c.customer_id
+       WHERE c.tenant_id = $1
+       ORDER BY c.updated_at DESC
+       LIMIT $2 OFFSET $3`,
+      [id, limit, offset]
+    )
+    await logAdminAction(auditFromRequest(request, 'tenant.conversations.view', id, `${rows.length} conversas (offset ${offset})`))
+    return reply.send({ data: rows, limit, offset })
+  })
+
+  // Messages of one conversation (read-only). tenant_id comes from the
+  // conversation row itself — never from a client-supplied param.
+  app.get<{ Params: { cid: string } }>('/conversations/:cid/messages', async (request, reply) => {
+    const { cid } = request.params
+    if (!isUuid(cid)) return reply.status(400).send({ error: 'ID inválido' })
+    const { limit, offset } = pageParams(request.query)
+
+    const { rows: [conv] } = await db.query(
+      `SELECT id, tenant_id, customer_id FROM conversations WHERE id = $1`, [cid]
+    )
+    if (!conv) return reply.status(404).send({ error: 'Conversa não encontrada' })
+
+    const { rows: messages } = await db.query(
+      `SELECT id, role, content, created_at
+       FROM messages WHERE conversation_id = $1
+       ORDER BY created_at DESC LIMIT $2 OFFSET $3`,
+      [cid, limit, offset]
+    )
+    await logAdminAction(auditFromRequest(request, 'conversation.view', cid, `tenant ${conv.tenant_id}, ${messages.length} mensagens (offset ${offset})`))
+    return reply.send({ conversation_id: cid, tenant_id: conv.tenant_id, data: messages, limit, offset })
+  })
+
+  // Persisted bot errors (migration 031) — newest first.
+  app.get<{ Params: { id: string } }>('/tenants/:id/bot-errors', async (request, reply) => {
+    const { id } = request.params
+    if (!isUuid(id)) return reply.status(400).send({ error: 'ID inválido' })
+    const { limit } = pageParams(request.query)
+    try {
+      const { rows } = await db.query(
+        `SELECT id, conversation_id, kind, detail, created_at
+         FROM bot_errors WHERE tenant_id = $1
+         ORDER BY created_at DESC LIMIT $2`,
+        [id, limit]
+      )
+      return reply.send(rows)
+    } catch {
+      // bot_errors table not created yet (migration 031 pending) — empty list
+      return reply.send([])
+    }
+  })
+
+  // WhatsApp instance + live Evolution state. NEVER exposes Evolution url/key.
+  app.get<{ Params: { id: string } }>('/tenants/:id/whatsapp', async (request, reply) => {
+    const { id } = request.params
+    if (!isUuid(id)) return reply.status(400).send({ error: 'ID inválido' })
+    const { rows: [instance] } = await db.query(
+      `SELECT instance_name, status, phone_number FROM whatsapp_instances WHERE tenant_id = $1`,
+      [id]
+    )
+    if (!instance) return reply.send({ instance: null, live: null })
+    const live = await evolutionConnectionState(instance.instance_name)
+    return reply.send({ instance, live })
+  })
+
+  // Reconnect a tenant's WhatsApp — same flow as the tenant-facing
+  // POST /whatsapp/connect (create instance if needed + fetch QR), but driven
+  // by the Root Admin for the target tenant. Each call holds a slow (~18s)
+  // upstream QR poll → same strict rate limit as the tenant route.
+  app.post<{ Params: { id: string } }>('/tenants/:id/whatsapp/reconnect', {
+    config: { rateLimit: { max: 5, timeWindow: '1 minute' } },
+  }, async (request, reply) => {
+    const { id } = request.params
+    if (!isUuid(id)) return reply.status(400).send({ error: 'ID inválido' })
+    const { rows: [tenant] } = await db.query(`SELECT id FROM tenants WHERE id = $1`, [id])
+    if (!tenant) return reply.status(404).send({ error: 'Tenant não encontrado' })
+
+    const instanceName = `tenant_${id.replace(/-/g, '')}`
+    const evoCfg = await getEvolutionConfig()
+    const secret = evoCfg.webhook_secret
+    const webhookUrl = `${evoCfg.webhook_base}/webhook/whatsapp/${instanceName}${secret ? `?token=${encodeURIComponent(secret)}` : ''}`
+
+    await db.query(
+      `INSERT INTO whatsapp_instances (tenant_id, instance_name, status)
+       VALUES ($1, $2, 'qr_pending')
+       ON CONFLICT (tenant_id) DO UPDATE SET instance_name = $2, status = 'qr_pending'`,
+      [id, instanceName]
+    )
+    await evolutionCreateInstance(instanceName, webhookUrl)
+    const qrData = await evolutionGetQR(instanceName)
+
+    await logAdminAction(auditFromRequest(request, 'tenant.whatsapp.reconnect', id, qrData ? 'QR gerado' : 'QR pendente'))
+    if (qrData) {
+      // Same cache the tenant app polls via GET /whatsapp/qr
+      await redis.setex(`whatsapp:qr:${id}`, QR_CODE_TTL, JSON.stringify(qrData))
+      return reply.send(qrData)
+    }
+    return reply.send({ qr_pending: true })
+  })
+
+  // Force-logout a tenant's WhatsApp session (unlinks the device).
+  app.post<{ Params: { id: string } }>('/tenants/:id/whatsapp/logout', async (request, reply) => {
+    const { id } = request.params
+    if (!isUuid(id)) return reply.status(400).send({ error: 'ID inválido' })
+    const { rows: [instance] } = await db.query(
+      `SELECT instance_name FROM whatsapp_instances WHERE tenant_id = $1`, [id]
+    )
+    if (!instance) return reply.status(404).send({ error: 'Tenant sem instância de WhatsApp' })
+
+    await evolutionLogout(instance.instance_name)
+    await db.query(
+      `UPDATE whatsapp_instances SET status = 'disconnected', phone_number = NULL WHERE tenant_id = $1`,
+      [id]
+    )
+    await redis.del(`whatsapp:qr:${id}`)
+    await logAdminAction(auditFromRequest(request, 'tenant.whatsapp.logout', id, instance.instance_name))
+    return reply.send({ ok: true })
+  })
+
+  // Test the tenant's bot (DRY-RUN) — runs the real pipeline (prompt/tone/
+  // business config + model routing) for a synthetic message. Nothing is
+  // persisted and nothing is sent via WhatsApp (see testBotReply in services/bot).
+  app.post<{ Params: { id: string } }>('/tenants/:id/test-bot', async (request, reply) => {
+    const { id } = request.params
+    if (!isUuid(id)) return reply.status(400).send({ error: 'ID inválido' })
+    const { message } = z.object({ message: z.string().min(1).max(2000) }).parse(request.body ?? {})
+
+    const { rows: [ac] } = await db.query(`SELECT tenant_id FROM agent_config WHERE tenant_id = $1`, [id])
+    if (!ac) return reply.status(404).send({ error: 'Tenant sem configuração de agente' })
+
+    const result = await testBotReply(id, message)
+    await logAdminAction(auditFromRequest(request, 'tenant.test_bot', id, `dry-run (${message.length} chars)`))
+    return reply.send({ reply: result.reply, dry_run: true })
+  })
+
+  // Clear a tenant's Redis caches (config/handoff/media/QR + bot contexts of
+  // its recent conversations) so config changes take effect immediately.
+  app.post<{ Params: { id: string } }>('/tenants/:id/clear-cache', async (request, reply) => {
+    const { id } = request.params
+    if (!isUuid(id)) return reply.status(400).send({ error: 'ID inválido' })
+
+    let cleared = await redis.del(
+      `tenant:config:${id}`, `tenant:handoff:${id}`, `tenant:media:${id}`, `whatsapp:qr:${id}`
+    )
+    // bot:context:{conversationId} for this tenant — bounded to the most recent
+    // conversations (the context TTL is 30min, so recent ones cover the cache).
+    try {
+      const { rows } = await db.query(
+        `SELECT id FROM conversations WHERE tenant_id = $1 ORDER BY updated_at DESC LIMIT 500`, [id]
+      )
+      const keys = (rows as any[]).map((r) => `bot:context:${r.id}`)
+      for (let i = 0; i < keys.length; i += 100) {
+        cleared += await redis.del(...keys.slice(i, i + 100))
+      }
+    } catch { /* cache cleanup is best-effort */ }
+
+    await logAdminAction(auditFromRequest(request, 'tenant.cache.clear', id, `${cleared} chaves removidas`))
+    return reply.send({ ok: true, cleared })
+  })
+
+  // AI usage of ONE tenant: current-month spend vs. the plan's cap (+ last 30
+  // days per day). Complements the global GET /ai-usage dashboard.
+  app.get<{ Params: { id: string } }>('/tenants/:id/ai-usage', async (request, reply) => {
+    const { id } = request.params
+    if (!isUuid(id)) return reply.status(400).send({ error: 'ID inválido' })
+    const { rows: [tenant] } = await db.query(`SELECT plan FROM tenants WHERE id = $1`, [id])
+    if (!tenant) return reply.status(404).send({ error: 'Tenant não encontrado' })
+
+    const [spend, aiConfig] = await Promise.all([monthlySpend(id), getAiConfig()])
+    const cap = Number(aiConfig.caps?.[tenant.plan] ?? 0)
+
+    let recent: any[] = []
+    try {
+      const { rows } = await db.query(
+        `SELECT to_char(created_at AT TIME ZONE 'America/Sao_Paulo', 'YYYY-MM-DD') AS day,
+                SUM(cost_usd)::float AS cost,
+                SUM(input_tokens + output_tokens + cache_read_tokens + cache_write_tokens)::bigint AS tokens,
+                COUNT(*)::int AS calls
+         FROM ai_usage
+         WHERE tenant_id = $1 AND created_at >= now() - interval '30 days'
+         GROUP BY day ORDER BY day DESC`,
+        [id]
+      )
+      recent = rows
+    } catch { /* ai_usage table not created yet (migration 014 pending) */ }
+
+    return reply.send({
+      month_spend: spend,
+      cap,                                       // 0 = unlimited
+      plan: tenant.plan,
+      hard_stop_at: cap > 0 ? cap * 1.5 : null,  // bot stops calling the model here
+      recent,
+    })
   })
 }

@@ -3,6 +3,12 @@ import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { tenantApi } from '@/lib/api'
 
+type ProCommission = {
+  commission_enabled: boolean
+  commission_type: 'percent' | 'fixed'
+  commission_value: number
+}
+
 type FormState = {
   name: string
   description: string
@@ -10,9 +16,25 @@ type FormState = {
   price: number
   reminder_days: number | null
   professional_ids: string[]
+  commissions: Record<string, ProCommission>
 }
 
-const BLANK: FormState = { name: '', description: '', duration_minutes: 60, price: 0, reminder_days: null, professional_ids: [] }
+const BLANK_COMMISSION: ProCommission = { commission_enabled: false, commission_type: 'percent', commission_value: 0 }
+
+const BLANK: FormState = { name: '', description: '', duration_minutes: 60, price: 0, reminder_days: null, professional_ids: [], commissions: {} }
+
+// Payload for POST/PUT /tenant/services: rich `professionals` array (with commission)
+// instead of the legacy `professional_ids`.
+function buildPayload(form: FormState) {
+  const { professional_ids, commissions, ...rest } = form
+  return {
+    ...rest,
+    professionals: professional_ids.map((id) => ({
+      id,
+      ...(commissions[id] ?? BLANK_COMMISSION),
+    })),
+  }
+}
 
 const inputCls = 'w-full h-10 px-3 rounded-xl border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary'
 
@@ -30,6 +52,14 @@ function FormFields({ form, setForm, professionals }: {
       professional_ids: f.professional_ids.includes(id)
         ? f.professional_ids.filter((x) => x !== id)
         : [...f.professional_ids, id],
+      commissions: f.commissions[id] ? f.commissions : { ...f.commissions, [id]: BLANK_COMMISSION },
+    }))
+  }
+
+  function setCommission(id: string, patch: Partial<ProCommission>) {
+    setForm((f) => ({
+      ...f,
+      commissions: { ...f.commissions, [id]: { ...(f.commissions[id] ?? BLANK_COMMISSION), ...patch } },
     }))
   }
 
@@ -93,21 +123,87 @@ function FormFields({ form, setForm, professionals }: {
             <a href="/settings/staff" className="text-primary underline">Colaboradores</a> e habilite alguém para prestar serviços.
           </p>
         ) : (
-          <div className="flex flex-wrap gap-2">
-            {professionals.map((p) => {
-              const sel = form.professional_ids.includes(p.id)
-              return (
-                <button key={p.id} type="button" onClick={() => togglePro(p.id)}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors ${
-                    sel
-                      ? 'bg-primary text-white border-primary'
-                      : 'bg-white text-gray-600 border-gray-200 hover:border-primary hover:text-primary'
-                  }`}>
-                  {p.name}
-                </button>
-              )
-            })}
-          </div>
+          <>
+            <div className="flex flex-wrap gap-2">
+              {professionals.map((p) => {
+                const sel = form.professional_ids.includes(p.id)
+                return (
+                  <button key={p.id} type="button" onClick={() => togglePro(p.id)}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors ${
+                      sel
+                        ? 'bg-primary text-white border-primary'
+                        : 'bg-white text-gray-600 border-gray-200 hover:border-primary hover:text-primary'
+                    }`}>
+                    {p.name}
+                  </button>
+                )
+              })}
+            </div>
+
+            {/* Comissão por profissional selecionado */}
+            {form.professional_ids.length > 0 && (
+              <div className="mt-3 space-y-2">
+                <p className="text-xs text-gray-400">
+                  Comissão paga ao profissional por este serviço (percentual do valor ou valor fixo).
+                </p>
+                {form.professional_ids.map((id) => {
+                  const p = professionals.find((x) => x.id === id)
+                  if (!p) return null
+                  const c = form.commissions[id] ?? BLANK_COMMISSION
+                  return (
+                    <div key={id} className="rounded-xl border border-gray-100 bg-gray-50/60 p-3">
+                      <div className="flex items-center justify-between gap-3">
+                        <p className="text-xs font-semibold text-gray-700 truncate">{p.name}</p>
+                        <label className="flex items-center gap-2 cursor-pointer select-none shrink-0">
+                          <span className="text-xs text-gray-500">Comissão</span>
+                          <button
+                            type="button"
+                            role="switch"
+                            aria-checked={c.commission_enabled}
+                            onClick={() => setCommission(id, { commission_enabled: !c.commission_enabled })}
+                            className={`relative w-9 h-5 rounded-full transition-colors ${
+                              c.commission_enabled ? 'bg-primary' : 'bg-gray-300'
+                            }`}
+                          >
+                            <span className={`absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${
+                              c.commission_enabled ? 'translate-x-4' : ''
+                            }`} />
+                          </button>
+                        </label>
+                      </div>
+                      {c.commission_enabled && (
+                        <div className="flex items-center gap-2 mt-2">
+                          <div className="flex rounded-lg border border-gray-200 overflow-hidden">
+                            {(['percent', 'fixed'] as const).map((t) => (
+                              <button key={t} type="button" onClick={() => setCommission(id, { commission_type: t })}
+                                className={`px-3 h-8 text-xs font-medium transition-colors ${
+                                  c.commission_type === t ? 'bg-primary text-white' : 'bg-white text-gray-500 hover:text-primary'
+                                }`}>
+                                {t === 'percent' ? '%' : 'R$'}
+                              </button>
+                            ))}
+                          </div>
+                          <input
+                            type="number"
+                            min={0}
+                            step={c.commission_type === 'percent' ? 1 : 0.01}
+                            max={c.commission_type === 'percent' ? 100 : undefined}
+                            value={c.commission_value}
+                            onChange={(e) => setCommission(id, { commission_value: Math.max(0, Number(e.target.value) || 0) })}
+                            className="w-28 h-8 px-3 rounded-lg border border-gray-200 text-xs focus:outline-none focus:ring-2 focus:ring-primary"
+                            placeholder={c.commission_type === 'percent' ? 'Ex.: 20' : 'Ex.: 15,00'}
+                          />
+                          <span className="text-xs text-gray-400">
+                            {c.commission_type === 'percent' ? '% do valor do serviço' : 'valor fixo por atendimento'}
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+          </>
         )}
       </div>
     </div>
@@ -169,6 +265,13 @@ export default function ServicesPage() {
       price: Number(s.price),
       reminder_days: s.reminder_days ?? null,
       professional_ids: (s.professionals ?? []).map((p: any) => p.id),
+      commissions: Object.fromEntries(
+        (s.professionals ?? []).map((p: any) => [p.id, {
+          commission_enabled: !!p.commission_enabled,
+          commission_type: p.commission_type === 'fixed' ? 'fixed' : 'percent',
+          commission_value: Number(p.commission_value ?? 0),
+        } satisfies ProCommission]),
+      ),
     })
   }
 
@@ -196,7 +299,7 @@ export default function ServicesPage() {
           <FormFields form={form} setForm={setForm} professionals={professionals as any[]} />
           {error && <p className="text-red-500 text-xs mt-2">{error}</p>}
           <div className="flex gap-2 mt-4">
-            <button onClick={() => createMutation.mutate(form)} disabled={createMutation.isPending}
+            <button onClick={() => createMutation.mutate(buildPayload(form))} disabled={createMutation.isPending}
               className="flex-1 h-10 bg-primary text-white text-sm font-semibold rounded-xl disabled:opacity-50">
               {createMutation.isPending ? 'Salvando...' : 'Salvar'}
             </button>
@@ -224,7 +327,7 @@ export default function ServicesPage() {
                   <FormFields form={form} setForm={setForm} professionals={professionals as any[]} />
                   {error && <p className="text-red-500 text-xs mt-2">{error}</p>}
                   <div className="flex gap-2 mt-4">
-                    <button onClick={() => updateMutation.mutate({ id: s.id, data: form })} disabled={updateMutation.isPending}
+                    <button onClick={() => updateMutation.mutate({ id: s.id, data: buildPayload(form) })} disabled={updateMutation.isPending}
                       className="flex-1 h-10 bg-primary text-white text-sm font-semibold rounded-xl disabled:opacity-50">
                       {updateMutation.isPending ? 'Salvando...' : 'Salvar alterações'}
                     </button>
@@ -252,6 +355,14 @@ export default function ServicesPage() {
                         {s.professionals.map((p: any) => (
                           <span key={p.id} className="text-xs bg-indigo-50 text-indigo-600 px-2 py-0.5 rounded-full font-medium">
                             {p.name}
+                            {p.commission_enabled && (
+                              <span className="text-indigo-400">
+                                {' · '}
+                                {p.commission_type === 'fixed'
+                                  ? Number(p.commission_value ?? 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
+                                  : `${Number(p.commission_value ?? 0)}%`}
+                              </span>
+                            )}
                           </span>
                         ))}
                       </div>

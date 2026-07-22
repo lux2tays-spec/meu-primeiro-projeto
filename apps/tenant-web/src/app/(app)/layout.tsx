@@ -10,7 +10,7 @@ import { useBranding } from '@/components/BrandingProvider'
 import {
   LayoutDashboard, CalendarDays, Users, Wallet, MessageCircle, Bot, Tag,
   UserCog, Clock, CreditCard, Package, Share2, LifeBuoy, LogOut, Trash2,
-  Menu, Lock, AlarmClock, type LucideIcon,
+  Menu, Lock, AlarmClock, Coins, type LucideIcon,
 } from 'lucide-react'
 
 const NAV: { href: string; icon: LucideIcon; label: string }[] = [
@@ -18,6 +18,7 @@ const NAV: { href: string; icon: LucideIcon; label: string }[] = [
   { href: '/calendar',              icon: CalendarDays,    label: 'Agenda' },
   { href: '/customers',             icon: Users,           label: 'Clientes' },
   { href: '/financeiro',            icon: Wallet,          label: 'Financeiro' },
+  { href: '/comissoes',             icon: Coins,           label: 'Comissões' },
   { href: '/settings/whatsapp',     icon: MessageCircle,   label: 'WhatsApp' },
   { href: '/settings/agent',        icon: Bot,             label: 'Agente IA' },
   { href: '/settings/services',     icon: Tag,             label: 'Serviços' },

@@ -112,9 +112,9 @@ export const tenantApi = {
   customers: (search?: string) =>
     api.get<any[]>(`/tenant/customers${search ? `?search=${encodeURIComponent(search)}` : ''}`),
   customer: (id: string) => api.get<any>(`/tenant/customers/${id}`),
-  addCustomer: (data: { name: string; phone: string; email?: string }) =>
+  addCustomer: (data: { name: string; last_name?: string; phone: string; email?: string }) =>
     api.post<any>('/tenant/customers', data),
-  updateCustomer: (id: string, data: { name?: string; email?: string }) =>
+  updateCustomer: (id: string, data: { name?: string; last_name?: string; email?: string }) =>
     api.put<any>(`/tenant/customers/${id}`, data),
   onboarding: () =>
     api.get<{
@@ -134,9 +134,29 @@ export const tenantApi = {
 export const appointmentsApi = {
   list: (date?: string) =>
     api.get<any[]>(`/appointments${date ? `?date=${date}` : ''}`),
+  search: (params: {
+    date?: string
+    from?: string
+    to?: string
+    search?: string
+    professional_id?: string
+    service_id?: string
+  }) => {
+    const qs = new URLSearchParams()
+    if (params.date) qs.set('date', params.date)
+    if (params.from) qs.set('from', params.from)
+    if (params.to) qs.set('to', params.to)
+    if (params.search) qs.set('search', params.search)
+    if (params.professional_id) qs.set('professional_id', params.professional_id)
+    if (params.service_id) qs.set('service_id', params.service_id)
+    const q = qs.toString()
+    return api.get<any[]>(`/appointments${q ? `?${q}` : ''}`)
+  },
   create: (data: any) => api.post<any>('/appointments', data),
   updateStatus: (id: string, status: string) =>
     api.patch<any>(`/appointments/${id}/status`, { status }),
+  bulkReschedule: (data: { from: string; to: string; professional_id?: string; message?: string }) =>
+    api.post<{ affected: number; notified: number }>('/appointments/bulk-reschedule', data),
 }
 
 // Agent
@@ -229,6 +249,18 @@ export const affiliateApi = {
 export const customersApi = {
   list: (search?: string) =>
     api.get<any[]>(`/tenant/customers${search ? `?search=${encodeURIComponent(search)}` : ''}`),
+  get: (id: string) => api.get<any>(`/tenant/customers/${id}`),
+  create: (data: { name: string; last_name?: string; phone: string; email?: string }) =>
+    api.post<any>('/tenant/customers', data),
+  update: (id: string, data: { name?: string; last_name?: string; email?: string }) =>
+    api.put<any>(`/tenant/customers/${id}`, data),
+  remove: (id: string) => api.delete<any>(`/tenant/customers/${id}`),
+}
+
+/** Full display name for a customer: `name` + optional `last_name`. */
+export function customerFullName(c: { name?: string | null; last_name?: string | null } | null | undefined): string {
+  if (!c) return ''
+  return [c.name, c.last_name].map((s) => (s ?? '').trim()).filter(Boolean).join(' ')
 }
 
 // Financeiro
@@ -241,6 +273,35 @@ export const financeiroApi = {
   createPaymentLink: (data: { title: string; description?: string; amount: number }) =>
     api.post<any>('/financeiro/payment-links', data),
   deletePaymentLink: (id: string) => api.delete<any>(`/financeiro/payment-links/${id}`),
+}
+
+// Comissões
+export interface CommissionItem {
+  id: string
+  amount: number
+  status: 'pending' | 'paid'
+  service_name: string
+  customer_name: string
+  customer_last_name?: string | null
+  professional_name: string
+  starts_at: string
+}
+export interface CommissionsResponse {
+  data: CommissionItem[]
+  totals: { pending_amount: number; paid_amount: number; count: number }
+}
+export const commissionsApi = {
+  list: (params?: { professional_id?: string; status?: 'pending' | 'paid'; from?: string; to?: string }) => {
+    const qs = new URLSearchParams()
+    if (params?.professional_id) qs.set('professional_id', params.professional_id)
+    if (params?.status) qs.set('status', params.status)
+    if (params?.from) qs.set('from', params.from)
+    if (params?.to) qs.set('to', params.to)
+    const q = qs.toString()
+    return api.get<CommissionsResponse>(`/commissions${q ? `?${q}` : ''}`)
+  },
+  pay: (body: { ids?: string[]; professional_id?: string; from?: string; to?: string }) =>
+    api.post<{ paid_count: number }>('/commissions/pay', body),
 }
 
 // Subscription (platform plans + transparent checkout)
@@ -307,6 +368,51 @@ export async function createCardToken(publicKey: string, card: CardTokenInput): 
     throw new Error('Não foi possível validar o cartão. Confira os dados e tente novamente.')
   }
   return String(data.id)
+}
+
+// Suporte (assistente IA + chamados)
+export interface SupportChatTurn {
+  role: 'user' | 'assistant'
+  content: string
+}
+export interface SupportAskResponse {
+  reply: string
+  suggest_ticket: boolean
+}
+export type SupportTicketStatus = 'open' | 'resolved'
+export type SupportTicketPriority = 'normal' | 'high'
+export interface SupportTicketSummary {
+  id: string
+  subject: string
+  status: SupportTicketStatus
+  priority: SupportTicketPriority
+  created_at: string
+  updated_at: string
+  last_message: string
+}
+export interface SupportTicketMessage {
+  id: string
+  sender: 'user' | 'admin'
+  body: string
+  created_at: string
+}
+export interface SupportTicketDetail {
+  id: string
+  subject: string
+  status: SupportTicketStatus
+  priority: SupportTicketPriority
+  created_at: string
+  messages: SupportTicketMessage[]
+}
+export const supportApi = {
+  ask: (message: string, history?: SupportChatTurn[]) =>
+    api.post<SupportAskResponse>('/support/ask', { message, history }),
+  tickets: () => api.get<SupportTicketSummary[]>('/support/tickets'),
+  createTicket: (data: { subject: string; message: string; priority?: SupportTicketPriority }) =>
+    api.post<SupportTicketSummary>('/support/tickets', data),
+  ticket: (id: string) => api.get<SupportTicketDetail>(`/support/tickets/${id}`),
+  replyTicket: (id: string, body: string) =>
+    api.post<{ ok: boolean }>(`/support/tickets/${id}/messages`, { body }),
 }
 
 // Payment config

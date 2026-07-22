@@ -1,4 +1,5 @@
 import Anthropic from '@anthropic-ai/sdk'
+import { randomUUID } from 'crypto'
 import { db } from '../lib/db'
 import { redis, TENANT_CONFIG_TTL } from '../lib/redis'
 import type { BotMessage } from '@agendabot/shared'
@@ -189,7 +190,8 @@ Você NÃO consegue realizar nenhuma ação sozinho(a). Consultar horários, age
 - check_availability: CHAME SEMPRE antes de mencionar ou oferecer QUALQUER horário. Nunca invente horários livres.
 - book_appointment: a ÚNICA forma de agendar. CHAME após confirmar serviço + data + hora com o cliente.
 - cancel_appointment: a ÚNICA forma de cancelar o próximo agendamento do cliente.
-- save_customer_info: CHAME IMEDIATAMENTE (na mesma resposta) quando o cliente informar NOME, E-MAIL ou um serviço de interesse — mesmo que ele não vá fechar agora.
+- save_customer_info: CHAME IMEDIATAMENTE (na mesma resposta) quando o cliente informar NOME, SOBRENOME, E-MAIL ou um serviço de interesse — mesmo que ele não vá fechar agora. SEMPRE colete nome E sobrenome: ao pedir o nome, peça "nome e sobrenome" com naturalidade; se o cliente disser só o primeiro nome, agradeça e pergunte o sobrenome também (uma única vez, sem insistir).
+- oferecer_especialista: CHAME quando você não conseguir resolver — cliente insatisfeito/reclamando, pede um humano/atendente, assunto fora do agendamento, ou você já tentou e não avançou. Ela oferece encaminhar a um especialista da equipe. Prefira SEMPRE tentar ajudar primeiro; só ofereça o especialista quando realmente travar.
 
 ## HONESTIDADE (REGRAS INVIOLÁVEIS)
 - Só diga "agendado", "confirmado" ou "garantido" DEPOIS que book_appointment retornar "ok": true NESTA conversa. Antes disso, o agendamento NÃO existe.
@@ -208,7 +210,7 @@ ${templateInstructions ? '\n## INSTRUÇÕES DO TIPO DE NEGÓCIO\n' + templateIns
   // VOLATILE part — customer-specific, changes per conversation (not cached).
   const volatile = `## CLIENTE ATUAL
 Telefone: ${customerPhone}
-${nameIsKnown ? `Nome: ${customerName}` : 'Nome: ainda não informado — pergunte de forma natural em algum momento.'}${interestLine}
+${nameIsKnown ? `Nome: ${customerName}` : 'Nome: ainda não informado — pergunte o nome e o sobrenome de forma natural em algum momento (e salve com save_customer_info).'}${interestLine}
 Histórico:
 ${formatPastAppointments(profile.history)}
 
@@ -226,11 +228,12 @@ ${nameIsKnown ? `- O cliente se chama "${customerName}". NUNCA pergunte o nome d
 const TOOLS: Anthropic.Tool[] = [
   {
     name: 'save_customer_info',
-    description: 'ÚNICA forma de salvar dados do cliente. CHAME IMEDIATAMENTE quando o cliente informar o nome, o e-mail ou demonstrar interesse em um serviço — na mesma resposta, mesmo que ele não vá agendar agora. Sem esta chamada, NADA fica salvo. Só afirme "dados salvos" se ela retornar "ok": true.',
+    description: 'ÚNICA forma de salvar dados do cliente. CHAME IMEDIATAMENTE quando o cliente informar o nome, o sobrenome, o e-mail ou demonstrar interesse em um serviço — na mesma resposta, mesmo que ele não vá agendar agora. Sempre colete nome E sobrenome (peça o sobrenome se o cliente disser só o primeiro nome). Sem esta chamada, NADA fica salvo. Só afirme "dados salvos" se ela retornar "ok": true.',
     input_schema: {
       type: 'object',
       properties: {
-        name: { type: 'string', description: 'Nome do cliente' },
+        name: { type: 'string', description: 'Primeiro nome do cliente' },
+        last_name: { type: 'string', description: 'Sobrenome do cliente' },
         email: { type: 'string', description: 'E-mail do cliente' },
         interested_service: { type: 'string', description: 'Serviço que o cliente demonstrou interesse mas não agendou' },
       },
@@ -273,9 +276,39 @@ const TOOLS: Anthropic.Tool[] = [
     description: 'Envia por e-mail um convite de calendário (.ics) dos agendamentos futuros do cliente, para ele adicionar na própria agenda. CHAME quando o cliente pedir um convite/invite ou lembrete na agenda dele por e-mail. Precisa que o e-mail do cliente esteja salvo (use save_customer_info antes se não tiver). Só diga que enviou se retornar "ok": true.',
     input_schema: { type: 'object', properties: {} },
   },
+  {
+    name: 'oferecer_especialista',
+    description: 'Use quando você NÃO conseguir resolver o pedido do cliente: ele está insatisfeito/reclamando, pede explicitamente falar com um humano/atendente/pessoa, o assunto foge do seu escopo (agendamento/serviços), ou você já tentou e não avançou. Envia ao cliente uma pergunta com um botão perguntando se ele quer ser encaminhado a um especialista da equipe. NÃO use para agendar, cancelar ou tirar dúvidas simples que você consegue responder. Depois de chamar esta ferramenta, NÃO escreva mais nada — a pergunta já foi enviada.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        mensagem: { type: 'string', description: 'Pergunta curta e gentil a mostrar antes do botão (opcional). Padrão: "Quer que eu encaminhe para um especialista?"' },
+      },
+    },
+  },
 ]
 
-type ExecCtx = { tenantId: string; customerId?: string }
+type ExecCtx = { tenantId: string; customerId?: string; conversationId?: string; offer?: { message: string } }
+
+// ── Bot error log (Root Admin remote diagnostics) ───────────────────────────
+
+/**
+ * Best-effort persistence of a bot failure to `bot_errors` (migration 031) so
+ * the Root Admin can diagnose a tenant's bot remotely. NEVER throws — an error
+ * while logging an error must not break the customer's reply flow (and the
+ * table may not exist yet if the migration is pending).
+ */
+export async function logBotError(
+  tenantId: string, kind: string, detail: string, conversationId?: string
+): Promise<void> {
+  try {
+    await db.query(
+      `INSERT INTO bot_errors (tenant_id, conversation_id, kind, detail)
+       VALUES ($1, $2, $3, $4)`,
+      [tenantId, conversationId ?? null, kind.slice(0, 100), detail.slice(0, 4000)]
+    )
+  } catch { /* best-effort — never let error logging break the bot */ }
+}
 
 // Simple sanity check — the stored email is later used to send calendar
 // invites, so a malformed one must never reach the database.
@@ -289,6 +322,11 @@ async function executeTool(name: string, input: any, ctx: ExecCtx): Promise<any>
     result = await runTool(name, input, ctx)
   } catch (err) {
     console.error(`[bot:tool] EXCEÇÃO tenant=${ctx.tenantId} tool=${name}:`, err)
+    await logBotError(
+      ctx.tenantId, 'tool_exception',
+      `tool=${name} input=${JSON.stringify(input)} err=${(err as any)?.message ?? String(err)}`,
+      ctx.conversationId
+    )
     result = { error: 'falha_interna' }
   }
   if (result && result.error) {
@@ -319,6 +357,16 @@ async function runTool(name: string, input: any, ctx: ExecCtx): Promise<any> {
       if (sets.length) {
         vals.push(customerId, tenantId)
         await db.query(`UPDATE customers SET ${sets.join(', ')} WHERE id = $${i++} AND tenant_id = $${i}`, vals)
+      }
+      // last_name — column from migration 028; separate query so its absence
+      // never breaks the name/email save above
+      if (input.last_name) {
+        try {
+          await db.query(
+            'UPDATE customers SET last_name = $1 WHERE id = $2 AND tenant_id = $3',
+            [String(input.last_name).slice(0, 120), customerId, tenantId]
+          )
+        } catch { /* migration 028 not applied yet */ }
       }
       // interest — column from migration 013; tolerate its absence
       if (input.interested_service) {
@@ -388,6 +436,14 @@ async function runTool(name: string, input: any, ctx: ExecCtx): Promise<any> {
       return { ok: true, agendado: { service: service.name, professional: prof.professional.name, date: input.date, time: input.time } }
     }
 
+    if (name === 'oferecer_especialista') {
+      // Records the intent; the dispatcher sends the button (with text fallback)
+      // and pauses the bot when the customer confirms. No text reply after this.
+      const q = String(input.mensagem ?? '').trim().slice(0, 300)
+      ctx.offer = { message: q || 'Quer que eu encaminhe para um especialista?' }
+      return { ok: true, oferecido: true, detalhe: 'A pergunta com o botão de especialista foi enviada ao cliente. NÃO escreva mais nada agora.' }
+    }
+
     if (name === 'cancel_appointment') {
       if (!customerId) return { error: 'sem_cliente' }
       const res = await cancelUpcomingAppointment(tenantId, customerId)
@@ -409,6 +465,10 @@ async function runTool(name: string, input: any, ctx: ExecCtx): Promise<any> {
 
 // ── Main entry: run the bot with native tool-calling ────────────────────────
 
+// The bot's reply. Normally plain text; when the model decides it can't resolve,
+// `offerSpecialist` carries the handoff question (the dispatcher sends the button).
+export type BotReply = { text: string; offerSpecialist?: { message: string } }
+
 export async function runBot(params: {
   tenantId: string
   conversationId: string
@@ -417,7 +477,7 @@ export async function runBot(params: {
   customerName?: string
   customerPhone?: string
   image?: { base64: string; mediaType: string }
-}): Promise<string> {
+}): Promise<BotReply> {
   const { tenantId, conversationId, customerMessage, customerId, customerName = '', customerPhone = '', image } = params
 
   // The webhook always resolves/creates the customer before dispatching; if this
@@ -450,7 +510,12 @@ export async function runBot(params: {
     const spend = await monthlySpend(tenantId)
     if (spend >= cap * 1.5) {
       console.warn(`[bot] HARD-STOP tenant=${tenantId} plano=${context.plan}: gasto mensal US$ ${spend.toFixed(4)} >= 1.5x o cap (US$ ${cap}) — modelo NÃO será chamado`)
-      return 'Estou com muitas conversas agora 😊 Já te respondo em instantes — se for urgente, me chama de novo daqui a pouco.'
+      await logBotError(
+        tenantId, 'cost_cap_hard_stop',
+        `plano=${context.plan} gasto_mensal_usd=${spend.toFixed(4)} cap_usd=${cap} (>= 1.5x) — modelo não foi chamado`,
+        conversationId
+      )
+      return { text: 'Estou com muitas conversas agora 😊 Já te respondo em instantes — se for urgente, me chama de novo daqui a pouco.' }
     }
     if (spend >= cap) model = 'claude-haiku-4-5'
   }
@@ -478,7 +543,7 @@ export async function runBot(params: {
     { role: 'user', content: latestUserContent },
   ]
 
-  const execCtx: ExecCtx = { tenantId, customerId }
+  const execCtx: ExecCtx = { tenantId, customerId, conversationId }
 
   // Single place to call the model — preserves model-config, prompt caching,
   // thinking-disabled and usage-recording behavior for every request in the loop.
@@ -511,13 +576,15 @@ export async function runBot(params: {
           is_error: Boolean(result && result.error),
         })
       }
+      // The model asked to hand off to a human — send the button (not more text).
+      if (execCtx.offer) return { text: '', offerSpecialist: execCtx.offer }
       messages.push({ role: 'assistant', content: response.content })
       messages.push({ role: 'user', content: toolResults })
       continue // ALWAYS loop again so the model produces a final natural-language reply
     }
 
     const text = extractText(response)
-    if (text) return text
+    if (text) return { text }
     break // no tools and no text — force a plain-text reply below
   }
 
@@ -525,7 +592,43 @@ export async function runBot(params: {
   // with tool_choice "none" so the customer ALWAYS gets a real reply that
   // reflects the actual tool results (never a fabricated success).
   console.warn(`[bot] tenant=${tenantId} conversa=${conversationId}: forçando resposta final em texto (tool_choice=none)`)
+  await logBotError(
+    tenantId, 'forced_final_reply',
+    'orçamento de ferramentas esgotado ou turno vazio — resposta final forçada com tool_choice=none',
+    conversationId
+  )
   const finalResponse = await callModel({ type: 'none' })
   const finalText = extractText(finalResponse)
-  return finalText || 'Desculpe, não consegui concluir isso agora. 🙏 Alguém da nossa equipe vai continuar seu atendimento em breve!'
+  return { text: finalText || 'Desculpe, não consegui concluir isso agora. 🙏 Alguém da nossa equipe vai continuar seu atendimento em breve!' }
+}
+
+// ── Dry-run: Root Admin tests a tenant's bot without side effects ───────────
+
+/**
+ * DRY-RUN diagnostic for the Root Admin: runs the tenant's REAL bot pipeline
+ * (same system prompt/tone/business context, model config and cost caps) for a
+ * single synthetic message, WITHOUT persisting any message and WITHOUT sending
+ * anything via WhatsApp/Evolution.
+ *
+ * How it stays side-effect free:
+ * - `runBot` itself never persists or sends (the dispatcher does) — it only
+ *   returns the reply.
+ * - A fresh random conversation id → the history query returns nothing.
+ * - No customerId → the write tools (save_customer_info, book_appointment,
+ *   cancel_appointment, send_appointment_invite) return errors instead of
+ *   touching the DB. Tool errors are expected and fine for a prompt/tone test.
+ */
+export async function testBotReply(tenantId: string, message: string): Promise<{ reply: string; dry_run: true }> {
+  const result = await runBot({
+    tenantId,
+    conversationId: randomUUID(), // synthetic — matches no rows, nothing persisted
+    customerMessage: message,
+    customerName: '',
+    customerPhone: '+5500000000000',
+  })
+  const reply = result.text
+    || (result.offerSpecialist
+      ? `[dry-run] O bot ofereceria encaminhar a um especialista: "${result.offerSpecialist.message}"`
+      : '')
+  return { reply, dry_run: true }
 }

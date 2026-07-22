@@ -1,7 +1,8 @@
 import { db } from '../lib/db'
 import { redis } from '../lib/redis'
 import { runBot } from './bot'
-import { evolutionSend } from './evolution'
+import { evolutionSend, evolutionSendSpecialistOffer } from './evolution'
+import { getHandoffConfig } from '../lib/handoffConfig'
 
 // Message de-duplication + per-conversation debounce.
 //
@@ -95,14 +96,29 @@ async function flush(conversationId: string): Promise<void> {
     image: ctx.image,
   })
 
+  // Escalation: the bot decided it can't resolve — send the tenant's configured
+  // "specialist?" prompt (interactive button, with a plain-text fallback) instead
+  // of a normal reply. The bot pauses only AFTER the customer confirms (webhook).
+  // If handoff is DISABLED for this tenant, the button would be dead (its click
+  // does nothing) — send a graceful text instead of offering a broken flow.
+  const cfg = reply.offerSpecialist ? await getHandoffConfig(ctx.tenantId) : null
+  const offerHandoff = !!cfg?.enabled
+  const outgoing = cfg
+    ? (offerHandoff ? cfg.offer_message : 'Vou verificar isso com a equipe e já te retorno 🙂')
+    : reply.text
+
   await db.query(
     'INSERT INTO messages (tenant_id, conversation_id, role, content) VALUES ($1,$2,$3,$4)',
     [ctx.tenantId, conversationId, 'user', combined]
   )
   await db.query(
     'INSERT INTO messages (tenant_id, conversation_id, role, content) VALUES ($1,$2,$3,$4)',
-    [ctx.tenantId, conversationId, 'assistant', reply]
+    [ctx.tenantId, conversationId, 'assistant', outgoing]
   )
 
-  await evolutionSend(ctx.instanceId, ctx.customerPhone, reply)
+  if (cfg && offerHandoff) {
+    await evolutionSendSpecialistOffer(ctx.instanceId, ctx.customerPhone, cfg.offer_message, cfg.button_label)
+  } else {
+    await evolutionSend(ctx.instanceId, ctx.customerPhone, outgoing)
+  }
 }

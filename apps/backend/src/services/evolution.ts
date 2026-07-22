@@ -1,4 +1,23 @@
 import { getEvolutionConfig } from '../lib/integrationConfig'
+import { redis } from '../lib/redis'
+
+// Handoff button identifiers — kept here so the webhook and the sender agree.
+export const HANDOFF_BUTTON_ID = 'handoff_specialist'
+export const HANDOFF_BUTTON_LABEL = 'Quero ajuda de um especialista'
+const SENT_MSG_TTL = 3600 // 1h — long enough to distinguish our echo from a manual reply
+
+// Record a message id WE sent, so the webhook can tell an API echo (fromMe) apart
+// from a manual reply typed by the business owner on their own phone.
+async function rememberSentMessage(res: any): Promise<void> {
+  const id = res?.key?.id
+  if (id) { try { await redis.setex(`bot:sent:${id}`, SENT_MSG_TTL, '1') } catch { /* redis hiccup — non-fatal */ } }
+}
+
+/** True if this outgoing message id was sent by us (bot/system), not typed by a human. */
+export async function wasSentByBot(messageId?: string): Promise<boolean> {
+  if (!messageId) return false
+  try { return (await redis.get(`bot:sent:${messageId}`)) !== null } catch { return false }
+}
 
 // URL and key are resolved per request via getEvolutionConfig() (Root Admin
 // panel with env fallback) instead of frozen at module load.
@@ -108,7 +127,32 @@ export async function evolutionLogout(instanceName: string) {
 }
 
 export async function evolutionSend(instanceName: string, to: string, text: string) {
-  return evolutionRequest(`/message/sendText/${instanceName}`, { number: to, text })
+  const res = await evolutionRequest(`/message/sendText/${instanceName}`, { number: to, text })
+  await rememberSentMessage(res)
+  return res
+}
+
+// Offers a human handoff. Tries an interactive WhatsApp button; if the Evolution
+// build / device doesn't support buttons (common with Baileys/QR connections),
+// falls back to a plain-text prompt whose reply text is the SAME label, so the
+// outcome (a clear "Quero ajuda de um especialista" the owner sees) is identical.
+export async function evolutionSendSpecialistOffer(
+  instanceName: string, to: string, question: string, buttonLabel: string = HANDOFF_BUTTON_LABEL
+) {
+  try {
+    const res = await evolutionRequest(`/message/sendButtons/${instanceName}`, {
+      number: to,
+      title: '',
+      description: question,
+      footer: '',
+      buttons: [{ type: 'reply', displayText: buttonLabel, id: HANDOFF_BUTTON_ID }],
+    })
+    await rememberSentMessage(res)
+    return res
+  } catch {
+    // Fallback: plain text the customer can reply to by typing the label.
+    return evolutionSend(instanceName, to, `${question}\n\nSe quiser, responda: *${buttonLabel}* 🙂`)
+  }
 }
 
 // Fetches a media message (image/audio) as base64. Used when the webhook payload

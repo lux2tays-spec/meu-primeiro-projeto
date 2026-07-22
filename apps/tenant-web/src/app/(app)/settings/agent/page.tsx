@@ -26,6 +26,14 @@ const BLANK = {
   appointment_reminders_enabled: true, reminder1_minutes: 180, reminder2_minutes: 30,
   catalog_files: [] as { name: string; url: string }[],
   language: 'pt-BR',
+  handoff_enabled: true,
+  handoff_pause_on_owner_reply: true,
+  handoff_timeout_min: 30,
+  handoff_offer_message: '',
+  handoff_button_label: '',
+  handoff_ack_message: '',
+  handoff_resume_message: '',
+  handoff_owner_resume_keyword: '',
 }
 
 export default function AgentPage() {
@@ -59,6 +67,14 @@ export default function AgentPage() {
       reminder2_minutes:    config.reminder2_minutes ?? 30,
       catalog_files:        config.catalog_files ?? [],
       language:             config.language ?? 'pt-BR',
+      handoff_enabled:              config.handoff_enabled ?? true,
+      handoff_pause_on_owner_reply: config.handoff_pause_on_owner_reply ?? true,
+      handoff_timeout_min:          config.handoff_timeout_min ?? 30,
+      handoff_offer_message:        config.handoff_offer_message ?? '',
+      handoff_button_label:         config.handoff_button_label ?? '',
+      handoff_ack_message:          config.handoff_ack_message ?? '',
+      handoff_resume_message:       config.handoff_resume_message ?? '',
+      handoff_owner_resume_keyword: config.handoff_owner_resume_keyword ?? '',
     })
   }, [config])
 
@@ -285,6 +301,100 @@ export default function AgentPage() {
                 </div>
               )}
             </div>
+
+            {/* ── Atendimento humano ── */}
+            <div className="border-t border-gray-100 pt-5 space-y-4">
+              <div>
+                <p className="text-sm font-semibold text-gray-900">Atendimento humano</p>
+                <p className="text-xs text-gray-400 mt-0.5">
+                  Controle como o bot passa a conversa para um humano e quando volta a atender.
+                </p>
+              </div>
+
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-medium text-gray-700">Atendimento humano ativado</p>
+                  <p className="text-xs text-gray-400 mt-0.5">
+                    Quando ligado, o bot pausa se um humano assumir e volta sozinho depois.
+                  </p>
+                </div>
+                <Toggle
+                  checked={form.handoff_enabled}
+                  onChange={() => set('handoff_enabled', !form.handoff_enabled)}
+                />
+              </div>
+
+              {form.handoff_enabled && (
+                <>
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-sm font-medium text-gray-700">Pausar o bot quando eu responder</p>
+                      <p className="text-xs text-gray-400 mt-0.5">
+                        Se você responder o cliente pelo seu próprio WhatsApp, o bot para de responder automaticamente.
+                      </p>
+                    </div>
+                    <Toggle
+                      checked={form.handoff_pause_on_owner_reply}
+                      onChange={() => set('handoff_pause_on_owner_reply', !form.handoff_pause_on_owner_reply)}
+                    />
+                  </div>
+
+                  <Field label="Tempo de retorno do bot (min)" hint="Minutos sem resposta do humano até o bot voltar a atender sozinho.">
+                    <input
+                      type="number"
+                      min={1}
+                      value={form.handoff_timeout_min}
+                      onChange={(e) => set('handoff_timeout_min', Math.max(1, Math.floor(Number(e.target.value) || 1)))}
+                      className={inputCls}
+                    />
+                  </Field>
+
+                  <Field label="Frase de ativação (pergunta do bot)" hint="Pergunta que o bot envia quando não consegue resolver, oferecendo um especialista.">
+                    <input
+                      value={form.handoff_offer_message}
+                      onChange={(e) => set('handoff_offer_message', e.target.value)}
+                      placeholder="Quer que eu encaminhe para um especialista?"
+                      className={inputCls}
+                    />
+                  </Field>
+
+                  <Field label="Texto do botão" hint="O que o cliente toca/responde para pedir um humano.">
+                    <input
+                      value={form.handoff_button_label}
+                      onChange={(e) => set('handoff_button_label', e.target.value)}
+                      placeholder="Quero ajuda de um especialista"
+                      className={inputCls}
+                    />
+                  </Field>
+
+                  <Field label="Confirmação ao cliente" hint="Mensagem enviada ao cliente logo depois que ele pede o especialista.">
+                    <textarea
+                      value={form.handoff_ack_message}
+                      onChange={(e) => set('handoff_ack_message', e.target.value)}
+                      rows={3}
+                      className="w-full px-4 py-3 rounded-xl border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary resize-none"
+                      placeholder="Perfeito! Já avisei a equipe 🙌 Em breve um especialista continua seu atendimento por aqui."
+                    />
+                  </Field>
+
+                  <Field label="Mensagem de retorno (opcional)" hint="Enviada quando o bot volta a atender após o tempo. Deixe vazio para voltar sem avisar.">
+                    <input
+                      value={form.handoff_resume_message}
+                      onChange={(e) => set('handoff_resume_message', e.target.value)}
+                      className={inputCls}
+                    />
+                  </Field>
+
+                  <Field label="Palavra para devolver ao bot (opcional)" hint="Digite essa palavra no chat para devolver o atendimento ao bot na hora. Deixe vazio para desativar.">
+                    <input
+                      value={form.handoff_owner_resume_keyword}
+                      onChange={(e) => set('handoff_owner_resume_keyword', e.target.value)}
+                      className={inputCls}
+                    />
+                  </Field>
+                </>
+              )}
+            </div>
           </>
         )}
 
@@ -363,6 +473,24 @@ export default function AgentPage() {
 }
 
 const inputCls = 'w-full h-10 px-3 rounded-xl border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary'
+
+function Toggle({ checked, onChange }: { checked: boolean; onChange: () => void }) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      onClick={onChange}
+      className={`relative w-11 h-6 rounded-full transition-colors shrink-0 ${checked ? 'bg-primary' : 'bg-gray-200'}`}
+    >
+      <span
+        className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${
+          checked ? 'translate-x-5' : ''
+        }`}
+      />
+    </button>
+  )
+}
 
 function Field({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
   return (

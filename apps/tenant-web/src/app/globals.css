@@ -18,3 +18,20 @@ body {
   background-color: #F8F7FF;
   color: #111827;
 }
+
+/* ── Landing page animations (used by PhoneChat) ─────────────────────────── */
+@keyframes lp-dot {
+  0%, 60%, 100% { transform: translateY(0); opacity: 0.4; }
+  30%           { transform: translateY(-3px); opacity: 1; }
+}
+.lp-dot { animation: lp-dot 1.2s infinite ease-in-out; }
+
+@keyframes lp-msg {
+  from { opacity: 0; transform: translateY(6px) scale(0.98); }
+  to   { opacity: 1; transform: none; }
+}
+.lp-msg { animation: lp-msg 0.28s ease-out both; }
+
+@media (prefers-reduced-motion: reduce) {
+  .lp-dot, .lp-msg { animation: none; }
+}

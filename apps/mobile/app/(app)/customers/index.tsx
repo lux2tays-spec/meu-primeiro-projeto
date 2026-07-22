@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import {
   View,
   Text,
@@ -14,7 +14,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { Ionicons } from '@expo/vector-icons'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { api, tenantApi } from '@/lib/api'
+import { api, tenantApi, customersApi, customerFullName } from '@/lib/api'
 import { colors, font, spacing, radius } from '@/lib/theme'
 import { useAuthStore } from '@/lib/store'
 import { Card } from '@/components/ui/Card'
@@ -53,7 +53,7 @@ export default function CustomersScreen() {
   })
 
   const filtered = customers?.filter((c) =>
-    c.name.toLowerCase().includes(search.toLowerCase()) ||
+    customerFullName(c).toLowerCase().includes(search.toLowerCase()) ||
     (c.phone ?? '').includes(search)
   ) ?? []
 
@@ -101,7 +101,7 @@ export default function CustomersScreen() {
                 <Text style={styles.avatarText}>{item.name.charAt(0).toUpperCase()}</Text>
               </View>
               <View style={styles.info}>
-                <Text style={styles.name}>{item.name}</Text>
+                <Text style={styles.name}>{customerFullName(item)}</Text>
                 <View style={styles.phoneRow}>
                   <Ionicons name="logo-whatsapp" size={14} color={colors.whatsapp} />
                   <Text style={styles.phone}>{item.phone}</Text>
@@ -116,6 +116,7 @@ export default function CustomersScreen() {
 
       <AddCustomerModal
         visible={addOpen}
+        initialName={search}
         onClose={() => setAddOpen(false)}
         onCreated={() => {
           setAddOpen(false)
@@ -134,28 +135,41 @@ export default function CustomersScreen() {
 // ── Add customer modal ────────────────────────────────────────────────────────
 function AddCustomerModal({
   visible,
+  initialName,
   onClose,
   onCreated,
 }: {
   visible: boolean
+  initialName?: string
   onClose: () => void
   onCreated: () => void
 }) {
   const [name, setName] = useState('')
+  const [lastName, setLastName] = useState('')
   const [phone, setPhone] = useState('')
   const [email, setEmail] = useState('')
 
-  const reset = () => {
-    setName('')
-    setPhone('')
-    setEmail('')
-  }
+  // #7 — when the modal opens, carry the text the user already typed (search)
+  // into the Nome field instead of starting blank.
+  useEffect(() => {
+    if (visible) {
+      setName(initialName?.trim() ?? '')
+      setLastName('')
+      setPhone('')
+      setEmail('')
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visible])
 
   const mutation = useMutation({
     mutationFn: () =>
-      tenantApi.addCustomer({ name: name.trim(), phone: phone.trim(), email: email.trim() || undefined }),
+      tenantApi.addCustomer({
+        name: name.trim(),
+        last_name: lastName.trim() || undefined,
+        phone: phone.trim(),
+        email: email.trim() || undefined,
+      }),
     onSuccess: () => {
-      reset()
       onCreated()
     },
     onError: (err: any) => {
@@ -184,6 +198,15 @@ function AddCustomerModal({
             placeholderTextColor={colors.textDisabled}
             value={name}
             onChangeText={setName}
+          />
+
+          <Text style={styles.fieldLabel}>Sobrenome</Text>
+          <TextInput
+            style={styles.fieldInput}
+            placeholder="Sobrenome do cliente"
+            placeholderTextColor={colors.textDisabled}
+            value={lastName}
+            onChangeText={setLastName}
           />
 
           <Text style={styles.fieldLabel}>WhatsApp / Telefone *</Text>
@@ -232,11 +255,78 @@ function CustomerDetailModal({
   customerId: string | null
   onClose: () => void
 }) {
+  const role = useAuthStore((s) => s.role)
+  // Only owner/admin/root can edit/delete customers — staff cannot (#8)
+  const canManage = role === 'owner' || role === 'admin' || role === 'root'
+  const queryClient = useQueryClient()
+
+  const [editing, setEditing] = useState(false)
+  const [editName, setEditName] = useState('')
+  const [editLastName, setEditLastName] = useState('')
+  const [editEmail, setEditEmail] = useState('')
+
   const { data, isLoading } = useQuery({
     queryKey: ['customer', customerId],
     queryFn: () => tenantApi.customer(customerId!),
     enabled: !!customerId,
   })
+
+  // Reset edit state whenever the modal opens for another customer
+  useEffect(() => {
+    setEditing(false)
+  }, [customerId])
+
+  const updateMutation = useMutation({
+    mutationFn: () =>
+      customersApi.update(customerId!, {
+        name: editName.trim(),
+        last_name: editLastName.trim() || undefined,
+        email: editEmail.trim() || undefined,
+      }),
+    onSuccess: () => {
+      setEditing(false)
+      queryClient.invalidateQueries({ queryKey: ['customers'] })
+      queryClient.invalidateQueries({ queryKey: ['customer', customerId] })
+    },
+    onError: (err: any) => {
+      Alert.alert('Não foi possível salvar', err?.message ?? 'Tente novamente.')
+    },
+  })
+
+  const deleteMutation = useMutation({
+    mutationFn: () => customersApi.remove(customerId!),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['customers'] })
+      onClose()
+    },
+    onError: (err: any) => {
+      const msg = String(err?.message ?? '')
+      Alert.alert(
+        'Não foi possível excluir',
+        msg.includes('403') || /permiss/i.test(msg)
+          ? 'Você não tem permissão para excluir clientes.'
+          : msg || 'Tente novamente.'
+      )
+    },
+  })
+
+  function confirmDelete() {
+    Alert.alert(
+      'Excluir cliente',
+      'Excluir este cliente e todo o histórico dele? Não pode ser desfeito.',
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        { text: 'Excluir', style: 'destructive', onPress: () => deleteMutation.mutate() },
+      ]
+    )
+  }
+
+  function startEditing() {
+    setEditName(data?.name ?? '')
+    setEditLastName(data?.last_name ?? '')
+    setEditEmail(data?.email ?? '')
+    setEditing(true)
+  }
 
   const interests: string[] = data?.interested_services
     ? String(data.interested_services)
@@ -253,7 +343,7 @@ function CustomerDetailModal({
           <View style={styles.modalHandle} />
           <View style={styles.modalHeader}>
             <Text style={styles.modalTitle} numberOfLines={1}>
-              {data?.name ?? 'Cliente'}
+              {customerFullName(data) || 'Cliente'}
             </Text>
             <TouchableOpacity onPress={onClose}>
               <Ionicons name="close" size={24} color={colors.textSecondary} />
@@ -262,6 +352,29 @@ function CustomerDetailModal({
 
           {isLoading ? (
             <ActivityIndicator color={colors.primary} style={{ marginVertical: spacing.xl }} />
+          ) : editing ? (
+            <ScrollView showsVerticalScrollIndicator={false}>
+              <Text style={styles.fieldLabel}>Nome</Text>
+              <TextInput style={styles.fieldInput} value={editName} onChangeText={setEditName}
+                placeholder="Nome" placeholderTextColor={colors.textDisabled} />
+              <Text style={styles.fieldLabel}>Sobrenome</Text>
+              <TextInput style={styles.fieldInput} value={editLastName} onChangeText={setEditLastName}
+                placeholder="Sobrenome" placeholderTextColor={colors.textDisabled} />
+              <Text style={styles.fieldLabel}>E-mail</Text>
+              <TextInput style={styles.fieldInput} value={editEmail} onChangeText={setEditEmail}
+                placeholder="email@exemplo.com" placeholderTextColor={colors.textDisabled}
+                autoCapitalize="none" keyboardType="email-address" />
+              <TouchableOpacity
+                style={[styles.primaryBtn, (!editName.trim() || updateMutation.isPending) && styles.primaryBtnDisabled]}
+                disabled={!editName.trim() || updateMutation.isPending}
+                onPress={() => updateMutation.mutate()}>
+                <Text style={styles.primaryBtnText}>{updateMutation.isPending ? 'Salvando...' : 'Salvar'}</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={[styles.secondaryBtn, { marginTop: spacing.sm }]} onPress={() => setEditing(false)}>
+                <Text style={styles.secondaryBtnText}>Cancelar</Text>
+              </TouchableOpacity>
+              <View style={{ height: spacing.xl }} />
+            </ScrollView>
           ) : (
             <ScrollView showsVerticalScrollIndicator={false}>
               {/* Contact */}
@@ -324,6 +437,20 @@ function CustomerDetailModal({
                 ))
               ) : (
                 <Text style={styles.sectionEmpty}>Nenhum atendimento registrado.</Text>
+              )}
+
+              {/* Admin actions (#8) — only owner/admin/root */}
+              {canManage && (
+                <View style={{ gap: spacing.sm, marginTop: spacing.lg }}>
+                  <TouchableOpacity style={styles.secondaryBtn} onPress={startEditing}>
+                    <Ionicons name="create-outline" size={18} color={colors.primary} />
+                    <Text style={styles.secondaryBtnText}>Editar cliente</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity style={styles.dangerBtn} onPress={confirmDelete} disabled={deleteMutation.isPending}>
+                    <Ionicons name="trash-outline" size={18} color={colors.danger} />
+                    <Text style={styles.dangerBtnText}>{deleteMutation.isPending ? 'Excluindo...' : 'Excluir cliente'}</Text>
+                  </TouchableOpacity>
+                </View>
               )}
               <View style={{ height: spacing.xl }} />
             </ScrollView>
@@ -432,6 +559,16 @@ const styles = StyleSheet.create({
   },
   primaryBtnDisabled: { opacity: 0.5 },
   primaryBtnText: { color: '#fff', fontWeight: '700', fontSize: font.md },
+  secondaryBtn: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6,
+    height: 48, borderRadius: radius.md, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surface,
+  },
+  secondaryBtnText: { color: colors.primary, fontWeight: '700', fontSize: font.md },
+  dangerBtn: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6,
+    height: 48, borderRadius: radius.md, borderWidth: 1, borderColor: colors.danger + '55', backgroundColor: colors.danger + '11',
+  },
+  dangerBtnText: { color: colors.danger, fontWeight: '700', fontSize: font.md },
 
   // Detail
   detailContactRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, marginBottom: spacing.xs },

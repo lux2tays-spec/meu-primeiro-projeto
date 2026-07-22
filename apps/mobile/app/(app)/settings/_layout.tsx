@@ -24,6 +24,10 @@ export default function SettingsLayout() {
       <Stack.Screen name="affiliate" options={{ title: 'Painel de Afiliado' }} />
       <Stack.Screen name="google-calendar" options={{ title: 'Google Agenda' }} />
       <Stack.Screen name="support" options={{ title: 'Suporte' }} />
+      <Stack.Screen name="support-chat" options={{ title: 'Assistente de suporte' }} />
+      <Stack.Screen name="tickets" options={{ title: 'Meus chamados' }} />
+      <Stack.Screen name="ticket-new" options={{ title: 'Abrir chamado' }} />
+      <Stack.Screen name="ticket/[id]" options={{ title: 'Chamado' }} />
     </Stack>
   )
 }

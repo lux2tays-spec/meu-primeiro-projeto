@@ -110,10 +110,11 @@ export const tenantApi = {
   customers: (search?: string) =>
     api.get<any[]>(`/tenant/customers${search ? `?search=${encodeURIComponent(search)}` : ''}`),
   customer: (id: string) => api.get<any>(`/tenant/customers/${id}`),
-  updateCustomer: (id: string, data: { name?: string; email?: string }) =>
+  updateCustomer: (id: string, data: { name?: string; last_name?: string; email?: string }) =>
     api.put<any>(`/tenant/customers/${id}`, data),
-  addCustomer: (data: { name: string; phone: string; email?: string }) =>
+  addCustomer: (data: { name: string; last_name?: string; phone: string; email?: string }) =>
     api.post<any>('/tenant/customers', data),
+  deleteCustomer: (id: string) => api.delete<{ deleted: boolean }>(`/tenant/customers/${id}`),
   hours: (professionalId?: string) =>
     api.get<any[]>(`/tenant/hours${professionalId ? `?professional_id=${professionalId}` : ''}`),
   saveHours: (rows: any[], professionalId?: string) =>
@@ -138,6 +139,43 @@ export const tenantApi = {
     api.post<any>('/tenant/apply-business-template', { business_type }),
 }
 
+export interface ServiceProfessionalCommission {
+  id: string
+  commission_enabled: boolean
+  commission_type: 'percent' | 'fixed'
+  commission_value: number
+}
+
+export interface CommissionRow {
+  id: string
+  amount: number
+  status: 'pending' | 'paid'
+  service_name: string
+  customer_name: string
+  customer_last_name: string | null
+  professional_name: string
+  starts_at: string
+}
+
+export interface CommissionsResponse {
+  data: CommissionRow[]
+  totals: { pending_amount: number; paid_amount: number; count: number }
+}
+
+export const commissionsApi = {
+  list: (params?: { professional_id?: string; status?: 'pending' | 'paid'; from?: string; to?: string }) => {
+    const qs = new URLSearchParams()
+    if (params?.professional_id) qs.set('professional_id', params.professional_id)
+    if (params?.status) qs.set('status', params.status)
+    if (params?.from) qs.set('from', params.from)
+    if (params?.to) qs.set('to', params.to)
+    const q = qs.toString()
+    return api.get<CommissionsResponse>(`/commissions${q ? `?${q}` : ''}`)
+  },
+  pay: (body: { ids?: string[]; professional_id?: string; from?: string; to?: string }) =>
+    api.post<{ paid_count: number }>('/commissions/pay', body),
+}
+
 export const financeiroApi = {
   resumo: (month?: number, year?: number) =>
     api.get<any>(`/financeiro/resumo${month ? `?month=${month}&year=${year}` : ''}`),
@@ -149,9 +187,28 @@ export const financeiroApi = {
   deletePaymentLink: (id: string) => api.delete(`/financeiro/payment-links/${id}`),
 }
 
+export interface AppointmentListParams {
+  date?: string // YYYY-MM-DD (day view)
+  from?: string // ISO instant, inclusive (week/month windows)
+  to?: string // ISO instant, exclusive
+  search?: string // customer name or phone
+  professional_id?: string
+  service_id?: string
+}
+
 export const appointmentsApi = {
-  list: (date?: string) =>
-    api.get<any[]>(`/appointments${date ? `?date=${date}` : ''}`),
+  list: (params?: AppointmentListParams | string) => {
+    const p: AppointmentListParams = typeof params === 'string' ? { date: params } : params ?? {}
+    const qs = new URLSearchParams()
+    if (p.date) qs.set('date', p.date)
+    if (p.from) qs.set('from', p.from)
+    if (p.to) qs.set('to', p.to)
+    if (p.search) qs.set('search', p.search)
+    if (p.professional_id) qs.set('professional_id', p.professional_id)
+    if (p.service_id) qs.set('service_id', p.service_id)
+    const q = qs.toString()
+    return api.get<any[]>(`/appointments${q ? `?${q}` : ''}`)
+  },
   getById: (id: string) => api.get<any>(`/appointments/${id}`),
   create: (data: any) => api.post<any>('/appointments', data),
   update: (id: string, data: any) => api.put<any>(`/appointments/${id}`, data),
@@ -159,6 +216,8 @@ export const appointmentsApi = {
     api.patch<any>(`/appointments/${id}/status`, { status }),
   slots: (professionalId: string, serviceId: string, date: string) =>
     api.get<string[]>(`/appointments/slots?professional_id=${professionalId}&service_id=${serviceId}&date=${date}`),
+  bulkReschedule: (data: { from: string; to: string; professional_id?: string; message?: string }) =>
+    api.post<{ affected: number; notified: number }>('/appointments/bulk-reschedule', data),
 }
 
 export const agentApi = {
@@ -190,6 +249,50 @@ export const whatsappApi = {
 
 export const affiliateApi = {
   me: () => api.get<any>('/affiliate/me'),
+}
+
+export interface SupportChatMessage {
+  role: 'user' | 'assistant'
+  content: string
+}
+
+export type SupportTicketStatus = 'open' | 'resolved'
+
+export interface SupportTicketSummary {
+  id: string
+  subject: string
+  status: SupportTicketStatus
+  priority: string
+  created_at: string
+  updated_at: string
+  last_message: string
+}
+
+export interface SupportTicketMessage {
+  id: string
+  sender: 'user' | 'admin'
+  body: string
+  created_at: string
+}
+
+export interface SupportTicketDetail {
+  id: string
+  subject: string
+  status: SupportTicketStatus
+  priority: string
+  created_at: string
+  messages: SupportTicketMessage[]
+}
+
+export const supportApi = {
+  ask: (message: string, history?: SupportChatMessage[]) =>
+    api.post<{ reply: string; suggest_ticket: boolean }>('/support/ask', { message, history }),
+  tickets: () => api.get<SupportTicketSummary[]>('/support/tickets'),
+  createTicket: (data: { subject: string; message: string; priority?: 'normal' | 'alta' }) =>
+    api.post<SupportTicketSummary>('/support/tickets', data),
+  ticket: (id: string) => api.get<SupportTicketDetail>(`/support/tickets/${id}`),
+  replyTicket: (id: string, body: string) =>
+    api.post<{ ok: boolean }>(`/support/tickets/${id}/messages`, { body }),
 }
 
 export const subscriptionApi = {

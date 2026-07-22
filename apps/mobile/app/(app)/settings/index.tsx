@@ -145,6 +145,8 @@ export default function SettingsScreen() {
         <Card style={styles.group}>
           <SettingsRow icon="wallet-outline" label="Meios de Pagamento" subtitle="Conectar Mercado Pago e gerar links" onPress={() => router.push('/(app)/settings/payments')} />
           <View style={styles.divider} />
+          <SettingsRow icon="cash-outline" label="Comissões" subtitle="Comissões dos profissionais por serviço" onPress={() => router.push('/(app)/comissoes')} />
+          <View style={styles.divider} />
           <SettingsRow icon="card-outline" label="Assinatura" subtitle="Plano atual, faturamento e cartões" onPress={() => router.push('/(app)/settings/subscription')} />
           <View style={styles.divider} />
           <SettingsRow icon="share-social-outline" label="Painel de Afiliado" subtitle="Indique e ganhe por cada indicação" onPress={() => router.push('/(app)/settings/affiliate')} />
@@ -154,6 +156,10 @@ export default function SettingsScreen() {
         <Text style={styles.section}>Ajuda</Text>
         <Card style={styles.group}>
           <SettingsRow icon="headset-outline" label="Suporte" subtitle="Fale com nossa equipe" onPress={() => router.push('/(app)/settings/support')} />
+          <View style={styles.divider} />
+          <SettingsRow icon="sparkles-outline" label="Assistente de suporte (IA)" subtitle="Tire dúvidas agora com nossa IA" onPress={() => router.push('/(app)/settings/support-chat')} />
+          <View style={styles.divider} />
+          <SettingsRow icon="file-tray-full-outline" label="Meus chamados" subtitle="Acompanhe suas solicitações" onPress={() => router.push('/(app)/settings/tickets')} />
           <View style={styles.divider} />
           <SettingsRow icon="shield-checkmark-outline" label="Política de Privacidade" onPress={() => Linking.openURL(`${WEB_URL}/privacidade`)} />
           <View style={styles.divider} />

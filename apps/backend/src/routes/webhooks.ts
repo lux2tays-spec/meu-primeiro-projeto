@@ -7,18 +7,31 @@ import { getPaymentConfig } from '../lib/paymentConfig'
 import { applyPreapproval } from '../lib/subscriptionState'
 import { tenantMediaEnabled } from '../lib/planMedia'
 import { transcribeAudio } from '../lib/transcription'
-import { evolutionGetMediaBase64, evolutionSend } from '../services/evolution'
+import { evolutionGetMediaBase64, evolutionSend, wasSentByBot, HANDOFF_BUTTON_ID } from '../services/evolution'
 import { base64Bytes, isAllowedAudioType, normalizeImageType, MAX_AUDIO_BYTES, MAX_IMAGE_BYTES } from '../lib/mediaGuard'
 import { getEvolutionConfig } from '../lib/integrationConfig'
+import { getHandoffConfig } from '../lib/handoffConfig'
 
 // Validate the shared secret Evolution must send with every webhook.
 // Enabled only when a webhook secret is configured (Root Admin panel, with
 // EVOLUTION_WEBHOOK_SECRET env fallback) — so existing instances keep working
 // until they are re-registered with the token. Accepts the secret via
 // ?token= query, or the `apikey` / `x-webhook-token` header.
+let warnedNoSecretInProd = false
 async function webhookAuthorized(request: any): Promise<boolean> {
   const { webhook_secret: secret } = await getEvolutionConfig()
-  if (!secret) return true // not configured yet — allow (logged as a warning at boot)
+  if (!secret) {
+    // Fail-closed in production: an unauthenticated webhook would let anyone
+    // inject WhatsApp events for ANY tenant. In dev, stay permissive.
+    if (process.env.NODE_ENV === 'production') {
+      if (!warnedNoSecretInProd) {
+        warnedNoSecretInProd = true
+        console.error('[webhook] Evolution webhook secret NOT configured in production — rejecting ALL webhook calls until it is set (panel/EVOLUTION_WEBHOOK_SECRET).')
+      }
+      return false
+    }
+    return true // dev/test — allow (logged as a warning at boot)
+  }
   const provided =
     (request.query as any)?.token ||
     request.headers['x-webhook-token'] ||
@@ -27,6 +40,62 @@ async function webhookAuthorized(request: any): Promise<boolean> {
   const a = Buffer.from(String(provided))
   const b = Buffer.from(secret)
   return a.length === b.length && crypto.timingSafeEqual(a, b)
+}
+
+// True when the customer is asking to talk to a human — either the handoff
+// button was clicked (id) or they typed the configured label / a clear request.
+function isHandoffRequest(buttonId: string, text: string, buttonLabel: string): boolean {
+  if (buttonId === HANDOFF_BUTTON_ID) return true
+  const t = (text || '').toLowerCase().trim()
+  if (!t) return false
+  if (buttonLabel && t.includes(buttonLabel.toLowerCase())) return true
+  return /(especialista|atendente|humano|uma pessoa|pessoa de verdade|falar com alguém|falar com alguem)/.test(t)
+    && /(quero|preciso|pode|gostaria|falar|chama|chamar|me passa|atender)/.test(t)
+}
+
+// A `fromMe` event is EITHER our own API echo (the bot's reply) or a message the
+// business owner typed manually from their own phone. The latter either resumes
+// the bot (if it matches the configured keyword) or pauses it (owner taking over).
+async function maybePauseOnOwnerReply(instanceId: string, body: any): Promise<void> {
+  if (body?.event !== 'messages.upsert') return
+  const key = body?.data?.key
+  const remoteJid: string = key?.remoteJid ?? ''
+  if (!remoteJid.endsWith('@s.whatsapp.net')) return // 1:1 customer chats only
+  const m = body?.data?.message ?? {}
+  const text = (m.conversation || m.extendedTextMessage?.text || '').trim()
+  if (!text) return                            // only manual text replies act
+  if (await wasSentByBot(key?.id)) return       // our own bot/system echo — ignore
+
+  const { rows: [inst] } = await db.query('SELECT tenant_id FROM whatsapp_instances WHERE instance_name = $1', [instanceId])
+  if (!inst) return
+  const tenantId = inst.tenant_id
+  const cfg = await getHandoffConfig(tenantId)
+  if (!cfg.enabled) return
+
+  const phone = remoteJid.replace('@s.whatsapp.net', '')
+  const { rows: [conv] } = await db.query(
+    `SELECT c.id FROM conversations c JOIN customers cu ON cu.id = c.customer_id
+     WHERE c.tenant_id = $1 AND cu.phone = $2`,
+    [tenantId, phone]
+  )
+  if (!conv) return // owner messaged someone with no conversation yet — nothing to do
+
+  // Owner typed the configured keyword → hand this conversation BACK to the bot now.
+  if (cfg.owner_resume_keyword && text.toLowerCase() === cfg.owner_resume_keyword.toLowerCase()) {
+    await db.query('UPDATE conversations SET bot_paused_until = NULL WHERE id = $1', [conv.id])
+    if (cfg.resume_message) await evolutionSend(instanceId, phone, cfg.resume_message)
+    return
+  }
+
+  if (!cfg.pause_on_owner_reply) return // auto-pause on manual reply is disabled
+
+  const until = new Date(Date.now() + cfg.timeout_min * 60_000)
+  await db.query('UPDATE conversations SET bot_paused_until = $1 WHERE id = $2', [until, conv.id])
+  // Keep the owner's manual reply in history so the bot has context when it resumes.
+  await db.query(
+    'INSERT INTO messages (tenant_id, conversation_id, role, content) VALUES ($1,$2,$3,$4)',
+    [tenantId, conv.id, 'assistant', text]
+  )
 }
 
 export const webhookRoutes: FastifyPluginAsync = async (app) => {
@@ -85,17 +154,26 @@ export const webhookRoutes: FastifyPluginAsync = async (app) => {
         return reply.send({ ok: true })
       }
 
-      // Ignore our own echoes and non-message events.
-      if (body?.data?.key?.fromMe) return reply.send({ ok: true })
+      // A message we sent (bot echo) or the owner's own manual reply. The latter
+      // pauses the bot so the human takes over; the former is ignored.
+      if (body?.data?.key?.fromMe) {
+        try { await maybePauseOnOwnerReply(instanceId, body) } catch (e) { app.log.warn({ e }, 'maybePauseOnOwnerReply falhou') }
+        return reply.send({ ok: true })
+      }
       if (body?.event !== 'messages.upsert') return reply.send({ ok: true })
 
       const customerPhone = body.data?.key?.remoteJid?.replace('@s.whatsapp.net', '')
       const messageId = body.data?.key?.id as string | undefined
       const msg = body.data?.message ?? {}
 
+      // Interactive-button reply (handoff): treat its label as text so it flows
+      // through the normal pipeline and is visible to the owner.
+      const buttonId: string = msg.buttonsResponseMessage?.selectedButtonId || msg.templateButtonReplyMessage?.selectedId || ''
+      const buttonText: string = msg.buttonsResponseMessage?.selectedDisplayText || msg.templateButtonReplyMessage?.selectedDisplayText || ''
+
       // Classify the message. Text is always handled; image/audio only when the
       // tenant's plan allows (checked below, after the tenant is resolved).
-      const textContent = msg.conversation || msg.extendedTextMessage?.text || ''
+      const textContent = msg.conversation || msg.extendedTextMessage?.text || buttonText || ''
       const imageMsg = msg.imageMessage
       const audioMsg = msg.audioMessage || msg.pttMessage
       const kind: 'text' | 'image' | 'audio' | 'other' =
@@ -161,6 +239,44 @@ export const webhookRoutes: FastifyPluginAsync = async (app) => {
         )
       ).rows[0].id
 
+      // ── Human handoff ────────────────────────────────────────────────────────
+      const handoff = await getHandoffConfig(tenantId)
+
+      // Customer confirmed they want a human → pause the bot and go quiet. Their
+      // message ("Quero ajuda de um especialista") stays visible in the owner's
+      // WhatsApp, which is the signal for the owner to take over.
+      if (handoff.enabled && isHandoffRequest(buttonId, textContent, handoff.button_label)) {
+        const until = new Date(Date.now() + handoff.timeout_min * 60_000)
+        await db.query('UPDATE conversations SET bot_paused_until = $1 WHERE id = $2', [until, conversationId])
+        await db.query(
+          'INSERT INTO messages (tenant_id, conversation_id, role, content) VALUES ($1,$2,$3,$4)',
+          [tenantId, conversationId, 'user', textContent || handoff.button_label]
+        )
+        await db.query(
+          'INSERT INTO messages (tenant_id, conversation_id, role, content) VALUES ($1,$2,$3,$4)',
+          [tenantId, conversationId, 'assistant', handoff.ack_message]
+        )
+        await evolutionSend(instanceId, customerPhone, handoff.ack_message)
+        return reply.send({ ok: true, handoff: 'confirmed' })
+      }
+
+      // Handoff pause state: while active the bot stays silent; once it expires the
+      // bot resumes (optionally announcing it with the configured resume message).
+      const { rows: [pauseRow] } = await db.query('SELECT bot_paused_until FROM conversations WHERE id = $1', [conversationId])
+      if (pauseRow?.bot_paused_until) {
+        if (new Date(pauseRow.bot_paused_until) > new Date()) {
+          // Still paused (a human is handling) → record the message but do NOT reply.
+          await db.query(
+            'INSERT INTO messages (tenant_id, conversation_id, role, content) VALUES ($1,$2,$3,$4)',
+            [tenantId, conversationId, 'user', textContent || '[mídia]']
+          )
+          return reply.send({ ok: true, paused: true })
+        }
+        // Pause expired → the bot takes over again for this message.
+        await db.query('UPDATE conversations SET bot_paused_until = NULL WHERE id = $1', [conversationId])
+        if (handoff.resume_message) await evolutionSend(instanceId, customerPhone, handoff.resume_message)
+      }
+
       // Resolve the message text + optional image the bot will actually receive.
       // For audio/image, gate on the plan and download/transcribe as needed.
       let finalText = textContent
@@ -225,9 +341,12 @@ export const webhookRoutes: FastifyPluginAsync = async (app) => {
       return reply.send({ ok: true })
   }
 
-  app.post<{ Params: { instanceId: string } }>('/whatsapp/:instanceId', whatsappHandler)
+  // rateLimit: false — Evolution sends ALL tenants' events from ONE IP; the
+  // global per-IP limit would 429 the webhook and silence every bot at once.
+  // Abuse is contained downstream by dedup + per-sender rate limit + plan caps.
+  app.post<{ Params: { instanceId: string } }>('/whatsapp/:instanceId', { config: { rateLimit: false } }, whatsappHandler)
   // Evolution v2 appends event name to URL even with byEvents:false
-  app.post<{ Params: { instanceId: string; '*': string } }>('/whatsapp/:instanceId/*', whatsappHandler)
+  app.post<{ Params: { instanceId: string; '*': string } }>('/whatsapp/:instanceId/*', { config: { rateLimit: false } }, whatsappHandler)
 
   // Mercado Pago webhook — validates x-signature, then always re-fetches the
   // resource from MP (never trusts the request body) and updates plan/status.

@@ -36,4 +36,7 @@ COPY infra/migrations ./infra/migrations
 
 EXPOSE 3000
 
-CMD ["node", "apps/backend/dist/index.js"]
+# Run pending migrations BEFORE serving so a new build never serves code that
+# references not-yet-added columns. The runner is idempotent (_migrations table)
+# and exits non-zero on failure, aborting the boot instead of serving broken code.
+CMD ["sh", "-c", "node apps/backend/scripts/migrate.js && node apps/backend/dist/index.js"]

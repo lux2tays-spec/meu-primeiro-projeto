@@ -66,6 +66,29 @@ export const rootApi = {
   tenant: (id: string) => api.get<any>(`/root/tenants/${id}`),
   updateTenant: (id: string, data: any) => api.patch<any>(`/root/tenants/${id}`, data),
   extendTrial: (id: string, days?: number) => api.post<any>(`/root/tenants/${id}/extend-trial`, { days }),
+  updateTenantHandoff: (id: string, data: any) => api.patch<any>(`/root/tenants/${id}/handoff`, data),
+  updateTenantAgent: (id: string, data: any) => api.patch<any>(`/root/tenants/${id}/agent`, data),
+
+  // Remote support toolkit (tenant diagnostics)
+  tenantConversations: (id: string, params?: { limit?: number; offset?: number }) => {
+    const q = new URLSearchParams()
+    if (params?.limit != null)  q.set('limit', String(params.limit))
+    if (params?.offset != null) q.set('offset', String(params.offset))
+    return api.get<any[]>(`/root/tenants/${id}/conversations?${q}`)
+  },
+  conversationMessages: (cid: string, params?: { limit?: number; offset?: number }) => {
+    const q = new URLSearchParams()
+    if (params?.limit != null)  q.set('limit', String(params.limit))
+    if (params?.offset != null) q.set('offset', String(params.offset))
+    return api.get<any[]>(`/root/conversations/${cid}/messages?${q}`)
+  },
+  tenantBotErrors: (id: string, limit = 20) => api.get<any[]>(`/root/tenants/${id}/bot-errors?limit=${limit}`),
+  tenantWhatsapp: (id: string) => api.get<any>(`/root/tenants/${id}/whatsapp`),
+  tenantWhatsappReconnect: (id: string) => api.post<{ qrcode?: string; qr_pending?: boolean }>(`/root/tenants/${id}/whatsapp/reconnect`),
+  tenantWhatsappLogout: (id: string) => api.post<{ ok: boolean }>(`/root/tenants/${id}/whatsapp/logout`),
+  testTenantBot: (id: string, message: string) => api.post<{ reply: string }>(`/root/tenants/${id}/test-bot`, { message }),
+  clearTenantCache: (id: string) => api.post<{ ok: boolean }>(`/root/tenants/${id}/clear-cache`),
+  tenantAiUsage: (id: string) => api.get<{ month_spend: number; cap: number; plan: string }>(`/root/tenants/${id}/ai-usage`),
 
   // Tenant staff
   addTenantStaff: (tenantId: string, data: { user_id: string; role: string }) =>
@@ -114,6 +137,15 @@ export const rootApi = {
   revenue: () => api.get<any>('/root/revenue'),
   affiliates: () => api.get<any[]>('/root/affiliates'),
   payAffiliate: (id: string) => api.post<any>(`/root/affiliates/${id}/pay`),
+
+  // Support tickets
+  supportTickets: (status?: 'open' | 'resolved') =>
+    api.get<any[]>(`/root/support/tickets${status ? `?status=${status}` : ''}`),
+  supportTicket: (id: string) => api.get<any>(`/root/support/tickets/${id}`),
+  replySupportTicket: (id: string, body: string) =>
+    api.post<any>(`/root/support/tickets/${id}/reply`, { body }),
+  updateSupportTicket: (id: string, data: { status: 'open' | 'resolved' }) =>
+    api.patch<any>(`/root/support/tickets/${id}`, data),
 
   // Business Type Templates
   businessTypeTemplates: () => api.get<any[]>('/root/business-type-templates'),

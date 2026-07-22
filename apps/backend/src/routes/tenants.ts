@@ -12,8 +12,18 @@ const serviceSchema = z.object({
   duration_minutes: z.number().int().positive(),
   price: z.number().nonnegative(),
   reminder_days: z.number().int().min(0).nullable().optional(),
+  // Legacy shape (no commission): just the professional ids.
   professional_ids: z.array(z.string().uuid()).optional(),
+  // Rich shape (#3): per-professional commission for this service.
+  professionals: z.array(z.object({
+    id: z.string().uuid(),
+    commission_enabled: z.boolean().optional(),
+    commission_type: z.enum(['percent', 'fixed']).optional(),
+    commission_value: z.number().nonnegative().optional(),
+  })).optional(),
 })
+
+type ServiceProInput = { id: string; commission_enabled?: boolean; commission_type?: string; commission_value?: number }
 
 const hoursRowSchema = z.object({
   day_of_week: z.number().int().min(0).max(6),
@@ -38,7 +48,16 @@ const staffUpdateSchema = z.object({
 
 const customerCreateSchema = z.object({
   name: z.string().min(1).max(120),
+  last_name: z.string().max(120).optional().nullable(),
   phone: z.string().min(8).max(30),
+  email: z.string().email().or(z.literal('')).nullable().optional(),
+})
+
+// Update: only keys present in the body are applied; empty string CLEARS the
+// field (stored as NULL) — unlike COALESCE, which would keep the old value.
+const customerUpdateSchema = z.object({
+  name: z.string().min(1).max(120).optional(),
+  last_name: z.string().max(120).nullable().optional(),
   email: z.string().email().or(z.literal('')).nullable().optional(),
 })
 
@@ -98,7 +117,12 @@ export const tenantRoutes: FastifyPluginAsync = async (app) => {
     const { rows } = await db.query(
       `SELECT s.*,
          COALESCE(
-           json_agg(json_build_object('id', p.id, 'name', p.name) ORDER BY p.name)
+           json_agg(json_build_object(
+             'id', p.id, 'name', p.name,
+             'commission_enabled', sp.commission_enabled,
+             'commission_type', sp.commission_type,
+             'commission_value', sp.commission_value
+           ) ORDER BY p.name)
              FILTER (WHERE p.id IS NOT NULL),
            '[]'
          ) AS professionals
@@ -113,20 +137,33 @@ export const tenantRoutes: FastifyPluginAsync = async (app) => {
     return reply.send(rows)
   })
 
-  async function syncServiceProfessionals(client: any, serviceId: string, tenantId: string, professionalIds: string[]) {
+  async function syncServiceProfessionals(client: any, serviceId: string, tenantId: string, pros: ServiceProInput[]) {
     await client.query('DELETE FROM service_professionals WHERE service_id = $1', [serviceId])
-    for (const pid of professionalIds) {
+    for (const p of pros) {
       const { rows: [pro] } = await client.query(
         'SELECT id FROM professionals WHERE id = $1 AND tenant_id = $2 AND active = TRUE',
-        [pid, tenantId]
+        [p.id, tenantId]
       )
       if (pro) {
         await client.query(
-          'INSERT INTO service_professionals (service_id, professional_id) VALUES ($1, $2) ON CONFLICT DO NOTHING',
-          [serviceId, pid]
+          `INSERT INTO service_professionals (service_id, professional_id, commission_enabled, commission_type, commission_value)
+           VALUES ($1, $2, $3, $4, $5)
+           ON CONFLICT (service_id, professional_id) DO UPDATE SET
+             commission_enabled = EXCLUDED.commission_enabled,
+             commission_type = EXCLUDED.commission_type,
+             commission_value = EXCLUDED.commission_value`,
+          [serviceId, p.id, p.commission_enabled ?? false, p.commission_type ?? 'percent', p.commission_value ?? 0]
         )
       }
     }
+  }
+
+  // Accept either the rich `professionals` array (with commission) or the legacy
+  // `professional_ids`. Returns the normalized list, or undefined if neither given.
+  function normalizePros(body: { professionals?: ServiceProInput[]; professional_ids?: string[] }): ServiceProInput[] | undefined {
+    if (body.professionals !== undefined) return body.professionals
+    if (body.professional_ids !== undefined) return body.professional_ids.map((id) => ({ id }))
+    return undefined
   }
 
   app.post('/services', async (request, reply) => {
@@ -142,8 +179,9 @@ export const tenantRoutes: FastifyPluginAsync = async (app) => {
          VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
         [tenant_id, body.name, body.description ?? null, body.duration_minutes, body.price, body.reminder_days ?? null]
       )
-      if (body.professional_ids?.length) {
-        await syncServiceProfessionals(client, service.id, tenant_id!, body.professional_ids)
+      const pros = normalizePros(body)
+      if (pros?.length) {
+        await syncServiceProfessionals(client, service.id, tenant_id!, pros)
       }
       await client.query('COMMIT')
       return reply.status(201).send(service)
@@ -160,7 +198,7 @@ export const tenantRoutes: FastifyPluginAsync = async (app) => {
     if (!['owner', 'admin', 'root'].includes(role)) return reply.status(403).send({ error: 'Sem permissão' })
 
     const body = serviceSchema.partial().parse(request.body)
-    const { professional_ids, ...fields } = body
+    const { professional_ids, professionals, ...fields } = body
 
     const client = await db.connect()
     try {
@@ -188,8 +226,9 @@ export const tenantRoutes: FastifyPluginAsync = async (app) => {
         service = s
       }
 
-      if (professional_ids !== undefined) {
-        await syncServiceProfessionals(client, request.params.id, tenant_id!, professional_ids)
+      const pros = normalizePros({ professionals, professional_ids })
+      if (pros !== undefined) {
+        await syncServiceProfessionals(client, request.params.id, tenant_id!, pros)
       }
 
       await client.query('COMMIT')
@@ -611,12 +650,12 @@ export const tenantRoutes: FastifyPluginAsync = async (app) => {
     const { search } = request.query as { search?: string }
 
     const { rows } = await db.query(
-      `SELECT c.id, c.name, c.phone, c.email, c.created_at,
+      `SELECT c.id, c.name, c.last_name, c.phone, c.email, c.created_at,
          (SELECT COUNT(*) FROM appointments a WHERE a.customer_id = c.id AND a.tenant_id = c.tenant_id) AS appointment_count,
          (SELECT MAX(a.starts_at) FROM appointments a WHERE a.customer_id = c.id AND a.tenant_id = c.tenant_id) AS last_appointment_at
        FROM customers c
        WHERE c.tenant_id = $1
-       ${search ? `AND (LOWER(c.name) LIKE $2 OR c.phone LIKE $2 OR LOWER(c.email) LIKE $2)` : ''}
+       ${search ? `AND (LOWER(c.name) LIKE $2 OR LOWER(c.last_name) LIKE $2 OR c.phone LIKE $2 OR LOWER(c.email) LIKE $2)` : ''}
        ORDER BY c.name LIMIT 200`,
       search ? [tenant_id, `%${search.toLowerCase()}%`] : [tenant_id]
     )
@@ -627,7 +666,7 @@ export const tenantRoutes: FastifyPluginAsync = async (app) => {
     const { tenant_id } = request.user
 
     const { rows: [customer] } = await db.query(
-      `SELECT id, name, phone, email, created_at FROM customers WHERE id = $1 AND tenant_id = $2`,
+      `SELECT id, name, last_name, phone, email, created_at FROM customers WHERE id = $1 AND tenant_id = $2`,
       [request.params.id, tenant_id]
     )
     if (!customer) return reply.status(404).send({ error: 'Cliente não encontrado' })
@@ -668,18 +707,55 @@ export const tenantRoutes: FastifyPluginAsync = async (app) => {
     const { tenant_id, role } = request.user
     if (!['owner', 'admin', 'root'].includes(role)) return reply.status(403).send({ error: 'Sem permissão' })
 
-    const { name, email } = request.body as any
+    const body = customerUpdateSchema.parse(request.body ?? {})
 
+    // Dynamic SET with only the keys present in the body (like the staff PATCH):
+    // sending last_name/email as '' clears the field instead of keeping it.
+    const sets: string[] = []
+    const values: unknown[] = []
+    let i = 1
+    if (body.name !== undefined)      { sets.push(`name = $${i++}`);      values.push(body.name) }
+    if (body.last_name !== undefined) { sets.push(`last_name = $${i++}`); values.push(body.last_name || null) }
+    if (body.email !== undefined)     { sets.push(`email = $${i++}`);     values.push(body.email || null) }
+    if (sets.length === 0) return reply.status(400).send({ error: 'Nenhum campo para atualizar' })
+
+    values.push(request.params.id, tenant_id)
     const { rows: [customer] } = await db.query(
-      `UPDATE customers SET
-         name  = COALESCE($1, name),
-         email = COALESCE($2, email)
-       WHERE id = $3 AND tenant_id = $4
+      `UPDATE customers SET ${sets.join(', ')}
+       WHERE id = $${i} AND tenant_id = $${i + 1}
        RETURNING *`,
-      [name ?? null, email !== undefined ? (email || null) : undefined, request.params.id, tenant_id]
+      values
     )
     if (!customer) return reply.status(404).send({ error: 'Cliente não encontrado' })
     return reply.send(customer)
+  })
+
+  // Delete a customer (Admin/Owner only) — cascades their conversations, messages
+  // and appointments (commissions cascade from appointments) in one transaction.
+  app.delete<{ Params: { id: string } }>('/customers/:id', async (request, reply) => {
+    const { tenant_id, role } = request.user
+    if (!['owner', 'admin', 'root'].includes(role)) return reply.status(403).send({ error: 'Sem permissão' })
+
+    const client = await db.connect()
+    try {
+      await client.query('BEGIN')
+      const { rows: [exists] } = await client.query('SELECT id FROM customers WHERE id = $1 AND tenant_id = $2', [request.params.id, tenant_id])
+      if (!exists) { await client.query('ROLLBACK'); return reply.status(404).send({ error: 'Cliente não encontrado' }) }
+      await client.query(
+        `DELETE FROM messages WHERE conversation_id IN (SELECT id FROM conversations WHERE customer_id = $1 AND tenant_id = $2)`,
+        [request.params.id, tenant_id]
+      )
+      await client.query('DELETE FROM conversations WHERE customer_id = $1 AND tenant_id = $2', [request.params.id, tenant_id])
+      await client.query('DELETE FROM appointments WHERE customer_id = $1 AND tenant_id = $2', [request.params.id, tenant_id])
+      await client.query('DELETE FROM customers WHERE id = $1 AND tenant_id = $2', [request.params.id, tenant_id])
+      await client.query('COMMIT')
+      return reply.send({ deleted: true })
+    } catch (err) {
+      await client.query('ROLLBACK')
+      throw err
+    } finally {
+      client.release()
+    }
   })
 
   app.post('/customers', async (request, reply) => {
@@ -690,10 +766,10 @@ export const tenantRoutes: FastifyPluginAsync = async (app) => {
 
     try {
       const { rows: [customer] } = await db.query(
-        `INSERT INTO customers (tenant_id, name, phone, email)
-         VALUES ($1, $2, $3, $4)
-         RETURNING id, name, phone, email, created_at`,
-        [tenant_id, body.name.trim(), body.phone.trim(), body.email || null]
+        `INSERT INTO customers (tenant_id, name, last_name, phone, email)
+         VALUES ($1, $2, $3, $4, $5)
+         RETURNING id, name, last_name, phone, email, created_at`,
+        [tenant_id, body.name.trim(), body.last_name?.trim() || null, body.phone.trim(), body.email || null]
       )
       return reply.status(201).send(customer)
     } catch (err: any) {

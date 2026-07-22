@@ -1,4 +1,4 @@
-import { View, Text, StyleSheet, FlatList, TouchableOpacity, Modal, ScrollView, Alert } from 'react-native'
+import { View, Text, StyleSheet, FlatList, TouchableOpacity, Modal, ScrollView, Alert, Switch, TextInput } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useState } from 'react'
 import { Ionicons } from '@expo/vector-icons'
@@ -10,6 +10,8 @@ import { tenantApi } from '@/lib/api'
 import { useToast } from '@/lib/toast'
 import { colors, font, spacing, radius } from '@/lib/theme'
 
+type ProCommission = { enabled: boolean; type: 'percent' | 'fixed'; value: string }
+
 const emptyForm = {
   name: '',
   description: '',
@@ -17,6 +19,7 @@ const emptyForm = {
   price: '',
   reminder_days: '',
   professional_ids: [] as string[],
+  commissions: {} as Record<string, ProCommission>,
 }
 type FormErrors = { name?: string; duration_minutes?: string; price?: string }
 
@@ -70,6 +73,17 @@ export default function ServicesScreen() {
 
   function openEdit(item: any) {
     setEditing(item)
+    const commissions: Record<string, ProCommission> = {}
+    for (const p of item.professionals ?? []) {
+      commissions[p.id] = {
+        enabled: !!p.commission_enabled,
+        type: p.commission_type === 'fixed' ? 'fixed' : 'percent',
+        value:
+          p.commission_value != null && Number(p.commission_value) > 0
+            ? String(Number(p.commission_value)).replace('.', ',')
+            : '',
+      }
+    }
     setForm({
       name: item.name,
       description: item.description ?? '',
@@ -77,6 +91,7 @@ export default function ServicesScreen() {
       price: Number(item.price).toFixed(2).replace('.', ','),
       reminder_days: item.reminder_days ? String(item.reminder_days) : '',
       professional_ids: (item.professionals ?? []).map((p: any) => p.id),
+      commissions,
     })
     setErrors({})
     setModalVisible(true)
@@ -105,6 +120,16 @@ export default function ServicesScreen() {
     }))
   }
 
+  function setCommission(id: string, patch: Partial<ProCommission>) {
+    setForm((f) => {
+      const prev: ProCommission = f.commissions[id] ?? { enabled: false, type: 'percent', value: '' }
+      return {
+        ...f,
+        commissions: { ...f.commissions, [id]: { ...prev, ...patch } },
+      }
+    })
+  }
+
   function validate() {
     const e: FormErrors = {}
     if (!form.name.trim()) e.name = 'Informe o nome do serviço'
@@ -118,6 +143,22 @@ export default function ServicesScreen() {
 
   function handleSave() {
     if (!validate()) return
+
+    // Valida comissões dos profissionais selecionados
+    for (const id of form.professional_ids) {
+      const c = form.commissions[id]
+      if (!c?.enabled) continue
+      const v = parseFloat(c.value.replace(',', '.'))
+      if (!c.value || isNaN(v) || v <= 0) {
+        toast.show('Informe um valor de comissão válido para os profissionais com comissão ativada.', 'error')
+        return
+      }
+      if (c.type === 'percent' && v > 100) {
+        toast.show('O percentual de comissão não pode ser maior que 100%.', 'error')
+        return
+      }
+    }
+
     const reminderDays = Math.max(0, Math.floor(Number(form.reminder_days) || 0))
     const payload = {
       name: form.name.trim(),
@@ -125,7 +166,16 @@ export default function ServicesScreen() {
       duration_minutes: Number(form.duration_minutes),
       price: parseFloat(form.price.replace(',', '.')),
       reminder_days: reminderDays > 0 ? reminderDays : null,
-      professional_ids: form.professional_ids,
+      professionals: form.professional_ids.map((id) => {
+        const c = form.commissions[id]
+        const value = c?.enabled ? parseFloat(c.value.replace(',', '.')) : 0
+        return {
+          id,
+          commission_enabled: !!c?.enabled,
+          commission_type: c?.type ?? 'percent',
+          commission_value: c?.enabled && !isNaN(value) ? value : 0,
+        }
+      }),
     }
     if (editing) {
       updateMutation.mutate({ id: editing.id, data: payload })
@@ -289,6 +339,68 @@ export default function ServicesScreen() {
               )}
             </View>
 
+            {/* Comissão por profissional */}
+            {form.professional_ids.length > 0 && (
+              <View style={s.proSection}>
+                <Text style={s.proSectionLabel}>Comissão por profissional</Text>
+                <Text style={s.commissionHint}>
+                  Comissão paga ao profissional por este serviço (percentual do valor ou valor fixo).
+                </Text>
+                {form.professional_ids.map((id) => {
+                  const pro = (professionals as any[]).find((p) => p.id === id)
+                  if (!pro) return null
+                  const c = form.commissions[id] ?? { enabled: false, type: 'percent' as const, value: '' }
+                  return (
+                    <View key={id} style={s.commissionCard}>
+                      <View style={s.commissionHeader}>
+                        <Text style={s.commissionProName}>{pro.name}</Text>
+                        <View style={s.commissionToggle}>
+                          <Text style={s.commissionToggleLabel}>Comissão</Text>
+                          <Switch
+                            value={c.enabled}
+                            onValueChange={(v) => setCommission(id, { enabled: v })}
+                            trackColor={{ false: colors.border, true: colors.primary }}
+                            thumbColor="#fff"
+                          />
+                        </View>
+                      </View>
+                      {c.enabled && (
+                        <View style={s.commissionControls}>
+                          <View style={s.commissionTypeRow}>
+                            <TouchableOpacity
+                              onPress={() => setCommission(id, { type: 'percent' })}
+                              style={[s.commissionTypeBtn, c.type === 'percent' && s.commissionTypeBtnActive]}
+                            >
+                              <Text style={[s.commissionTypeText, c.type === 'percent' && s.commissionTypeTextActive]}>
+                                %
+                              </Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity
+                              onPress={() => setCommission(id, { type: 'fixed' })}
+                              style={[s.commissionTypeBtn, c.type === 'fixed' && s.commissionTypeBtnActive]}
+                            >
+                              <Text style={[s.commissionTypeText, c.type === 'fixed' && s.commissionTypeTextActive]}>
+                                R$
+                              </Text>
+                            </TouchableOpacity>
+                          </View>
+                          <TextInput
+                            style={s.commissionInput}
+                            value={c.value}
+                            onChangeText={(v) => setCommission(id, { value: v.replace(/[^0-9,\.]/g, '') })}
+                            keyboardType="decimal-pad"
+                            placeholder={c.type === 'percent' ? 'Ex: 30' : 'Ex: 25,00'}
+                            placeholderTextColor={colors.textDisabled}
+                          />
+                          <Text style={s.commissionSuffix}>{c.type === 'percent' ? '%' : 'R$'}</Text>
+                        </View>
+                      )}
+                    </View>
+                  )
+                })}
+              </View>
+            )}
+
             <Button
               label={editing ? 'Salvar alterações' : 'Salvar serviço'}
               onPress={handleSave}
@@ -343,6 +455,35 @@ const s = StyleSheet.create({
   proSelectChipText: { fontSize: font.sm, fontWeight: '600', color: colors.textSecondary },
   proSelectChipTextActive: { color: '#fff' },
   proEmptyHint: { fontSize: font.sm, color: colors.textDisabled, fontStyle: 'italic' },
+  // Commission
+  commissionHint: { fontSize: font.sm, color: colors.textSecondary },
+  commissionCard: {
+    backgroundColor: colors.surface, borderRadius: radius.md,
+    borderWidth: 1, borderColor: colors.border,
+    padding: spacing.md, gap: spacing.sm,
+  },
+  commissionHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  commissionProName: { fontSize: font.md, fontWeight: '600', color: colors.text, flex: 1 },
+  commissionToggle: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+  commissionToggleLabel: { fontSize: font.sm, color: colors.textSecondary, fontWeight: '600' },
+  commissionControls: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+  commissionTypeRow: {
+    flexDirection: 'row', backgroundColor: colors.surfaceAlt,
+    borderRadius: radius.sm, padding: 3, gap: 3,
+  },
+  commissionTypeBtn: {
+    paddingHorizontal: 14, paddingVertical: 6,
+    borderRadius: radius.sm - 2, alignItems: 'center',
+  },
+  commissionTypeBtnActive: { backgroundColor: colors.primary },
+  commissionTypeText: { fontSize: font.sm, fontWeight: '700', color: colors.textSecondary },
+  commissionTypeTextActive: { color: '#fff' },
+  commissionInput: {
+    flex: 1, borderWidth: 1, borderColor: colors.border, borderRadius: radius.sm,
+    paddingHorizontal: spacing.md, paddingVertical: 8,
+    fontSize: font.md, color: colors.text, backgroundColor: colors.surface,
+  },
+  commissionSuffix: { fontSize: font.sm, fontWeight: '700', color: colors.textSecondary, width: 24 },
   reminderHint: { fontSize: font.sm, color: colors.textSecondary, marginBottom: spacing.sm },
   reminderBadge: { flexDirection: 'row', alignItems: 'center', gap: 3, marginTop: spacing.xs },
   reminderBadgeText: { fontSize: 11, color: colors.warning, fontWeight: '600' },
