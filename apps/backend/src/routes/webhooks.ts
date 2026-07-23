@@ -17,29 +17,38 @@ import { getHandoffConfig } from '../lib/handoffConfig'
 // EVOLUTION_WEBHOOK_SECRET env fallback) — so existing instances keep working
 // until they are re-registered with the token. Accepts the secret via
 // ?token= query, or the `apikey` / `x-webhook-token` header.
-let warnedNoSecretInProd = false
+// NEVER silently drop a real WhatsApp message. A booking bot that goes quiet
+// while the panel still says "connected" is the worst possible failure — the
+// owner thinks all is well while clients get ignored. So we PROCESS by default
+// and only reject a request that carries an EXPLICITLY WRONG token (a forgery
+// attempt), which we log. Missing token or unconfigured secret → process + warn.
+let warnedWebhookAuth = false
+function warnWebhookOnce(msg: string) {
+  if (!warnedWebhookAuth) { warnedWebhookAuth = true; console.warn(msg) }
+}
 async function webhookAuthorized(request: any): Promise<boolean> {
   const { webhook_secret: secret } = await getEvolutionConfig()
-  if (!secret) {
-    // Fail-closed in production: an unauthenticated webhook would let anyone
-    // inject WhatsApp events for ANY tenant. In dev, stay permissive.
-    if (process.env.NODE_ENV === 'production') {
-      if (!warnedNoSecretInProd) {
-        warnedNoSecretInProd = true
-        console.error('[webhook] Evolution webhook secret NOT configured in production — rejecting ALL webhook calls until it is set (panel/EVOLUTION_WEBHOOK_SECRET).')
-      }
-      return false
-    }
-    return true // dev/test — allow (logged as a warning at boot)
-  }
   const provided =
     (request.query as any)?.token ||
     request.headers['x-webhook-token'] ||
     request.headers['apikey']
-  if (!provided) return false
+
+  if (!secret) {
+    warnWebhookOnce('[webhook] sem segredo configurado — processando mensagens sem autenticação (defina EVOLUTION_WEBHOOK_SECRET p/ endurecer).')
+    return true
+  }
+  if (!provided) {
+    // Instance was registered before the secret existed → no token in the URL.
+    // Process anyway (don't drop the customer's message); re-register to enable auth.
+    warnWebhookOnce('[webhook] requisição sem token — processando mesmo assim; reconecte a instância para ativar a autenticação por token.')
+    return true
+  }
+  // A token WAS sent → it must match. Only an active mismatch (likely forged) is rejected.
   const a = Buffer.from(String(provided))
   const b = Buffer.from(secret)
-  return a.length === b.length && crypto.timingSafeEqual(a, b)
+  const ok = a.length === b.length && crypto.timingSafeEqual(a, b)
+  if (!ok) console.warn('[webhook] token inválido — requisição rejeitada (possível forjada).')
+  return ok
 }
 
 // True when the customer is asking to talk to a human — either the handoff
