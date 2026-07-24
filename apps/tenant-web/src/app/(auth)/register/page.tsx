@@ -107,12 +107,14 @@ export default function RegisterPage() {
   async function handleGoogleBusiness(e: FormEvent) {
     e.preventDefault()
     setError('')
+    if (!googleExtra.business_name.trim()) return setError('Informe o nome do seu estabelecimento')
+    if (!googleExtra.phone.trim()) return setError('Informe seu telefone (WhatsApp)')
     setLoading(true)
     try {
       const res = await authApi.googleAuth({
         id_token: pendingGoogleToken,
-        business_name: googleExtra.business_name,
-        phone: googleExtra.phone || undefined,
+        business_name: googleExtra.business_name.trim(),
+        phone: googleExtra.phone.trim(),
         referral_code: googleExtra.referral_code || undefined,
       })
       setToken(res.token)

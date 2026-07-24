@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { authApi, setToken } from '@/lib/api'
 import { isTenantToken } from '@/lib/auth'
 import BrandLogo from '@/components/BrandLogo'
+import GoogleSignIn from '@/components/auth/GoogleSignIn'
 
 export default function LoginPage() {
   const router = useRouter()
@@ -78,6 +79,9 @@ export default function LoginPage() {
         >
           {loading ? 'Entrando...' : 'Entrar'}
         </button>
+
+        <GoogleSignIn onAuthenticated={(token) => { setToken(token); router.replace('/dashboard') }} />
+
         <p className="text-center text-sm text-gray-500">
           Ainda não tem conta?{' '}
           <Link href="/register" className="text-primary font-semibold hover:underline">

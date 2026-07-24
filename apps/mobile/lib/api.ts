@@ -200,10 +200,11 @@ export const whatsappApi = {
 
 // Google
 export const googleApi = {
-  loginWithIdToken: (idToken: string, businessName?: string, referralCode?: string) =>
+  loginWithIdToken: (idToken: string, businessName?: string, phone?: string, referralCode?: string) =>
     api.post<{ token: string; is_new: boolean; tenant_id?: string }>('/auth/google', {
       id_token: idToken,
       business_name: businessName,
+      phone,
       referral_code: referralCode,
     }),
   calendarStatus: () => api.get<{ connected: boolean; sync_enabled: boolean; calendar_id?: string }>('/google-calendar/status'),

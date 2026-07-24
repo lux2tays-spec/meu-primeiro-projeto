@@ -47,9 +47,12 @@ export const googleRoutes: FastifyPluginAsync = async (app) => {
       return reply.send({ token, is_new: false })
     }
 
-    // New user — requires business_name for first registration
+    // New user — requires business_name AND phone (WhatsApp) for first registration.
     if (!business_name) {
       return reply.status(422).send({ error: 'business_name_required', message: 'Informe o nome do seu estabelecimento' })
+    }
+    if (!phone || !phone.trim()) {
+      return reply.status(422).send({ error: 'phone_required', message: 'Informe seu telefone (WhatsApp)' })
     }
 
     const slug = business_name.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '')

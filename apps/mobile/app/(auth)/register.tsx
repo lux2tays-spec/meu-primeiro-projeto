@@ -21,6 +21,7 @@ type FormErrors = {
   name?: string
   email?: string
   password?: string
+  phone?: string
   business_name?: string
 }
 
@@ -32,6 +33,7 @@ export default function RegisterScreen() {
     name: '',
     email: '',
     password: '',
+    phone: '',
     business_name: '',
     referral_code: '',
   })
@@ -50,6 +52,9 @@ export default function RegisterScreen() {
   function validate() {
     const e: FormErrors = {}
     if (!form.business_name.trim()) e.business_name = 'Informe o nome do estabelecimento'
+    // Phone (WhatsApp) is required in BOTH flows (Google and e-mail).
+    if (!form.phone.trim()) e.phone = 'Informe seu telefone (WhatsApp)'
+    else if (form.phone.replace(/\D/g, '').length < 8) e.phone = 'Telefone inválido'
     if (!isGoogleFlow) {
       if (!form.name.trim()) e.name = 'Informe seu nome'
       if (!form.email.trim()) e.email = 'Informe seu e-mail'
@@ -70,6 +75,7 @@ export default function RegisterScreen() {
         const res = await googleApi.loginWithIdToken(
           googleIdToken!,
           form.business_name,
+          form.phone.trim(),
           form.referral_code || undefined,
         )
         token = res.token
@@ -135,6 +141,15 @@ export default function RegisterScreen() {
             onChangeText={setField('business_name')}
             placeholder="Clínica Bella, Pet Shop do João..."
             error={errors.business_name}
+          />
+
+          <Input
+            label="Telefone (WhatsApp) *"
+            value={form.phone}
+            onChangeText={setField('phone')}
+            placeholder="5511999999999"
+            keyboardType="phone-pad"
+            error={errors.phone}
           />
 
           {!isGoogleFlow && (

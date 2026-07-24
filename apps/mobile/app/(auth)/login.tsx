@@ -48,7 +48,7 @@ export default function LoginScreen() {
       .catch((err) => {
         // Backend returns 422 business_name_required for new Google users — route to
         // the register step so they can name their business (api.post throws on non-2xx).
-        if (err?.message === 'business_name_required') {
+        if (err?.message === 'business_name_required' || err?.message === 'phone_required') {
           router.push({ pathname: '/(auth)/register', params: { id_token: idToken } })
           return
         }
