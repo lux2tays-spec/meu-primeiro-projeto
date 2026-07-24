@@ -1,5 +1,7 @@
 import { db } from '../lib/db'
 import { evolutionSend } from '../services/evolution'
+import { getBotConfig } from '../lib/botConfig'
+import { renderReminderTemplate } from '../lib/reminderText'
 
 const TZ = 'America/Sao_Paulo'
 
@@ -16,6 +18,7 @@ const DUE_REMINDERS_QUERY = `
     c.phone       AS customer_phone,
     s.name        AS service_name,
     t.name        AS business_name,
+    ac.reminder_appointment_template,
     wi.instance_name,
     k.kind
   FROM appointments a
@@ -39,7 +42,8 @@ const DUE_REMINDERS_QUERY = `
   ORDER BY a.starts_at
 `
 
-function buildMessage(customerName: string, serviceName: string, startsAt: Date, businessName: string): string {
+// Template resolution: per-tenant override (agent_config) → global (bot_config).
+function buildMessage(row: any, startsAt: Date, globalTemplate: string): string {
   const time = new Intl.DateTimeFormat('pt-BR', { timeZone: TZ, hour: '2-digit', minute: '2-digit' }).format(startsAt)
   const dayFmt = new Intl.DateTimeFormat('pt-BR', { timeZone: TZ, day: '2-digit', month: '2-digit' })
 
@@ -53,15 +57,21 @@ function buildMessage(customerName: string, serviceName: string, startsAt: Date,
     apptDay === tomorrow ? 'amanhã' :
     `no dia ${apptDay}`
 
-  return (
-    `Oi ${customerName}! 😊 Passando pra confirmar seu *${serviceName}* ${when} às *${time}* ` +
-    `na ${businessName}. Está confirmado? Responde *SIM* pra confirmar 👍 ou me chama se precisar remarcar.`
-  )
+  const template = (row.reminder_appointment_template?.trim()) || globalTemplate
+  return renderReminderTemplate(template, {
+    cliente: row.customer_name ?? '',
+    servico: row.service_name ?? '',
+    negocio: row.business_name ?? '',
+    quando: when,
+    hora: time,
+  })
 }
 
 export async function runAppointmentReminders() {
   const { rows } = await db.query(DUE_REMINDERS_QUERY)
   if (rows.length === 0) return
+
+  const botCfg = await getBotConfig()
 
   // If both r1 and r2 became due at the same time (e.g. appointment booked at
   // the last minute), send a single message but log both kinds so the customer
@@ -93,7 +103,7 @@ export async function runAppointmentReminders() {
     if (!claimed) continue
 
     const row = dueRows[0]
-    const message = buildMessage(row.customer_name, row.service_name, new Date(row.starts_at), row.business_name)
+    const message = buildMessage(row, new Date(row.starts_at), botCfg.reminder_appointment_template)
 
     try {
       await evolutionSend(row.instance_name, row.customer_phone, message)

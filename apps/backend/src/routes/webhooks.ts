@@ -11,6 +11,8 @@ import { evolutionGetMediaBase64, evolutionSend, wasSentByBot, HANDOFF_BUTTON_ID
 import { base64Bytes, isAllowedAudioType, normalizeImageType, MAX_AUDIO_BYTES, MAX_IMAGE_BYTES } from '../lib/mediaGuard'
 import { getEvolutionConfig } from '../lib/integrationConfig'
 import { getHandoffConfig } from '../lib/handoffConfig'
+import { SUPPORT_INSTANCE, updateSupportBotConfig } from '../lib/supportBotConfig'
+import { runSupportBot } from '../services/supportBot'
 
 // Validate the shared secret Evolution must send with every webhook.
 // Enabled only when a webhook secret is configured (Root Admin panel, with
@@ -132,12 +134,16 @@ export const webhookRoutes: FastifyPluginAsync = async (app) => {
       if (body?.event === 'qrcode.updated') {
         const qrBase64 = body?.data?.qrcode?.base64 ?? body?.data?.base64
         if (qrBase64) {
-          const { rows: [instance] } = await db.query(
-            'SELECT tenant_id FROM whatsapp_instances WHERE instance_name = $1',
-            [instanceId]
-          )
-          if (instance) {
-            await redis.setex(`whatsapp:qr:${instance.tenant_id}`, QR_CODE_TTL, JSON.stringify({ qrcode: qrBase64 }))
+          if (instanceId === SUPPORT_INSTANCE) {
+            await redis.setex(`support:qr`, QR_CODE_TTL, JSON.stringify({ qrcode: qrBase64 }))
+          } else {
+            const { rows: [instance] } = await db.query(
+              'SELECT tenant_id FROM whatsapp_instances WHERE instance_name = $1',
+              [instanceId]
+            )
+            if (instance) {
+              await redis.setex(`whatsapp:qr:${instance.tenant_id}`, QR_CODE_TTL, JSON.stringify({ qrcode: qrBase64 }))
+            }
           }
         }
         return reply.send({ ok: true })
@@ -146,8 +152,13 @@ export const webhookRoutes: FastifyPluginAsync = async (app) => {
       // Handle connection status updates
       if (body?.event === 'connection.update') {
         const state = body?.data?.state
+        const phone = body?.data?.instance?.wuid?.replace('@s.whatsapp.net', '') ?? null
+        if (instanceId === SUPPORT_INSTANCE) {
+          if (state === 'open') await updateSupportBotConfig(phone ? { status: 'connected', phone_number: phone } : { status: 'connected' })
+          else if (state === 'close') await updateSupportBotConfig({ status: 'disconnected' })
+          return reply.send({ ok: true })
+        }
         if (state === 'open') {
-          const phone = body?.data?.instance?.wuid?.replace('@s.whatsapp.net', '') ?? null
           await db.query(
             `UPDATE whatsapp_instances
              SET status = 'connected', phone_number = COALESCE($1, phone_number)
@@ -193,6 +204,20 @@ export const webhookRoutes: FastifyPluginAsync = async (app) => {
       // De-duplicate — Evolution re-delivers webhooks; never process the same message twice
       if (await isDuplicateMessage(messageId)) return reply.send({ ok: true, dedup: true })
 
+      // System support/sales bot (platform's own number) — not a tenant. Answer
+      // with the support engine and return before any tenant resolution.
+      if (instanceId === SUPPORT_INSTANCE) {
+        if (kind === 'text' && textContent) {
+          try {
+            const answer = await runSupportBot(customerPhone, textContent)
+            await evolutionSend(instanceId, customerPhone, answer)
+          } catch (e) {
+            app.log.error({ e }, 'support bot falhou')
+          }
+        }
+        return reply.send({ ok: true })
+      }
+
       // Resolve tenant from instance
       const { rows: [instance] } = await db.query(
         'SELECT tenant_id FROM whatsapp_instances WHERE instance_name = $1',
@@ -219,16 +244,16 @@ export const webhookRoutes: FastifyPluginAsync = async (app) => {
       }
 
       // Find or create customer — never overwrite a real name with the phone number
-      let customer: { id: string; name: string; phone: string }
+      let customer: { id: string; name: string; last_name: string | null; phone: string }
       const existing = await db.query(
-        'SELECT id, name, phone FROM customers WHERE tenant_id = $1 AND phone = $2',
+        'SELECT id, name, last_name, phone FROM customers WHERE tenant_id = $1 AND phone = $2',
         [tenantId, customerPhone]
       )
       if (existing.rows[0]) {
         customer = existing.rows[0]
       } else {
         const { rows: [c] } = await db.query(
-          `INSERT INTO customers (tenant_id, name, phone) VALUES ($1, $2, $3) RETURNING id, name, phone`,
+          `INSERT INTO customers (tenant_id, name, phone) VALUES ($1, $2, $3) RETURNING id, name, last_name, phone`,
           [tenantId, customerPhone, customerPhone]
         )
         customer = c
@@ -343,7 +368,7 @@ export const webhookRoutes: FastifyPluginAsync = async (app) => {
       // Buffer + debounce: reply ONCE after a short quiet window (runs async).
       // Respond 200 immediately so Evolution never times out and retries.
       await scheduleReply(
-        { tenantId, conversationId, customerId: customer.id, customerName: customer.name, customerPhone: customer.phone, instanceId },
+        { tenantId, conversationId, customerId: customer.id, customerName: customer.name, customerLastName: customer.last_name, customerPhone: customer.phone, instanceId },
         finalText,
         botImage
       )

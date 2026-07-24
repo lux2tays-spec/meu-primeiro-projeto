@@ -3,7 +3,7 @@ import { z } from 'zod'
 import { randomBytes } from 'crypto'
 import { db } from '../lib/db'
 import { hashPassword } from '../lib/password'
-import { invalidateAiConfig, getAiConfig } from '../lib/botConfig'
+import { invalidateAiConfig, getAiConfig, invalidateBotConfig } from '../lib/botConfig'
 import { redis, QR_CODE_TTL } from '../lib/redis'
 import { monthlySpend } from '../lib/aiUsage'
 import { testBotReply } from '../services/bot'
@@ -11,8 +11,14 @@ import {
   evolutionConnectionState,
   evolutionCreateInstance,
   evolutionGetQR,
+  evolutionGetStatus,
   evolutionLogout,
 } from '../services/evolution'
+import {
+  SUPPORT_INSTANCE,
+  getSupportBotConfig,
+  updateSupportBotConfig,
+} from '../lib/supportBotConfig'
 import { encrypt, decrypt, maskSecret } from '../lib/crypto'
 import { logAdminAction, auditFromRequest } from '../lib/auditLog'
 
@@ -476,6 +482,7 @@ export const rootRoutes: FastifyPluginAsync = async (app) => {
       [key, JSON.stringify(body)]
     )
     if (key === 'ai_config') await invalidateAiConfig()
+    if (key === 'bot_config') await invalidateBotConfig()
     if (key === 'payment_config') await invalidatePaymentConfig()
     if (key === 'evolution_config') await invalidateEvolutionConfig()
     if (key === 'smtp_config') await invalidateSmtpConfig()
@@ -485,6 +492,85 @@ export const rootRoutes: FastifyPluginAsync = async (app) => {
     const changed = body && typeof body === 'object' ? Object.keys(body).join(', ') : ''
     await logAdminAction(auditFromRequest(request, 'settings.update', key, `campos: ${changed}`))
     return reply.send({ ok: true })
+  })
+
+  // ── Support/sales bot (platform WhatsApp) ────────────────────────────────────
+  const supportBehaviourSchema = z.object({
+    enabled: z.boolean().optional(),
+    system_prompt: z.string().max(8000).optional(),
+    product_info: z.string().max(8000).optional(),
+    register_url: z.string().url().max(300).optional(),
+  })
+
+  // Current config + live connection state.
+  app.get('/support-bot', async (_request, reply) => {
+    const cfg = await getSupportBotConfig()
+    return reply.send(cfg)
+  })
+
+  // Update behaviour fields (never touches runtime connection state).
+  app.patch('/support-bot', async (request, reply) => {
+    const body = supportBehaviourSchema.parse(request.body)
+    const next = await updateSupportBotConfig(body)
+    await logAdminAction(auditFromRequest(request, 'support_bot.update', 'support_bot_config', `campos: ${Object.keys(body).join(', ')}`))
+    return reply.send(next)
+  })
+
+  // Connect the system WhatsApp: create the Evolution instance + fetch QR.
+  app.post('/support-bot/connect', {
+    config: { rateLimit: { max: 5, timeWindow: '1 minute' } },
+  }, async (request, reply) => {
+    const evoCfg = await getEvolutionConfig()
+    const secret = evoCfg.webhook_secret
+    const webhookUrl = `${evoCfg.webhook_base}/webhook/whatsapp/${SUPPORT_INSTANCE}${secret ? `?token=${encodeURIComponent(secret)}` : ''}`
+    await updateSupportBotConfig({ status: 'qr_pending' })
+    await evolutionCreateInstance(SUPPORT_INSTANCE, webhookUrl)
+    const qrData = await evolutionGetQR(SUPPORT_INSTANCE)
+    if (qrData) {
+      await redis.setex('support:qr', QR_CODE_TTL, JSON.stringify(qrData))
+      await logAdminAction(auditFromRequest(request, 'support_bot.connect', SUPPORT_INSTANCE, 'iniciou conexão'))
+      return reply.send(qrData)
+    }
+    return reply.send({ qr_pending: true })
+  })
+
+  // Poll for the QR (from webhook cache or a fresh fetch).
+  app.get('/support-bot/qr', async (_request, reply) => {
+    const cached = await redis.get('support:qr')
+    if (cached) {
+      const parsed = JSON.parse(cached)
+      if (parsed?.qrcode) return reply.send(parsed)
+    }
+    const qrData = await evolutionGetQR(SUPPORT_INSTANCE)
+    if (qrData) {
+      await redis.setex('support:qr', QR_CODE_TTL, JSON.stringify(qrData))
+      return reply.send(qrData)
+    }
+    return reply.status(202).send({ qr_pending: true })
+  })
+
+  // Live connection status (syncs the stored status with Evolution).
+  app.get('/support-bot/status', async (_request, reply) => {
+    const cfg = await getSupportBotConfig()
+    const liveStatus = await evolutionGetStatus(SUPPORT_INSTANCE)
+    const state = liveStatus?.instance?.state ?? liveStatus?.state ?? 'unknown'
+    let next = cfg
+    if (state === 'open' && cfg.status !== 'connected') {
+      next = await updateSupportBotConfig({ status: 'connected' })
+    } else if (state === 'close' && cfg.status !== 'disconnected') {
+      next = await updateSupportBotConfig({ status: 'disconnected', phone_number: null })
+      await redis.del('support:qr')
+    }
+    return reply.send({ ...next, live: { state } })
+  })
+
+  // Disconnect / unlink the system WhatsApp.
+  app.post('/support-bot/disconnect', async (request, reply) => {
+    await evolutionLogout(SUPPORT_INSTANCE)
+    const next = await updateSupportBotConfig({ status: 'disconnected', phone_number: null })
+    await redis.del('support:qr')
+    await logAdminAction(auditFromRequest(request, 'support_bot.disconnect', SUPPORT_INSTANCE, 'desconectou'))
+    return reply.send(next)
   })
 
   // Audit trail (governance) — who changed what in the Root Admin, when.

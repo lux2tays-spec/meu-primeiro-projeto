@@ -113,6 +113,14 @@ export const rootApi = {
   settings: () => api.get<any>('/root/settings'),
   updateSettings: (key: string, value: any) => api.patch(`/root/settings/${key}`, value),
 
+  // Support/sales bot (platform WhatsApp)
+  supportBot: () => api.get<any>('/root/support-bot'),
+  updateSupportBot: (data: any) => api.patch<any>('/root/support-bot', data),
+  supportBotConnect: () => api.post<{ qrcode?: string; qr_pending?: boolean }>('/root/support-bot/connect'),
+  supportBotQr: () => api.get<{ qrcode?: string; qr_pending?: boolean }>('/root/support-bot/qr'),
+  supportBotStatus: () => api.get<any>('/root/support-bot/status'),
+  supportBotDisconnect: () => api.post<any>('/root/support-bot/disconnect'),
+
   // AI usage & cost
   aiUsage: (days = 30) => api.get<any>(`/root/ai-usage?days=${days}`),
 

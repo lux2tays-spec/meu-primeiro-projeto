@@ -3,6 +3,7 @@ import { redis } from '../lib/redis'
 import { runBot } from './bot'
 import { evolutionSend, evolutionSendSpecialistOffer } from './evolution'
 import { getHandoffConfig } from '../lib/handoffConfig'
+import { getBotConfig } from '../lib/botConfig'
 
 // Message de-duplication + per-conversation debounce.
 //
@@ -13,9 +14,9 @@ import { getHandoffConfig } from '../lib/handoffConfig'
 //   any retry that slipped past dedup. Single backend instance, so an in-process
 //   timer map is sufficient; the buffer lives in Redis so nothing is lost mid-window.
 
-const DEBOUNCE_MS = Number(process.env.BOT_DEBOUNCE_MS ?? 7000)
-const DEDUP_TTL = 60 * 60 // 1h
-const SENDER_RATE_LIMIT = 40 // max bot runs per customer phone per tenant per hour
+// Operational limits (dedup TTL, rate limit, debounce) come from bot_config
+// (Root Admin, cached 60s). The rate-limit window stays at 1h — the limit is
+// defined as "per hour".
 const SENDER_RATE_WINDOW = 60 * 60 // 1h
 
 const timers = new Map<string, NodeJS.Timeout>()
@@ -27,6 +28,7 @@ export type DispatchCtx = {
   conversationId: string
   customerId: string
   customerName: string
+  customerLastName?: string | null
   customerPhone: string
   instanceId: string
   image?: BotImage
@@ -37,7 +39,8 @@ const latestCtx = new Map<string, DispatchCtx>()
 /** Returns true if this message id was already seen (and should be ignored). */
 export async function isDuplicateMessage(messageId?: string): Promise<boolean> {
   if (!messageId) return false
-  const set = await redis.set(`bot:msg:${messageId}`, '1', 'EX', DEDUP_TTL, 'NX')
+  const { dedup_ttl_seconds } = await getBotConfig()
+  const set = await redis.set(`bot:msg:${messageId}`, '1', 'EX', dedup_ttl_seconds, 'NX')
   return set === null
 }
 
@@ -47,13 +50,14 @@ export async function isDuplicateMessage(messageId?: string): Promise<boolean> {
  * message silently (no bot run, no reply). Logged once, on crossing the limit.
  */
 export async function isSenderRateLimited(tenantId: string, customerPhone: string): Promise<boolean> {
+  const { sender_rate_limit } = await getBotConfig()
   const key = `bot:rl:${tenantId}:${customerPhone}`
   const count = await redis.incr(key)
   if (count === 1) await redis.expire(key, SENDER_RATE_WINDOW)
-  if (count === SENDER_RATE_LIMIT + 1) {
-    console.warn(`[bot] rate-limit: tenant=${tenantId} phone=${customerPhone} passou de ${SENDER_RATE_LIMIT} mensagens/hora — descartando em silêncio`)
+  if (count === sender_rate_limit + 1) {
+    console.warn(`[bot] rate-limit: tenant=${tenantId} phone=${customerPhone} passou de ${sender_rate_limit} mensagens/hora — descartando em silêncio`)
   }
-  return count > SENDER_RATE_LIMIT
+  return count > sender_rate_limit
 }
 
 /** Buffer an incoming message and (re)start the debounce window. */
@@ -65,11 +69,12 @@ export async function scheduleReply(ctx: DispatchCtx, text: string, image?: BotI
   const prev = latestCtx.get(ctx.conversationId)
   latestCtx.set(ctx.conversationId, { ...ctx, image: image ?? prev?.image })
 
+  const { debounce_ms } = await getBotConfig()
   const existing = timers.get(ctx.conversationId)
   if (existing) clearTimeout(existing)
   timers.set(
     ctx.conversationId,
-    setTimeout(() => { flush(ctx.conversationId).catch((e) => console.error('bot flush error:', e)) }, DEBOUNCE_MS)
+    setTimeout(() => { flush(ctx.conversationId).catch((e) => console.error('bot flush error:', e)) }, debounce_ms)
   )
 }
 
@@ -92,6 +97,7 @@ async function flush(conversationId: string): Promise<void> {
     customerMessage: combined,
     customerId: ctx.customerId,
     customerName: ctx.customerName,
+    customerLastName: ctx.customerLastName,
     customerPhone: ctx.customerPhone,
     image: ctx.image,
   })

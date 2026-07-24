@@ -8,6 +8,7 @@ import Logo, { LP_FONT } from '@/components/landing/Logo'
 import Reveal from '@/components/landing/Reveal'
 import PhoneChat, { type ChatMessage } from '@/components/landing/PhoneChat'
 import AgendaMock from '@/components/landing/AgendaMock'
+import SupportWhatsAppButton from '@/components/landing/SupportWhatsAppButton'
 
 export const metadata: Metadata = {
   title: 'AíConfirma — Seu atendimento no WhatsApp no piloto automático',
@@ -305,6 +306,28 @@ export default function Home() {
         </Reveal>
       </Section>
 
+      {/* ── Afiliados (CTA) ──────────────────────────────────────────────────── */}
+      <section className="border-t border-slate-100 dark:border-white/10">
+        <div className="mx-auto max-w-6xl px-5 py-10 sm:px-8">
+          <div className="flex flex-col items-center gap-4 rounded-3xl bg-gradient-to-br from-[#2CB86E]/10 to-[#2CB86E]/5 px-6 py-8 text-center dark:from-[#2CB86E]/15 dark:to-transparent sm:flex-row sm:justify-between sm:text-left">
+            <div>
+              <h3 className="text-lg font-extrabold text-slate-900 dark:text-white sm:text-xl">
+                Quer ganhar indicando nosso sistema? 💸
+              </h3>
+              <p className="mt-1 text-sm text-slate-600 dark:text-slate-300">
+                Acesse agora nosso portal de afiliados e receba comissão a cada indicação que assinar.
+              </p>
+            </div>
+            <Link
+              href="/register?ref=afiliado"
+              className="inline-flex shrink-0 items-center gap-2 rounded-2xl bg-[#2CB86E] px-6 py-3.5 text-base font-bold text-white shadow-lg shadow-[#2CB86E]/25 transition hover:brightness-105"
+            >
+              Quero ser afiliado
+            </Link>
+          </div>
+        </div>
+      </section>
+
       {/* ── Footer ──────────────────────────────────────────────────────────── */}
       <footer className="border-t border-slate-100 py-10 dark:border-white/10">
         <div className="mx-auto flex max-w-6xl flex-col items-center justify-between gap-4 px-5 sm:flex-row sm:px-8">
@@ -312,11 +335,15 @@ export default function Home() {
           <nav className="flex items-center gap-5 text-sm text-slate-500 dark:text-slate-400">
             <Link href="/privacidade" className="hover:text-slate-800 dark:hover:text-white">Privacidade</Link>
             <Link href="/termos" className="hover:text-slate-800 dark:hover:text-white">Termos</Link>
+            <Link href="/register?ref=afiliado" className="hover:text-slate-800 dark:hover:text-white">Afiliados</Link>
             <Link href="/login" className="hover:text-slate-800 dark:hover:text-white">Entrar</Link>
           </nav>
           <p className="text-xs text-slate-400">© 2026 AíConfirma</p>
         </div>
       </footer>
+
+      {/* Floating WhatsApp — only renders when the system bot is connected */}
+      <SupportWhatsAppButton />
     </main>
   )
 }

@@ -33,6 +33,11 @@ const BLANK = {
   appointment_reminders_enabled: true,
   reminder1_minutes: 180,
   reminder2_minutes: 30,
+  // Tri-state ('inherit' = usar padrão global do Root Admin).
+  allow_price_list: 'inherit' as 'inherit' | 'on' | 'off',
+  collect_last_name: 'inherit' as 'inherit' | 'on' | 'off',
+  reminder_return_template: '',
+  reminder_appointment_template: '',
   catalog_files: [] as { name: string; url: string }[],
   language: 'pt-BR',
   handoff_enabled: true,
@@ -71,6 +76,10 @@ export default function AgentScreen() {
       appointment_reminders_enabled: config.appointment_reminders_enabled ?? true,
       reminder1_minutes:    config.reminder1_minutes ?? 180,
       reminder2_minutes:    config.reminder2_minutes ?? 30,
+      allow_price_list:     config.allow_price_list == null ? 'inherit' : (config.allow_price_list ? 'on' : 'off'),
+      collect_last_name:    config.collect_last_name == null ? 'inherit' : (config.collect_last_name ? 'on' : 'off'),
+      reminder_return_template:      config.reminder_return_template ?? '',
+      reminder_appointment_template: config.reminder_appointment_template ?? '',
       catalog_files:        config.catalog_files ?? [],
       language:             config.language ?? 'pt-BR',
       handoff_enabled:              config.handoff_enabled ?? true,
@@ -86,8 +95,20 @@ export default function AgentScreen() {
 
   const set = (key: keyof typeof BLANK, val: any) => setForm((f) => ({ ...f, [key]: val }))
 
+  // Tri-state selects → null/true/false, empty templates → null (inherit global).
+  const toPayload = (f: typeof form) => {
+    const triState = (v: 'inherit' | 'on' | 'off') => (v === 'inherit' ? null : v === 'on')
+    return {
+      ...f,
+      allow_price_list: triState(f.allow_price_list),
+      collect_last_name: triState(f.collect_last_name),
+      reminder_return_template: f.reminder_return_template.trim() || null,
+      reminder_appointment_template: f.reminder_appointment_template.trim() || null,
+    }
+  }
+
   const saveMutation = useMutation({
-    mutationFn: (data: typeof form) => agentApi.updateConfig(data),
+    mutationFn: (data: typeof form) => agentApi.updateConfig(toPayload(data)),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['agent-config'] })
       toast.show('Configuração salva com sucesso!', 'success')
@@ -313,6 +334,54 @@ export default function AgentScreen() {
               )}
             </View>
 
+            {/* ── Regras do agente (deste negócio) ── */}
+            <View style={s.remindersSection}>
+              <View>
+                <Text style={s.label}>Regras do agente</Text>
+                <Text style={s.hint}>Específico deste negócio. "Padrão" usa a config global da plataforma.</Text>
+              </View>
+              <TriChoice
+                label="Enviar tabela de preços"
+                hint="Se o bot pode mandar a lista de serviços/preços quando o cliente pedir."
+                value={form.allow_price_list}
+                onChange={(v) => set('allow_price_list', v)}
+              />
+              <TriChoice
+                label="Coletar sobrenome do cliente"
+                hint="Se o bot deve perguntar e salvar o sobrenome nas conversas."
+                value={form.collect_last_name}
+                onChange={(v) => set('collect_last_name', v)}
+              />
+            </View>
+
+            {/* ── Textos de lembrete (override deste negócio) ── */}
+            <View style={s.remindersSection}>
+              <View>
+                <Text style={s.label}>Textos dos lembretes</Text>
+                <Text style={s.hint}>
+                  Deixe em branco para usar o padrão da plataforma. Variáveis: {'{cliente} {servico} {negocio} {dias}'} (retorno) · {'{quando} {hora}'} (véspera).
+                </Text>
+              </View>
+              <Label>Lembrete de retorno (pós-atendimento)</Label>
+              <Input
+                value={form.reminder_return_template}
+                onChangeText={(v) => set('reminder_return_template', v)}
+                placeholder="(usando o texto padrão da plataforma)"
+                multiline
+                numberOfLines={4}
+                style={s.textarea}
+              />
+              <Label>Lembrete de agendamento (véspera)</Label>
+              <Input
+                value={form.reminder_appointment_template}
+                onChangeText={(v) => set('reminder_appointment_template', v)}
+                placeholder="(usando o texto padrão da plataforma)"
+                multiline
+                numberOfLines={3}
+                style={s.textarea}
+              />
+            </View>
+
             {/* ── Atendimento humano ── */}
             <View style={s.handoffSection}>
               <View>
@@ -479,6 +548,41 @@ function Label({ children, hint }: { children: React.ReactNode; hint?: string })
   )
 }
 
+// Tri-state selector: Padrão (inherit) / Sim (on) / Não (off).
+function TriChoice({
+  label, hint, value, onChange,
+}: {
+  label: string
+  hint?: string
+  value: 'inherit' | 'on' | 'off'
+  onChange: (v: 'inherit' | 'on' | 'off') => void
+}) {
+  const opts: { key: 'inherit' | 'on' | 'off'; label: string }[] = [
+    { key: 'inherit', label: 'Padrão' },
+    { key: 'on', label: 'Sim' },
+    { key: 'off', label: 'Não' },
+  ]
+  return (
+    <View>
+      <Label hint={hint}>{label}</Label>
+      <View style={s.segRow}>
+        {opts.map((o) => {
+          const active = value === o.key
+          return (
+            <TouchableOpacity
+              key={o.key}
+              onPress={() => onChange(o.key)}
+              style={[s.segBtn, active && s.segBtnActive]}
+            >
+              <Text style={[s.segText, active && s.segTextActive]}>{o.label}</Text>
+            </TouchableOpacity>
+          )
+        })}
+      </View>
+    </View>
+  )
+}
+
 const s = StyleSheet.create({
   container:         { flex: 1, backgroundColor: colors.background },
   tabs:              { flexDirection: 'row', borderBottomWidth: 1, borderBottomColor: colors.border, backgroundColor: colors.surface },
@@ -491,6 +595,11 @@ const s = StyleSheet.create({
   tipTitle:          { fontSize: font.md, fontWeight: '700', color: colors.primaryDark },
   tipText:           { fontSize: font.sm, color: colors.primaryDark, lineHeight: 20 },
   label:             { fontSize: font.md, fontWeight: '600', color: colors.text },
+  segRow:            { flexDirection: 'row', gap: spacing.xs },
+  segBtn:            { flex: 1, paddingVertical: spacing.sm, alignItems: 'center', borderRadius: radius.md, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surface },
+  segBtnActive:      { borderColor: colors.primary, backgroundColor: colors.primaryLight },
+  segText:           { fontSize: font.sm, color: colors.textSecondary, fontWeight: '500' },
+  segTextActive:     { color: colors.primary, fontWeight: '700' },
   hint:              { fontSize: font.sm, color: colors.textSecondary },
   textarea:          { height: undefined, paddingVertical: spacing.md, textAlignVertical: 'top' },
   typeScroll:        { marginBottom: spacing.xs },

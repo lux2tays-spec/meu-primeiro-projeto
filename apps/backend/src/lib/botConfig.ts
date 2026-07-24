@@ -33,6 +33,68 @@ const DEFAULTS: AiConfig = {
 
 const CACHE_KEY = 'ai:config'
 
+// ── Bot runtime + behaviour config (Root Admin, global) ──────────────────────
+// Everything here used to be hardcoded in bot.ts / botDispatcher.ts / reminder
+// jobs. Now it lives in platform_settings 'bot_config' so the platform owner can
+// tune it without a deploy. Per-tenant overrides (allow_price_list, etc.) live in
+// agent_config and fall back to the *_default values below.
+
+export type BotConfig = {
+  // operational limits
+  max_tokens: number
+  max_tool_turns: number
+  sender_rate_limit: number      // max bot runs per customer phone per tenant per hour
+  dedup_ttl_seconds: number      // inbound message-id dedup window
+  debounce_ms: number            // wait window to group rapid-fire messages
+  hybrid_sales_signal: string    // regex: which messages route to the stronger model
+  // base behaviour rules (global)
+  never_reveal_ai: boolean
+  allow_payment_talk: boolean    // may the bot discuss payment/pix/discounts?
+  max_reply_lines: number        // "mensagens de no máximo N linhas"
+  base_extra_instructions: string
+  // global defaults for per-tenant toggles (agent_config overrides these)
+  allow_price_list_default: boolean
+  collect_last_name_default: boolean
+  // global reminder templates (agent_config may override per tenant)
+  reminder_return_template: string
+  reminder_appointment_template: string
+}
+
+// Defaults preserve the previous hardcoded behaviour exactly.
+export const BOT_DEFAULTS: BotConfig = {
+  max_tokens: 1024,
+  max_tool_turns: 6,
+  sender_rate_limit: 40,
+  dedup_ttl_seconds: 60 * 60,
+  debounce_ms: 7000,
+  hybrid_sales_signal: 'agend|marc|hor[aá]ri|pre[cç]o|valor|quero|fech|confirm|dispon|cancel|remarc|reserv|quanto|orç',
+  never_reveal_ai: true,
+  allow_payment_talk: false,
+  max_reply_lines: 4,
+  base_extra_instructions: '',
+  allow_price_list_default: false,
+  collect_last_name_default: true,
+  reminder_return_template:
+    'Olá, {cliente}! 😊\n\nTudo bem? Notamos que já faz {dias} desde o seu último *{servico}* aqui na *{negocio}*.\n\nQue tal agendar um novo atendimento? Estamos à disposição! 📅\n\nResponda esta mensagem para marcar seu horário. 😊',
+  reminder_appointment_template:
+    'Oi {cliente}! 😊 Passando pra confirmar seu *{servico}* {quando} às *{hora}* na {negocio}. Está confirmado? Responde *SIM* pra confirmar 👍 ou me chama se precisar remarcar.',
+}
+
+const BOT_CACHE_KEY = 'bot:config'
+
+export async function getBotConfig(): Promise<BotConfig> {
+  const cached = await redis.get(BOT_CACHE_KEY)
+  if (cached) return JSON.parse(cached)
+  const { rows: [row] } = await db.query("SELECT value FROM platform_settings WHERE key = 'bot_config'")
+  const merged: BotConfig = { ...BOT_DEFAULTS, ...(row?.value ?? {}) }
+  await redis.setex(BOT_CACHE_KEY, 60, JSON.stringify(merged))
+  return merged
+}
+
+export async function invalidateBotConfig(): Promise<void> {
+  await redis.del(BOT_CACHE_KEY)
+}
+
 export async function getAiConfig(): Promise<AiConfig> {
   const cached = await redis.get(CACHE_KEY)
   if (cached) return JSON.parse(cached)
@@ -51,13 +113,27 @@ export async function invalidateAiConfig(): Promise<void> {
   await redis.del(CACHE_KEY)
 }
 
-// Sales/booking intent signals — when present, hybrid mode uses the stronger model.
-const SALES_SIGNAL = /agend|marc|hor[aá]ri|pre[cç]o|valor|quero|fech|confirm|dispon|cancel|remarc|reserv|quanto|orç/i
+// Sales/booking intent signals — when present, hybrid mode uses the stronger
+// model. The pattern is configurable via bot_config.hybrid_sales_signal; this is
+// the fallback if a bad/empty regex is provided.
+const SALES_SIGNAL_FALLBACK = /agend|marc|hor[aá]ri|pre[cç]o|valor|quero|fech|confirm|dispon|cancel|remarc|reserv|quanto|orç/i
 
-/** Resolve which model to use for a given incoming message under the current config. */
-export function resolveModel(cfg: AiConfig, message: string): string {
+function salesSignalRegex(pattern?: string): RegExp {
+  if (!pattern) return SALES_SIGNAL_FALLBACK
+  try {
+    return new RegExp(pattern, 'i')
+  } catch {
+    return SALES_SIGNAL_FALLBACK
+  }
+}
+
+/**
+ * Resolve which model to use for a given incoming message under the current
+ * config. `salesSignal` comes from bot_config.hybrid_sales_signal (optional).
+ */
+export function resolveModel(cfg: AiConfig, message: string, salesSignal?: string): string {
   if (cfg.mode === 'hybrid') {
-    return SALES_SIGNAL.test(message || '') ? cfg.model : cfg.model_simple
+    return salesSignalRegex(salesSignal).test(message || '') ? cfg.model : cfg.model_simple
   }
   return cfg.model
 }

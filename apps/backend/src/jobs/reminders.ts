@@ -1,5 +1,7 @@
 import { db } from '../lib/db'
 import { evolutionSend } from '../services/evolution'
+import { getBotConfig } from '../lib/botConfig'
+import { renderReminderTemplate } from '../lib/reminderText'
 
 const REMINDER_QUERY = `
   SELECT
@@ -10,11 +12,13 @@ const REMINDER_QUERY = `
     s.name        AS service_name,
     s.reminder_days,
     t.name        AS business_name,
+    ac.reminder_return_template,
     wi.instance_name
   FROM appointments a
   JOIN services         s  ON s.id = a.service_id
   JOIN customers        c  ON c.id = a.customer_id
   JOIN tenants          t  ON t.id = a.tenant_id
+  LEFT JOIN agent_config ac ON ac.tenant_id = a.tenant_id
   JOIN whatsapp_instances wi ON wi.tenant_id = a.tenant_id AND wi.status = 'connected'
   WHERE
     a.status = 'completed'
@@ -26,14 +30,16 @@ const REMINDER_QUERY = `
     )
 `
 
-function buildMessage(customerName: string, serviceName: string, reminderDays: number, businessName: string): string {
-  return (
-    `Olá, ${customerName}! 😊\n\n` +
-    `Tudo bem? Notamos que já faz ${reminderDays} ${reminderDays === 1 ? 'dia' : 'dias'} desde o seu último ` +
-    `*${serviceName}* aqui na *${businessName}*.\n\n` +
-    `Que tal agendar um novo atendimento? Estamos à disposição! 📅\n\n` +
-    `Responda esta mensagem para marcar seu horário. 😊`
-  )
+// Template resolution: per-tenant override (agent_config) → global (bot_config).
+function buildMessage(row: any, globalTemplate: string): string {
+  const template = (row.reminder_return_template?.trim()) || globalTemplate
+  const days = `${row.reminder_days} ${row.reminder_days === 1 ? 'dia' : 'dias'}`
+  return renderReminderTemplate(template, {
+    cliente: row.customer_name ?? '',
+    servico: row.service_name ?? '',
+    negocio: row.business_name ?? '',
+    dias: days,
+  })
 }
 
 export async function runReminderJob() {
@@ -43,13 +49,10 @@ export async function runReminderJob() {
   const { rows } = await db.query(REMINDER_QUERY)
   if (rows.length === 0) return
 
+  const botCfg = await getBotConfig()
+
   for (const row of rows) {
-    const message = buildMessage(
-      row.customer_name,
-      row.service_name,
-      row.reminder_days,
-      row.business_name,
-    )
+    const message = buildMessage(row, botCfg.reminder_return_template)
 
     let status = 'sent'
     let errorMessage: string | null = null

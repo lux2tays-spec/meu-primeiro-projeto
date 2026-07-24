@@ -24,6 +24,11 @@ const BLANK = {
   instagram_url: '', google_maps_url: '', website_url: '', whatsapp_number: '',
   tone: 'friendly', custom_instructions: '', system_prompt: '',
   appointment_reminders_enabled: true, reminder1_minutes: 180, reminder2_minutes: 30,
+  // Tri-state ('inherit' = usar padrão global do Root Admin).
+  allow_price_list: 'inherit' as 'inherit' | 'on' | 'off',
+  collect_last_name: 'inherit' as 'inherit' | 'on' | 'off',
+  reminder_return_template: '',
+  reminder_appointment_template: '',
   catalog_files: [] as { name: string; url: string }[],
   language: 'pt-BR',
   handoff_enabled: true,
@@ -65,6 +70,10 @@ export default function AgentPage() {
       appointment_reminders_enabled: config.appointment_reminders_enabled ?? true,
       reminder1_minutes:    config.reminder1_minutes ?? 180,
       reminder2_minutes:    config.reminder2_minutes ?? 30,
+      allow_price_list:     config.allow_price_list == null ? 'inherit' : (config.allow_price_list ? 'on' : 'off'),
+      collect_last_name:    config.collect_last_name == null ? 'inherit' : (config.collect_last_name ? 'on' : 'off'),
+      reminder_return_template:      config.reminder_return_template ?? '',
+      reminder_appointment_template: config.reminder_appointment_template ?? '',
       catalog_files:        config.catalog_files ?? [],
       language:             config.language ?? 'pt-BR',
       handoff_enabled:              config.handoff_enabled ?? true,
@@ -80,8 +89,21 @@ export default function AgentPage() {
 
   const set = (key: keyof typeof BLANK, val: any) => setForm((f) => ({ ...f, [key]: val }))
 
+  // Convert tri-state selects → null/true/false and empty templates → null
+  // (null means "inherit the global default from bot_config").
+  const toPayload = (f: typeof BLANK) => {
+    const triState = (v: 'inherit' | 'on' | 'off') => (v === 'inherit' ? null : v === 'on')
+    return {
+      ...f,
+      allow_price_list: triState(f.allow_price_list),
+      collect_last_name: triState(f.collect_last_name),
+      reminder_return_template: f.reminder_return_template.trim() || null,
+      reminder_appointment_template: f.reminder_appointment_template.trim() || null,
+    }
+  }
+
   const saveMutation = useMutation({
-    mutationFn: () => agentApi.updateConfig(form),
+    mutationFn: () => agentApi.updateConfig(toPayload(form)),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['agent-config'] })
       setSaved(true)
@@ -300,6 +322,60 @@ export default function AgentPage() {
                   </Field>
                 </div>
               )}
+            </div>
+
+            {/* ── Regras do agente (deste negócio) ── */}
+            <div className="border-t border-gray-100 pt-5 space-y-4">
+              <div>
+                <p className="text-sm font-semibold text-gray-900">Regras do agente</p>
+                <p className="text-xs text-gray-400 mt-0.5">
+                  Ajustes específicos deste negócio. "Herdar padrão" usa a configuração global da plataforma.
+                </p>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <Field label="Enviar tabela de preços" hint="Se o bot pode mandar a lista completa de serviços/preços quando o cliente pedir.">
+                  <select value={form.allow_price_list} onChange={(e) => set('allow_price_list', e.target.value)} className={inputCls}>
+                    <option value="inherit">Herdar padrão da plataforma</option>
+                    <option value="on">Sim, pode enviar</option>
+                    <option value="off">Não enviar</option>
+                  </select>
+                </Field>
+                <Field label="Coletar sobrenome do cliente" hint="Se o bot deve perguntar e salvar o sobrenome nas conversas.">
+                  <select value={form.collect_last_name} onChange={(e) => set('collect_last_name', e.target.value)} className={inputCls}>
+                    <option value="inherit">Herdar padrão da plataforma</option>
+                    <option value="on">Sim, coletar</option>
+                    <option value="off">Não coletar</option>
+                  </select>
+                </Field>
+              </div>
+            </div>
+
+            {/* ── Textos de lembrete (override deste negócio) ── */}
+            <div className="border-t border-gray-100 pt-5 space-y-4">
+              <div>
+                <p className="text-sm font-semibold text-gray-900">Textos dos lembretes</p>
+                <p className="text-xs text-gray-400 mt-0.5">
+                  Deixe em branco para usar o texto padrão da plataforma. Variáveis: <code>{'{cliente}'}</code> <code>{'{servico}'}</code> <code>{'{negocio}'}</code> <code>{'{dias}'}</code> (retorno) · <code>{'{quando}'}</code> <code>{'{hora}'}</code> (véspera).
+                </p>
+              </div>
+              <Field label="Lembrete de retorno (pós-atendimento)">
+                <textarea
+                  value={form.reminder_return_template}
+                  onChange={(e) => set('reminder_return_template', e.target.value)}
+                  rows={4}
+                  className="w-full px-4 py-3 rounded-xl border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary resize-none"
+                  placeholder="(usando o texto padrão da plataforma)"
+                />
+              </Field>
+              <Field label="Lembrete de agendamento (véspera)">
+                <textarea
+                  value={form.reminder_appointment_template}
+                  onChange={(e) => set('reminder_appointment_template', e.target.value)}
+                  rows={3}
+                  className="w-full px-4 py-3 rounded-xl border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary resize-none"
+                  placeholder="(usando o texto padrão da plataforma)"
+                />
+              </Field>
             </div>
 
             {/* ── Atendimento humano ── */}

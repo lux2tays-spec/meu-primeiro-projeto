@@ -7,12 +7,11 @@ import {
   resolveService, resolveProfessional, findAvailableSlots,
   bookAppointment, cancelUpcomingAppointment,
 } from './scheduling'
-import { getAiConfig, resolveModel } from '../lib/botConfig'
+import { getAiConfig, resolveModel, getBotConfig, type BotConfig } from '../lib/botConfig'
 import { recordUsage, monthlySpend } from '../lib/aiUsage'
 import { sendInviteForAppointment, sendInvitesForCustomerUpcoming } from './appointmentInvite'
 
 const TZ = 'America/Sao_Paulo'
-const MAX_TOOL_TURNS = 6
 
 // ── Context loaders ─────────────────────────────────────────────────────────
 
@@ -27,6 +26,7 @@ async function getTenantContext(tenantId: string) {
        ac.business_type, ac.address, ac.neighborhood, ac.city, ac.state,
        ac.instagram_url, ac.google_maps_url, ac.website_url, ac.whatsapp_number,
        ac.custom_instructions, ac.return_reminder_days,
+       ac.allow_price_list, ac.collect_last_name,
        t.name AS business_name, t.plan,
        btt.system_prompt AS template_system_prompt,
        btt.custom_instructions AS template_custom_instructions,
@@ -136,14 +136,23 @@ function dateReference(): string {
 
 // ── System prompt (sales-oriented, human-like) ──────────────────────────────
 
-function buildSystemPrompt(ctx: any, live: any, profile: any, customerName: string, customerPhone: string, hasHistory: boolean): { stable: string; volatile: string } {
+function buildSystemPrompt(ctx: any, live: any, profile: any, customerName: string, customerLastName: string, customerPhone: string, hasHistory: boolean, botCfg: BotConfig): { stable: string; volatile: string } {
   const loc = [ctx.address, ctx.neighborhood, ctx.city, ctx.state].filter(Boolean).join(', ')
   const links: string[] = []
   if (ctx.instagram_url) links.push(`Instagram: ${ctx.instagram_url}`)
   if (ctx.google_maps_url) links.push(`Google Maps: ${ctx.google_maps_url}`)
   if (ctx.website_url) links.push(`Site: ${ctx.website_url}`)
 
+  // Behaviour toggles: per-tenant override (agent_config) falls back to the
+  // global default (bot_config). `?? ` keeps a tenant's explicit false.
+  const allowPriceList = ctx.allow_price_list ?? botCfg.allow_price_list_default
+  const collectLastName = ctx.collect_last_name ?? botCfg.collect_last_name_default
+
   const nameIsKnown = customerName && customerName !== customerPhone
+  // We know the first name but still lack the surname — the bot should ask for
+  // just the surname once (very common: contact gave only their first name).
+  // Only when surname collection is enabled for this tenant.
+  const lastNameMissing = collectLastName && nameIsKnown && !(customerLastName && customerLastName.trim())
   const effectiveTone = ctx.tone || ctx.template_tone || 'amigável, caloroso e profissional'
   const templatePrompt = ctx.template_system_prompt || ''
   const tenantPrompt = ctx.system_prompt || ''
@@ -155,7 +164,7 @@ function buildSystemPrompt(ctx: any, live: any, profile: any, customerName: stri
     : ''
 
   // STABLE part — same for every customer of this tenant (cacheable prefix).
-  const stable = `Você é um(a) atendente HUMANO(A) de WhatsApp do(a) "${ctx.business_name}"${ctx.business_type ? ` (${ctx.business_type})` : ''}. NUNCA revele que é uma IA ou robô. Fale como uma pessoa real da equipe.
+  const stable = `Você é um(a) atendente de WhatsApp do(a) "${ctx.business_name}"${ctx.business_type ? ` (${ctx.business_type})` : ''}.${botCfg.never_reveal_ai ? ' Você é um(a) atendente HUMANO(A). NUNCA revele que é uma IA ou robô. Fale como uma pessoa real da equipe.' : ''}
 Tom: ${effectiveTone}. Idioma: ${ctx.language || 'Português do Brasil'}.
 
 ${templatePrompt ? templatePrompt + '\n' : ''}${tenantPrompt ? tenantPrompt + '\n' : ''}
@@ -168,9 +177,10 @@ Você é consultivo e conduz a conversa para o FECHAMENTO. Não seja passivo. Se
 - Contorne objeções com empatia (preço → valor/benefício; "vou pensar" → ofereça segurar um horário sem compromisso).
 - Feche de forma proativa: confirme serviço, dia e hora e AGENDE de fato.
 
-## ABORDAGEM CONSULTIVA (NÃO despeje catálogo)
-- NUNCA envie a lista completa de serviços nem uma "tabela de preços" de uma vez, mesmo se o cliente pedir "quais serviços vocês têm" ou "me manda a tabela". Em vez disso, faça 1 pergunta para entender a necessidade ("Me conta o que você está buscando que eu já te indico o ideal 😊") e então recomende 1 ou 2 serviços certos.
-- Só cite preço de um serviço específico quando for relevante para a decisão (ex.: o cliente perguntou daquele serviço ou você já recomendou um). Não liste vários preços.
+## ABORDAGEM CONSULTIVA
+${allowPriceList
+  ? '- Você PODE enviar a lista de serviços e os preços quando o cliente pedir ("quais serviços vocês têm", "me manda a tabela"). Mesmo assim, prefira entender a necessidade e destacar o serviço ideal — não deixe a conversa virar só uma tabela.'
+  : '- NUNCA envie a lista completa de serviços nem uma "tabela de preços" de uma vez, mesmo se o cliente pedir "quais serviços vocês têm" ou "me manda a tabela". Em vez disso, faça 1 pergunta para entender a necessidade ("Me conta o que você está buscando que eu já te indico o ideal 😊") e então recomende 1 ou 2 serviços certos.\n- Só cite preço de um serviço específico quando for relevante para a decisão (ex.: o cliente perguntou daquele serviço ou você já recomendou um). Não liste vários preços.'}
 - Sempre que couber, faça upsell de um serviço correlacionado ("quem faz X costuma gostar de Y — quer incluir?"), de forma natural e sem empurrar.
 
 ## IDENTIDADE DO NEGÓCIO
@@ -190,7 +200,7 @@ Você NÃO consegue realizar nenhuma ação sozinho(a). Consultar horários, age
 - check_availability: CHAME SEMPRE antes de mencionar ou oferecer QUALQUER horário. Nunca invente horários livres.
 - book_appointment: a ÚNICA forma de agendar. CHAME após confirmar serviço + data + hora com o cliente.
 - cancel_appointment: a ÚNICA forma de cancelar o próximo agendamento do cliente.
-- save_customer_info: CHAME IMEDIATAMENTE (na mesma resposta) quando o cliente informar NOME, SOBRENOME, E-MAIL ou um serviço de interesse — mesmo que ele não vá fechar agora. SEMPRE colete nome E sobrenome: ao pedir o nome, peça "nome e sobrenome" com naturalidade; se o cliente disser só o primeiro nome, agradeça e pergunte o sobrenome também (uma única vez, sem insistir).
+- save_customer_info: CHAME IMEDIATAMENTE (na mesma resposta) quando o cliente informar NOME${collectLastName ? ', SOBRENOME' : ''}, E-MAIL ou um serviço de interesse — mesmo que ele não vá fechar agora.${collectLastName ? ' SEMPRE colete nome E sobrenome: ao pedir o nome, peça "nome e sobrenome" com naturalidade; se o cliente disser só o primeiro nome, agradeça e pergunte o sobrenome também (uma única vez, sem insistir).' : ''}
 - oferecer_especialista: CHAME quando você não conseguir resolver — cliente insatisfeito/reclamando, pede um humano/atendente, assunto fora do agendamento, ou você já tentou e não avançou. Ela oferece encaminhar a um especialista da equipe. Prefira SEMPRE tentar ajudar primeiro; só ofereça o especialista quando realmente travar.
 
 ## HONESTIDADE (REGRAS INVIOLÁVEIS)
@@ -198,19 +208,20 @@ Você NÃO consegue realizar nenhuma ação sozinho(a). Consultar horários, age
 - Só diga "dados salvos" / "anotei seus dados" DEPOIS que save_customer_info retornar "ok": true.
 - Se uma ferramenta retornar erro, o resultado é que a ação NÃO FOI FEITA. Seja honesto(a): peça desculpas brevemente e diga que não conseguiu concluir agora e que alguém da equipe vai confirmar com o cliente. É PROIBIDO: dizer que foi um "problema técnico" ou "instabilidade", dizer que "o sistema vai normalizar", prometer "processar depois", ou afirmar que a ação aconteceu.
 - Significado dos erros: "dia_fechado" = o estabelecimento NÃO abre nesse dia da semana (mas abre em outros) — diga CLARAMENTE ao cliente que não atendem nesse dia e informe os dias de atendimento (campo "dias_atendimento"), oferecendo um deles. Ex.: "Nesse dia não atendemos 😊 Funcionamos domingo e segunda. Quer que eu veja um horário nesses dias?". "sem_profissional" ou "sem_horario_config" = a agenda deste estabelecimento ainda não está configurada — NÃO ofereça nem confirme horários; diga que vai verificar a agenda e que alguém da equipe confirma o horário em seguida. "horario_indisponivel" = aquele horário foi ocupado — consulte check_availability e ofereça outro. "dia_bloqueado" = o estabelecimento/profissional NÃO atende nessa data (folga/bloqueio) — diga honestamente que essa data não está disponível e ofereça outra data. "servico_nao_encontrado" = confirme com o cliente qual serviço ele quer (use os nomes da lista de serviços).
-- Você NÃO tem como gerar link de pagamento, cobrar, dar desconto, parcelar ou enviar boleto/PIX. NUNCA ofereça nem prometa nada disso. Pagamento e valores especiais são tratados diretamente com o estabelecimento.
-- Nunca prometa nenhuma ação futura que você não consegue executar com as ferramentas listadas acima.
+${botCfg.allow_payment_talk ? '' : '- Você NÃO tem como gerar link de pagamento, cobrar, dar desconto, parcelar ou enviar boleto/PIX. NUNCA ofereça nem prometa nada disso. Pagamento e valores especiais são tratados diretamente com o estabelecimento.\n'}- Nunca prometa nenhuma ação futura que você não consegue executar com as ferramentas listadas acima.
 
 ## REGRAS GERAIS
-- Estilo WhatsApp: mensagens CURTAS e humanas, no máximo 2-4 linhas. Emojis com moderação. Nunca mande textão.
+- Estilo WhatsApp: mensagens CURTAS e humanas, no máximo ${botCfg.max_reply_lines} linha${botCfg.max_reply_lines === 1 ? '' : 's'}. Emojis com moderação. Nunca mande textão.
 - Nunca repita perguntas já respondidas. Lembre de tudo que foi dito.
 - Confirme serviço + dia + hora antes de agendar, e agende de fato com a ferramenta.
-${templateInstructions ? '\n## INSTRUÇÕES DO TIPO DE NEGÓCIO\n' + templateInstructions : ''}${tenantInstructions ? '\n## INSTRUÇÕES DO ESTABELECIMENTO\n' + tenantInstructions : ''}`.trim()
+${botCfg.base_extra_instructions?.trim() ? '\n## INSTRUÇÕES-BASE (PLATAFORMA)\n' + botCfg.base_extra_instructions.trim() : ''}${templateInstructions ? '\n## INSTRUÇÕES DO TIPO DE NEGÓCIO\n' + templateInstructions : ''}${tenantInstructions ? '\n## INSTRUÇÕES DO ESTABELECIMENTO\n' + tenantInstructions : ''}`.trim()
 
   // VOLATILE part — customer-specific, changes per conversation (not cached).
   const volatile = `## CLIENTE ATUAL
 Telefone: ${customerPhone}
-${nameIsKnown ? `Nome: ${customerName}` : 'Nome: ainda não informado — pergunte o nome e o sobrenome de forma natural em algum momento (e salve com save_customer_info).'}${interestLine}
+${nameIsKnown
+  ? `Nome: ${customerName}${customerLastName && customerLastName.trim() ? ' ' + customerLastName.trim() : ''}`
+  : `Nome: ainda não informado — pergunte o ${collectLastName ? 'nome e o sobrenome' : 'nome'} de forma natural em algum momento (e salve com save_customer_info).`}${interestLine}
 Histórico:
 ${formatPastAppointments(profile.history)}
 
@@ -218,7 +229,8 @@ ${formatPastAppointments(profile.history)}
 ${hasHistory
   ? '- CONVERSA EM ANDAMENTO: você JÁ se apresentou. NÃO cumprimente de novo ("Olá", "Bem-vindo") nem se apresente. Continue direto.'
   : '- PRIMEIRA MENSAGEM: cumprimente de forma calorosa e breve, uma única vez.'}
-${nameIsKnown ? `- O cliente se chama "${customerName}". NUNCA pergunte o nome de novo.` : ''}`.trim()
+${nameIsKnown ? `- O cliente se chama "${customerName}". NUNCA pergunte o PRIMEIRO nome de novo.` : ''}
+${lastNameMissing ? '- Você ainda NÃO tem o SOBRENOME dele. Em um momento natural da conversa (não precisa ser agora, nem repita se ele desconversar), pergunte o sobrenome uma única vez — ex.: "Ah, e qual o seu sobrenome? 😊" — e salve com save_customer_info assim que ele responder.' : ''}`.trim()
 
   return { stable, volatile }
 }
@@ -475,10 +487,11 @@ export async function runBot(params: {
   customerMessage: string
   customerId?: string
   customerName?: string
+  customerLastName?: string | null
   customerPhone?: string
   image?: { base64: string; mediaType: string }
 }): Promise<BotReply> {
-  const { tenantId, conversationId, customerMessage, customerId, customerName = '', customerPhone = '', image } = params
+  const { tenantId, conversationId, customerMessage, customerId, customerName = '', customerLastName = '', customerPhone = '', image } = params
 
   // The webhook always resolves/creates the customer before dispatching; if this
   // ever regresses, surface it loudly — without customerId every action tool fails.
@@ -495,13 +508,13 @@ export async function runBot(params: {
   if (!context) throw new Error('Tenant config not found')
 
   // Resolve the model + API key from the Root Admin config (single/hybrid) for this message.
-  const aiConfig = await getAiConfig()
+  const [aiConfig, botCfg] = await Promise.all([getAiConfig(), getBotConfig()])
   // API key comes from the Root Admin panel; fall back to env for existing deployments.
   const anthropic = new Anthropic({
     apiKey: aiConfig.api_key || process.env.ANTHROPIC_API_KEY,
     ...(aiConfig.base_url ? { baseURL: aiConfig.base_url } : {}),
   })
-  let model = resolveModel(aiConfig, customerMessage)
+  let model = resolveModel(aiConfig, customerMessage, botCfg.hybrid_sales_signal)
   // Monthly cost cap per plan (0 = unlimited): downgrade to the cheapest model
   // when over the cap, and HARD-STOP (no model call at all) at 1.5× the cap so
   // a runaway/abused tenant can never generate unbounded spend.
@@ -522,7 +535,7 @@ export async function runBot(params: {
   // Keep the bot fast/cheap: no extended thinking (haiku has none; disable it on others).
   const thinkingOff = !model.startsWith('claude-haiku')
 
-  const { stable, volatile } = buildSystemPrompt(context, live, profile, customerName, customerPhone, history.length > 0)
+  const { stable, volatile } = buildSystemPrompt(context, live, profile, customerName, customerLastName ?? '', customerPhone, history.length > 0, botCfg)
   // Prompt caching: the stable per-tenant prefix is cached; the volatile block is not.
   const system: any = [
     { type: 'text', text: stable, cache_control: { type: 'ephemeral' } },
@@ -548,7 +561,7 @@ export async function runBot(params: {
   // Single place to call the model — preserves model-config, prompt caching,
   // thinking-disabled and usage-recording behavior for every request in the loop.
   const callModel = async (toolChoice: any): Promise<any> => {
-    const createParams: any = { model, max_tokens: 1024, system, tools: TOOLS, tool_choice: toolChoice, messages }
+    const createParams: any = { model, max_tokens: botCfg.max_tokens, system, tools: TOOLS, tool_choice: toolChoice, messages }
     if (thinkingOff) createParams.thinking = { type: 'disabled' }
     const response: any = await anthropic.messages.create(createParams)
     recordUsage(tenantId, model, response.usage).catch(() => {})
@@ -558,7 +571,7 @@ export async function runBot(params: {
   const extractText = (response: any): string =>
     response.content.filter((b: any) => b.type === 'text').map((b: any) => b.text).join('\n').trim()
 
-  for (let turn = 0; turn < MAX_TOOL_TURNS; turn++) {
+  for (let turn = 0; turn < botCfg.max_tool_turns; turn++) {
     const response = await callModel({ type: 'auto' })
 
     // Branch on tool_use BLOCKS, not stop_reason — the model can emit a tool_use

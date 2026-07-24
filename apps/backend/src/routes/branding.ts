@@ -1,6 +1,7 @@
 import { FastifyPluginAsync } from 'fastify'
 import { db } from '../lib/db'
 import { getBrandConfig } from '../lib/brandConfig'
+import { getSupportBotConfig } from '../lib/supportBotConfig'
 
 // Public branding — consumed by mobile + tenant-web at runtime so the platform
 // owner can rebrand (name, colors, logo, favicon) WITHOUT a redeploy. Everything
@@ -42,6 +43,19 @@ export const brandingRoutes: FastifyPluginAsync = async (app) => {
       terms_url: brand.terms_url,
       colors,
       assets,
+    })
+  })
+
+  // Public support-bot presence — the landing page shows a floating WhatsApp
+  // button ONLY when the system bot is enabled AND connected (so it never links
+  // to a dead number). Exposes just the digits-only phone; nothing secret.
+  app.get('/support-bot/public', async (_request, reply) => {
+    const cfg = await getSupportBotConfig()
+    const active = cfg.enabled && cfg.status === 'connected' && !!cfg.phone_number
+    reply.header('Cache-Control', 'public, max-age=30')
+    return reply.send({
+      active,
+      phone_number: active ? cfg.phone_number : null,
     })
   })
 
