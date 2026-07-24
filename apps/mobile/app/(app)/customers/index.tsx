@@ -10,6 +10,7 @@ import {
   ScrollView,
   ActivityIndicator,
   Alert,
+  Linking,
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { Ionicons } from '@expo/vector-icons'
@@ -30,6 +31,18 @@ const STATUS_COLOR: Record<string, string> = {
   confirmed: colors.primary,
   completed: colors.success,
   cancelled: colors.danger,
+}
+
+// Open a WhatsApp chat with the customer (digits-only phone → wa.me).
+async function openWhatsApp(phone?: string | null) {
+  const digits = (phone ?? '').replace(/\D/g, '')
+  if (!digits) return
+  const url = `https://wa.me/${digits}`
+  try {
+    await Linking.openURL(url)
+  } catch {
+    Alert.alert('WhatsApp', 'Não foi possível abrir o WhatsApp neste dispositivo.')
+  }
 }
 
 function formatPrice(v: any): string {
@@ -102,10 +115,15 @@ export default function CustomersScreen() {
               </View>
               <View style={styles.info}>
                 <Text style={styles.name}>{customerFullName(item)}</Text>
-                <View style={styles.phoneRow}>
+                <TouchableOpacity
+                  style={styles.phoneRow}
+                  activeOpacity={0.6}
+                  onPress={() => openWhatsApp(item.phone)}
+                  hitSlop={{ top: 8, bottom: 8, left: 4, right: 8 }}
+                >
                   <Ionicons name="logo-whatsapp" size={14} color={colors.whatsapp} />
-                  <Text style={styles.phone}>{item.phone}</Text>
-                </View>
+                  <Text style={[styles.phone, styles.phoneLink]}>{item.phone}</Text>
+                </TouchableOpacity>
                 {item.email ? <Text style={styles.email}>{item.email}</Text> : null}
               </View>
               <Ionicons name="chevron-forward" size={18} color={colors.textDisabled} />
@@ -378,10 +396,14 @@ function CustomerDetailModal({
           ) : (
             <ScrollView showsVerticalScrollIndicator={false}>
               {/* Contact */}
-              <View style={styles.detailContactRow}>
+              <TouchableOpacity
+                style={styles.detailContactRow}
+                activeOpacity={0.6}
+                onPress={() => openWhatsApp(data?.phone)}
+              >
                 <Ionicons name="logo-whatsapp" size={16} color={colors.whatsapp} />
-                <Text style={styles.detailContactText}>{data?.phone}</Text>
-              </View>
+                <Text style={[styles.detailContactText, styles.phoneLink]}>{data?.phone}</Text>
+              </TouchableOpacity>
               {data?.email ? (
                 <View style={styles.detailContactRow}>
                   <Ionicons name="mail-outline" size={16} color={colors.textSecondary} />
@@ -511,6 +533,7 @@ const styles = StyleSheet.create({
   name: { fontSize: font.md, fontWeight: '600', color: colors.text },
   phoneRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 2 },
   phone: { fontSize: font.sm, color: colors.textSecondary },
+  phoneLink: { color: colors.whatsapp, textDecorationLine: 'underline' },
   email: { fontSize: font.sm, color: colors.textSecondary, marginTop: 1 },
   empty: { textAlign: 'center', color: colors.textSecondary, paddingVertical: spacing.xl, fontSize: font.md },
 
