@@ -38,17 +38,22 @@ export default function PhoneChat({ contactName, messages, className = '', label
   const idxRef = useRef(0)
   const reducedRef = useRef(false)
 
-  // Decide once whether we animate at all; then observe visibility.
+  // Decide once whether to soften motion (only affects scroll smoothness); the
+  // conversation itself always plays. NOTE: iOS reports prefers-reduced-motion
+  // as `reduce` under Low Power Mode, so we must NOT gate the whole animation on
+  // it — that made the demo look permanently frozen on many iPhones.
   useEffect(() => {
     reducedRef.current = window.matchMedia('(prefers-reduced-motion: reduce)').matches
-    if (reducedRef.current) return // keep the full static thread
     idxRef.current = 0
     setCount(0)
     const el = rootRef.current
     if (!el) return
+    // Some iOS Chrome/Safari builds fire the observer late; start running by
+    // default and let the observer pause it only when clearly off-screen.
+    setRunning(true)
     const io = new IntersectionObserver(
       (entries) => setRunning(Boolean(entries[0]?.isIntersecting)),
-      { threshold: 0.35 }
+      { threshold: 0.2 }
     )
     io.observe(el)
     return () => io.disconnect()
@@ -56,7 +61,7 @@ export default function PhoneChat({ contactName, messages, className = '', label
 
   // Timed sequence (resumes from idxRef when scrolled back into view).
   useEffect(() => {
-    if (!running || reducedRef.current) return
+    if (!running) return
     let cancelled = false
     let timer: ReturnType<typeof setTimeout>
 

@@ -32,6 +32,7 @@ body {
 }
 .lp-msg { animation: lp-msg 0.28s ease-out both; }
 
-@media (prefers-reduced-motion: reduce) {
-  .lp-dot, .lp-msg { animation: none; }
-}
+/* NOTE: we intentionally do NOT disable these under prefers-reduced-motion.
+   iOS reports `reduce` while in Low Power Mode, which froze the demo on most
+   iPhones. These are small, non-vestibular content animations (typing dots +
+   a gentle bubble fade), so keeping them is a reasonable trade-off. */
