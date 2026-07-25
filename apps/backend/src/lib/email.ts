@@ -98,6 +98,34 @@ export async function sendPasswordResetEmail(to: string, name: string, link: str
   }
 }
 
+export async function sendEmailChangeEmail(to: string, name: string, token: string) {
+  const baseUrl = process.env.TENANT_WEB_URL ?? 'http://localhost:3002'
+  const link = `${baseUrl}/confirmar-troca-email?token=${token}`
+
+  const { transporter, hasSmtp, from } = await getMailer()
+  const info = await transporter.sendMail({
+    from,
+    to,
+    subject: 'Confirme seu novo e-mail — AiConfirma',
+    html: `
+      <div style="font-family:sans-serif;max-width:480px;margin:0 auto">
+        <h2 style="color:#111">Olá, ${escapeHtml(name)}!</h2>
+        <p>Recebemos um pedido para alterar o e-mail de login da sua conta no <strong>AiConfirma</strong> para este endereço.</p>
+        <p>Clique no botão abaixo para confirmar a troca:</p>
+        <a href="${link}"
+           style="display:inline-block;margin:16px 0;padding:14px 28px;background:#6366f1;color:#fff;border-radius:10px;text-decoration:none;font-weight:700;font-size:16px">
+          Confirmar novo e-mail
+        </a>
+        <p style="color:#666;font-size:13px">O link expira em 24 horas. Se você não pediu esta alteração, ignore este e-mail — seu e-mail de login continuará o mesmo.</p>
+      </div>
+    `,
+  })
+
+  if (!hasSmtp) {
+    console.log('[EMAIL DEV] Preview URL:', nodemailer.getTestMessageUrl(info))
+  }
+}
+
 export interface AppointmentInvite {
   to: string
   customerName: string

@@ -4,6 +4,7 @@ import {
   Platform, TouchableOpacity,
 } from 'react-native'
 import { router } from 'expo-router'
+import { Ionicons } from '@expo/vector-icons'
 import { Input } from '@/components/ui/Input'
 import { Button } from '@/components/ui/Button'
 import { BrandLogo } from '@/components/BrandLogo'
@@ -20,6 +21,7 @@ function validateEmail(v: string) {
 export default function LoginScreen() {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
+  const [showPassword, setShowPassword] = useState(false)
   const [errors, setErrors] = useState<{ email?: string; password?: string }>({})
   const [loading, setLoading] = useState(false)
   const [googleLoading, setGoogleLoading] = useState(false)
@@ -126,9 +128,22 @@ export default function LoginScreen() {
             value={password}
             onChangeText={(v) => { setPassword(v); if (errors.password) setErrors((e) => ({ ...e, password: undefined })) }}
             placeholder="••••••••"
-            secureTextEntry
+            secureTextEntry={!showPassword}
             autoComplete="password"
             error={errors.password}
+            rightElement={
+              <TouchableOpacity
+                onPress={() => setShowPassword((v) => !v)}
+                accessibilityLabel={showPassword ? 'Ocultar senha' : 'Mostrar senha'}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              >
+                <Ionicons
+                  name={showPassword ? 'eye-off-outline' : 'eye-outline'}
+                  size={22}
+                  color={colors.textSecondary}
+                />
+              </TouchableOpacity>
+            }
           />
           <TouchableOpacity
             style={styles.forgotLink}

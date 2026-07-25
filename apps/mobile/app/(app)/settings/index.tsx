@@ -169,6 +169,8 @@ export default function SettingsScreen() {
         {/* Conta */}
         <Text style={styles.section}>Conta</Text>
         <Card style={styles.group}>
+          <SettingsRow icon="person-circle-outline" label="Meu Perfil" subtitle="Nome, telefone, e-mail de login e senha" onPress={() => router.push('/(app)/settings/perfil')} />
+          <View style={styles.divider} />
           <SettingsRow icon="log-out-outline" iconColor={colors.danger} label="Sair" showChevron={false} onPress={handleLogout} />
           <View style={styles.divider} />
           <SettingsRow icon="trash-outline" iconColor={colors.danger} label="Excluir conta" subtitle="Apagar permanentemente sua conta e dados" showChevron={false} onPress={handleDeleteAccount} />

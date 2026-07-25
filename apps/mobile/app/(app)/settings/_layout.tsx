@@ -16,6 +16,7 @@ export default function SettingsLayout() {
       <Stack.Screen name="index" options={{ title: 'Configurações' }} />
       <Stack.Screen name="agent" options={{ title: 'Agente IA' }} />
       <Stack.Screen name="business" options={{ title: 'Dados do negócio' }} />
+      <Stack.Screen name="perfil" options={{ title: 'Meu Perfil' }} />
       <Stack.Screen name="services" options={{ title: 'Serviços' }} />
       <Stack.Screen name="staff" options={{ title: 'Colaboradores' }} />
       <Stack.Screen name="hours" options={{ title: 'Horários de Funcionamento' }} />

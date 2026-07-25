@@ -82,6 +82,22 @@ export const authApi = {
   forgotPassword: (email: string) =>
     api.post<{ ok: boolean }>('/auth/forgot-password', { email }),
   deleteAccount: () => api.delete<{ deleted: boolean }>('/auth/account'),
+  me: () =>
+    api.get<{
+      id: string
+      name: string
+      email: string
+      phone: string | null
+      role: string
+      email_verified: boolean
+      business_name: string | null
+    }>('/auth/me'),
+  updateMe: (data: { name?: string; phone?: string }) =>
+    api.patch<{ id: string; name: string; email: string; phone: string | null }>('/auth/me', data),
+  changePassword: (current_password: string, new_password: string) =>
+    api.post<{ message: string }>('/auth/change-password', { current_password, new_password }),
+  changeEmail: (new_email: string, password: string) =>
+    api.post<{ sent: boolean; message: string }>('/auth/change-email', { new_email, password }),
 }
 
 // Tenant
