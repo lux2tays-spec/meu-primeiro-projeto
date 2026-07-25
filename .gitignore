@@ -7,3 +7,4 @@ dist/
 .turbo/
 .logs/
 apps/mobile/assets/*.png
+*.tsbuildinfo
