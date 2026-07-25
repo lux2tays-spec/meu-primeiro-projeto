@@ -313,8 +313,12 @@ export const appointmentRoutes: FastifyPluginAsync = async (app) => {
     const result = await findAvailableSlots(tenant_id!, professional_id, service_id, date)
     if (!result.ok) return reply.send([])
 
-    // Frontend expects `${date}T${HH}:${MM}:00` strings.
-    return reply.send(result.slots.map((hm) => `${date}T${hm}:00`))
+    // Return each slot as a full UTC ISO string (with "Z"). The wall-clock time
+    // is São Paulo (UTC-03), so we build the instant with the -03:00 offset and
+    // serialize to UTC. This satisfies the create endpoint's z.string().datetime()
+    // (which requires "Z") and encodes the correct instant regardless of the
+    // server timezone. Frontends render it back in local (BR) time.
+    return reply.send(result.slots.map((hm) => new Date(`${date}T${hm}:00-03:00`).toISOString()))
   })
 
   // ── Bulk reschedule (#5a) ────────────────────────────────────────────────────
