@@ -5,6 +5,11 @@ export const BASE_URL = process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:300
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const token = await getToken()
   let res: Response
+  // Abort hung requests so the UI never freezes. AbortSignal.timeout() is NOT
+  // available in the Hermes runtime, so we use a manual AbortController + timer
+  // (using AbortSignal.timeout here throws on every request → "falha de conexão").
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), 15000)
   try {
     res = await fetch(`${BASE_URL}${path}`, {
       ...options,
@@ -13,14 +18,15 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
         ...options?.headers,
       },
-      // Abort hung requests so the UI never freezes waiting on the network
-      signal: AbortSignal.timeout(15000),
+      signal: controller.signal,
     })
   } catch (e: any) {
-    if (e?.name === 'TimeoutError' || e?.name === 'AbortError') {
+    if (e?.name === 'AbortError') {
       throw new Error('Tempo de conexão esgotado. Verifique sua internet e tente novamente.')
     }
     throw new Error('Falha de conexão. Verifique sua internet.')
+  } finally {
+    clearTimeout(timer)
   }
 
   if (!res.ok) {
@@ -184,19 +190,24 @@ export const agentApi = {
     const body = new FormData()
     body.append('file', { uri, name: filename, type: mimeType } as any)
     let res: Response
+    // Uploads são mais lentos — timeout de 60s via AbortController (AbortSignal.timeout
+    // não existe no Hermes e lançaria erro em todo envio).
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), 60000)
     try {
       res = await fetch(`${BASE_URL}/agent/config/upload`, {
         method: 'POST',
         headers: token ? { Authorization: `Bearer ${token}` } : {},
         body,
-        // Uploads são mais lentos que requests normais — timeout maior que os 15s do request()
-        signal: AbortSignal.timeout(60000),
+        signal: controller.signal,
       })
     } catch (e: any) {
-      if (e?.name === 'TimeoutError' || e?.name === 'AbortError') {
+      if (e?.name === 'AbortError') {
         throw new Error('Tempo de envio esgotado. Verifique sua internet e tente novamente.')
       }
       throw new Error('Falha de conexão. Verifique sua internet.')
+    } finally {
+      clearTimeout(timer)
     }
     if (!res.ok) {
       const err = await res.json().catch(() => ({}))
@@ -356,6 +367,8 @@ export interface CardTokenInput {
 
 export async function createCardToken(publicKey: string, card: CardTokenInput): Promise<string> {
   let res: Response
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), 15000)
   try {
     res = await fetch(
       `https://api.mercadopago.com/v1/card_tokens?public_key=${encodeURIComponent(publicKey)}`,
@@ -372,11 +385,13 @@ export async function createCardToken(publicKey: string, card: CardTokenInput): 
             identification: { type: 'CPF', number: card.cpf },
           },
         }),
-        signal: AbortSignal.timeout(15000),
+        signal: controller.signal,
       }
     )
   } catch {
     throw new Error('Falha de conexão. Verifique sua internet e tente novamente.')
+  } finally {
+    clearTimeout(timer)
   }
 
   const data: any = await res.json().catch(() => null)
