@@ -76,8 +76,24 @@ export interface SendEmailParams {
   to: string
   subject: string
   html: string
+  /** Plain-text alternative. Auto-derived from the HTML when omitted. */
+  text?: string
   /** iCalendar content — attached as convite.ics (method=REQUEST) when present. */
   ics?: string
+}
+
+// A minimal HTML→text fallback. Sending a multipart (html + text) message helps
+// deliverability (HTML-only mail scores higher on spam filters).
+function htmlToText(html: string): string {
+  return html
+    .replace(/<style[\s\S]*?<\/style>/gi, '')
+    .replace(/<\/(p|div|h[1-6]|li|tr)>/gi, '\n')
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<[^>]+>/g, '')
+    .replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&#39;/g, "'").replace(/&quot;/g, '"')
+    .replace(/\n{3,}/g, '\n\n')
+    .split('\n').map((l) => l.trim()).join('\n')
+    .trim()
 }
 
 /**
@@ -101,6 +117,7 @@ async function sendViaResend(apiKey: string, p: SendEmailParams): Promise<boolea
       to: p.to,
       subject: p.subject,
       html: p.html,
+      text: p.text || htmlToText(p.html),
     }
     if (p.ics) {
       body.attachments = [
@@ -135,6 +152,7 @@ async function sendViaSmtp(p: SendEmailParams): Promise<boolean> {
     to: p.to,
     subject: p.subject,
     html: p.html,
+    text: p.text || htmlToText(p.html),
   }
   if (p.ics) {
     ;(mail as any).icalEvent = { method: 'REQUEST', content: p.ics }
