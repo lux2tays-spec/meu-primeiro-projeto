@@ -298,3 +298,32 @@ export async function cancelUpcomingAppointment(
   deleteCalendarEvent(appt.id).catch(console.error)
   return { ok: true, when: appt.when_fmt }
 }
+
+/** The customer's next upcoming (non-cancelled) appointment with service/professional. */
+export async function getUpcomingAppointment(
+  tenantId: string,
+  customerId: string
+): Promise<{ id: string; serviceId: string; serviceName: string; professionalId: string; professionalName: string | null; when: string } | null> {
+  const { rows: [a] } = await db.query(
+    `SELECT a.id, a.service_id, s.name AS service_name,
+            a.professional_id, p.name AS professional_name,
+            to_char(a.starts_at AT TIME ZONE $3, 'DD/MM HH24:MI') AS when_fmt
+     FROM appointments a
+     JOIN services s ON s.id = a.service_id
+     LEFT JOIN professionals p ON p.id = a.professional_id
+     WHERE a.tenant_id = $1 AND a.customer_id = $2 AND a.status <> 'cancelled' AND a.starts_at >= now()
+     ORDER BY a.starts_at ASC LIMIT 1`,
+    [tenantId, customerId, TZ]
+  )
+  if (!a) return null
+  return { id: a.id, serviceId: a.service_id, serviceName: a.service_name, professionalId: a.professional_id, professionalName: a.professional_name, when: a.when_fmt }
+}
+
+/** Cancel one specific appointment by id (used by reschedule after the new slot is booked). */
+export async function cancelAppointmentById(tenantId: string, appointmentId: string): Promise<void> {
+  await db.query(
+    `UPDATE appointments SET status = 'cancelled' WHERE id = $1 AND tenant_id = $2`,
+    [appointmentId, tenantId]
+  )
+  deleteCalendarEvent(appointmentId).catch(console.error)
+}

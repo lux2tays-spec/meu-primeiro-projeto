@@ -6,6 +6,7 @@ import type { BotMessage } from '@agendabot/shared'
 import {
   resolveService, resolveProfessional, findAvailableSlots,
   bookAppointment, cancelUpcomingAppointment,
+  getUpcomingAppointment, cancelAppointmentById,
 } from './scheduling'
 import { getAiConfig, resolveModel, getBotConfig, type BotConfig } from '../lib/botConfig'
 import { recordUsage, monthlySpend } from '../lib/aiUsage'
@@ -203,7 +204,7 @@ Você NÃO consegue realizar nenhuma ação sozinho(a). Consultar horários, age
 - check_availability: CHAME SEMPRE antes de mencionar ou oferecer QUALQUER horário. Nunca invente horários livres.
 - book_appointment: a ÚNICA forma de agendar. CHAME após confirmar serviço + data + hora com o cliente.
 - cancel_appointment: a ÚNICA forma de cancelar o próximo agendamento do cliente.
-- REMARCAR / REAGENDAR: NÃO existe uma ação única de "remarcar". Para mudar a data/hora, você PRECISA (1) confirmar o novo horário com check_availability, (2) cancelar o atual com cancel_appointment, e (3) criar o novo com book_appointment. Só está remarcado quando book_appointment retornar "ok": true. Se qualquer passo falhar ou você não conseguir, diga a verdade — que NÃO conseguiu remarcar e que alguém da equipe vai confirmar. NUNCA diga "remarcado", "alterado" ou "reagendado" sem o book_appointment ter dado ok nesta conversa.
+- reschedule_appointment: a ÚNICA forma de REMARCAR/REAGENDAR o próximo agendamento para outra data/hora. Confirme a nova data/hora com o cliente (use check_availability antes) e CHAME reschedule_appointment com a nova date/time. Ela reserva o novo horário e só então cancela o antigo. Só diga "remarcado/reagendado" se retornar "ok": true. Se retornar erro, o agendamento ORIGINAL continua — seja honesto: diga que NÃO conseguiu remarcar e ofereça outro horário; NUNCA invente que remarcou.
 - save_customer_info: CHAME IMEDIATAMENTE (na mesma resposta) quando o cliente informar NOME${collectLastName ? ', SOBRENOME' : ''}, E-MAIL ou um serviço de interesse — mesmo que ele não vá fechar agora.${collectLastName ? ' SEMPRE colete nome E sobrenome: ao pedir o nome, peça "nome e sobrenome" com naturalidade; se o cliente disser só o primeiro nome, agradeça e pergunte o sobrenome também (uma única vez, sem insistir).' : ''}
 - oferecer_especialista: CHAME quando você não conseguir resolver — cliente insatisfeito/reclamando, pede um humano/atendente, assunto fora do agendamento, ou você já tentou e não avançou. Ela oferece encaminhar a um especialista da equipe. Prefira SEMPRE tentar ajudar primeiro; só ofereça o especialista quando realmente travar.
 
@@ -289,6 +290,20 @@ const TOOLS: Anthropic.Tool[] = [
     name: 'cancel_appointment',
     description: 'ÚNICA forma de cancelar o próximo agendamento do cliente. CHAME quando o cliente pedir para cancelar. Só confirme o cancelamento se retornar "ok": true.',
     input_schema: { type: 'object', properties: {} },
+  },
+  {
+    name: 'reschedule_appointment',
+    description: 'ÚNICA forma de REMARCAR/REAGENDAR o próximo agendamento do cliente para outra data/hora. Reserva o novo horário e só então cancela o antigo (seguro). Se o cliente não informar o serviço/profissional, mantém os do agendamento atual. Só confirme "remarcado" se retornar "ok": true; se retornar erro, o agendamento ORIGINAL continua intacto — seja honesto e não diga que remarcou.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        date: { type: 'string', description: 'Nova data YYYY-MM-DD' },
+        time: { type: 'string', description: 'Nova hora HH:MM (24h)' },
+        service: { type: 'string', description: 'Serviço (opcional; padrão = o do agendamento atual)' },
+        professional: { type: 'string', description: 'Profissional (opcional; padrão = o do agendamento atual)' },
+      },
+      required: ['date', 'time'],
+    },
   },
   {
     name: 'send_appointment_invite',
@@ -467,6 +482,43 @@ async function runTool(name: string, input: any, ctx: ExecCtx): Promise<any> {
       if (!customerId) return { error: 'sem_cliente' }
       const res = await cancelUpcomingAppointment(tenantId, customerId)
       return res.ok ? { ok: true, cancelado: res.when } : { error: 'sem_agendamento' }
+    }
+
+    if (name === 'reschedule_appointment') {
+      if (!customerId) return { error: 'sem_cliente' }
+      const current = await getUpcomingAppointment(tenantId, customerId)
+      if (!current) return { error: 'sem_agendamento', detalhe: 'O cliente não tem agendamento futuro para remarcar. Ofereça agendar um novo.' }
+
+      // Keep the current service/professional unless the client asked to change them.
+      let serviceId = current.serviceId
+      let serviceName = current.serviceName
+      if (input.service) {
+        const s = await resolveService(tenantId, input.service)
+        if (!s) return { error: 'servico_nao_encontrado' }
+        serviceId = s.id; serviceName = s.name
+      }
+      let professionalId = current.professionalId
+      if (input.professional) {
+        const prof = await resolveProfessional(tenantId, input.professional, serviceId)
+        if (prof.ambiguous) return { error: 'escolha_profissional', profissionais: prof.options?.map((p) => p.name) }
+        if (!prof.professional) return { error: 'sem_profissional', detalhe: 'Profissional não encontrado — a remarcação NÃO foi feita.' }
+        professionalId = prof.professional.id
+      }
+
+      // Book the NEW slot FIRST; only cancel the old one if it succeeds, so a
+      // failure never leaves the customer with no appointment.
+      const res = await bookAppointment({ tenantId, customerId, serviceId, professionalId, date: input.date, time: input.time })
+      if (!res.ok) {
+        if (res.reason === 'unavailable') return { error: 'horario_indisponivel', detalhe: 'O novo horário está ocupado — a remarcação NÃO foi feita; o agendamento atual continua. Consulte check_availability e ofereça outro horário.' }
+        if (res.reason === 'dia_fechado') return { error: 'dia_fechado', dias_atendimento: res.openDays, detalhe: `Não atende nesse dia — a remarcação NÃO foi feita; o agendamento atual continua. Dias: ${res.openDays.join(', ')}.` }
+        if (res.reason === 'sem_horario_config') return { error: 'sem_horario_config', detalhe: 'Agenda não configurada nessa data — a remarcação NÃO foi feita; o agendamento atual continua.' }
+        if (res.reason === 'dia_bloqueado') return { error: 'dia_bloqueado', detalhe: 'Data bloqueada (folga) — a remarcação NÃO foi feita; o agendamento atual continua. Ofereça outra data.' }
+        return { error: 'dados_invalidos', detalhe: 'Não foi possível remarcar — o agendamento atual continua.' }
+      }
+      // New slot secured — cancel the old appointment and send the new invite.
+      await cancelAppointmentById(tenantId, current.id)
+      sendInviteForAppointment(tenantId, res.appointmentId).catch(() => {})
+      return { ok: true, remarcado: { de: current.when, para: { date: input.date, time: input.time }, service: serviceName } }
     }
 
     if (name === 'send_appointment_invite') {
