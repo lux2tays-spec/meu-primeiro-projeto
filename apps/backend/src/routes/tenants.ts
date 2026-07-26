@@ -704,8 +704,23 @@ export const tenantRoutes: FastifyPluginAsync = async (app) => {
   })
 
   app.put<{ Params: { id: string } }>('/customers/:id', async (request, reply) => {
-    const { tenant_id, role } = request.user
-    if (!['owner', 'admin', 'root'].includes(role)) return reply.status(403).send({ error: 'Sem permissão' })
+    const { tenant_id, user_id, role } = request.user
+    if (!['owner', 'admin', 'root'].includes(role)) {
+      // Staff pode editar os dados básicos (nome/sobrenome/e-mail) de um cliente
+      // que atende: precisa existir um agendamento desse cliente criado por ele
+      // OU em que ele é o profissional designado — a mesma regra usada em
+      // canEditAppointment (routes/appointments.ts).
+      const { rows: [rel] } = await db.query(
+        `SELECT 1
+         FROM appointments a
+         JOIN professionals p ON p.id = a.professional_id
+         WHERE a.customer_id = $1 AND a.tenant_id = $2
+           AND (a.created_by = $3 OR p.user_id = $3)
+         LIMIT 1`,
+        [request.params.id, tenant_id, user_id]
+      )
+      if (!rel) return reply.status(403).send({ error: 'Sem permissão' })
+    }
 
     const body = customerUpdateSchema.parse(request.body ?? {})
 

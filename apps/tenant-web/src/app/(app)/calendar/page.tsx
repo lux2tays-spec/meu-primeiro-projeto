@@ -305,7 +305,11 @@ export default function CalendarPage() {
           services={services as any[]}
           professionals={professionals as any[]}
           onClose={() => setEditing(null)}
-          onSaved={() => { setEditing(null); qc.invalidateQueries({ queryKey: ['appointments'] }) }}
+          onSaved={() => {
+            setEditing(null)
+            qc.invalidateQueries({ queryKey: ['appointments'] })
+            qc.invalidateQueries({ queryKey: ['customers'] })
+          }}
         />
       )}
       {bulkOpen && isManager && (
@@ -553,10 +557,14 @@ function EditModal({ appointment: a, services, professionals, onClose, onSaved }
   const [form, setForm] = useState({
     service_id: a.service_id,
     professional_id: a.professional_id,
-    date: toISODate(start),
-    time: `${String(start.getHours()).padStart(2, '0')}:${String(start.getMinutes()).padStart(2, '0')}`,
+    // Data/hora sempre exibidas no fuso de São Paulo — o mesmo usado ao salvar,
+    // para que abrir e salvar sem mexer não desloque o horário.
+    date: start.toLocaleDateString('en-CA', { timeZone: 'America/Sao_Paulo' }),
+    time: start.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', timeZone: 'America/Sao_Paulo' }),
     status: a.status as string,
     notes: a.notes ?? '',
+    customer_name: a.customer_name ?? '',
+    customer_last_name: a.customer_last_name ?? '',
   })
   const [error, setError] = useState('')
 
@@ -565,13 +573,20 @@ function EditModal({ appointment: a, services, professionals, onClose, onSaved }
   const waLink = `https://wa.me/${String(a.customer_phone ?? '').replace(/\D/g, '')}`
 
   function buildStartsAt() {
-    const [y, m, d] = form.date.split('-').map(Number)
-    const [hh, mm] = form.time.split(':').map(Number)
-    return new Date(y, m - 1, d, hh, mm).toISOString()
+    // Horário digitado é horário de São Paulo (UTC−03) → converter para UTC "Z",
+    // independente do fuso do dispositivo (mesma correção dos slots no backend).
+    return new Date(`${form.date}T${form.time}:00-03:00`).toISOString()
   }
 
   const saveMutation = useMutation({
-    mutationFn: (data: any) => appointmentsApi.update(a.id, data),
+    mutationFn: async ({ appointment, customer }: {
+      appointment: any
+      customer?: { name: string; last_name: string }
+    }) => {
+      // Nome do cliente mudou? Atualiza primeiro o cadastro do cliente.
+      if (customer) await tenantApi.updateCustomer(a.customer_id, customer)
+      return appointmentsApi.update(a.id, appointment)
+    },
     onSuccess: onSaved,
     onError: (e: any) => setError(e?.message ?? 'Não foi possível salvar. Tente novamente.'),
   })
@@ -579,38 +594,68 @@ function EditModal({ appointment: a, services, professionals, onClose, onSaved }
   function save() {
     setError('')
     if (!form.date || !form.time) { setError('Informe data e horário.'); return }
+    const name = form.customer_name.trim()
+    if (!name) { setError('Informe o nome do cliente.'); return }
+    const lastName = form.customer_last_name.trim()
+    const customerChanged =
+      name !== (a.customer_name ?? '').trim() || lastName !== (a.customer_last_name ?? '').trim()
     saveMutation.mutate({
-      service_id: form.service_id,
-      professional_id: form.professional_id,
-      starts_at: buildStartsAt(),
-      status: form.status,
-      notes: form.notes || null,
+      appointment: {
+        service_id: form.service_id,
+        professional_id: form.professional_id,
+        starts_at: buildStartsAt(),
+        status: form.status,
+        notes: form.notes || null,
+      },
+      ...(customerChanged ? { customer: { name, last_name: lastName } } : {}),
     })
   }
 
   function markCompleted() {
     setError('')
-    saveMutation.mutate({ status: 'completed' })
+    saveMutation.mutate({ appointment: { status: 'completed' } })
   }
 
   return (
     <ModalShell title="Editar agendamento" onClose={onClose}>
       <div className="space-y-3.5">
-        {/* Cliente (read-only) */}
-        <div className="bg-gray-50 rounded-xl p-3.5 space-y-1">
-          <Link href={`/appointments/${a.id}`} className="font-semibold text-gray-900 text-sm hover:text-primary hover:underline underline-offset-2">
-            {fullName(a)}
-          </Link>
-          <a
-            href={waLink}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="flex items-center gap-1.5 text-sm text-green-600 hover:text-green-700 font-medium"
-            title="Abrir conversa no WhatsApp"
-          >
-            <MessageCircle size={14} strokeWidth={2} />
-            {a.customer_phone}
-          </a>
+        {/* Cliente (nome editável) */}
+        <div className="bg-gray-50 rounded-xl p-3.5 space-y-2.5">
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className={labelCls}>Nome do cliente</label>
+              <input
+                value={form.customer_name}
+                onChange={(e) => setForm({ ...form, customer_name: e.target.value })}
+                className={inputCls}
+                placeholder="Nome"
+              />
+            </div>
+            <div>
+              <label className={labelCls}>Sobrenome</label>
+              <input
+                value={form.customer_last_name}
+                onChange={(e) => setForm({ ...form, customer_last_name: e.target.value })}
+                className={inputCls}
+                placeholder="Sobrenome (opcional)"
+              />
+            </div>
+          </div>
+          <div className="flex items-center justify-between gap-3">
+            <a
+              href={waLink}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center gap-1.5 text-sm text-green-600 hover:text-green-700 font-medium"
+              title="Abrir conversa no WhatsApp"
+            >
+              <MessageCircle size={14} strokeWidth={2} />
+              {a.customer_phone}
+            </a>
+            <Link href={`/appointments/${a.id}`} className="text-xs font-semibold text-primary hover:underline underline-offset-2">
+              Ver detalhes
+            </Link>
+          </div>
         </div>
 
         <div>

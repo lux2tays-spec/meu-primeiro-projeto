@@ -33,6 +33,7 @@ interface Appt {
   service_id: string
   customer_id: string
   notes?: string | null
+  created_by?: string | null
 }
 
 const DAYS = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb']
@@ -99,7 +100,7 @@ const TIME_RE = /^([01]\d|2[0-3]):[0-5]\d$/
 export default function CalendarScreen() {
   const toast = useToast()
   const queryClient = useQueryClient()
-  const { role } = useAuthStore()
+  const { role, userId } = useAuthStore()
   const canManage = role === 'owner' || role === 'admin' || role === 'root'
 
   // Day strip: stripBase-7 .. stripBase+7 (scrollable), chevrons shift the window
@@ -152,33 +153,73 @@ export default function CalendarScreen() {
   const [editDate, setEditDate] = useState<string>('')
   const [editTime, setEditTime] = useState<string>('')
   const [editStatus, setEditStatus] = useState<Appt['status']>('pending')
+  const [editCustomerName, setEditCustomerName] = useState<string>('')
+  const [editCustomerLastName, setEditCustomerLastName] = useState<string>('')
+  const [editNotes, setEditNotes] = useState<string>('')
+
+  // Quem pode editar: owner/admin/root editam tudo; staff edita os agendamentos
+  // que criou OU em que é o profissional designado (mesma regra do backend em
+  // canEditAppointment). O mapa professional_id → user_id vem de /tenant/professionals.
+  const profUserById = useMemo(() => {
+    const m: Record<string, string | null> = {}
+    for (const p of (professionals ?? []) as any[]) m[p.id] = p.user_id ?? null
+    return m
+  }, [professionals])
+
+  function canEditAppt(a: Appt) {
+    if (canManage) return true
+    if (!userId) return false
+    return a.created_by === userId || profUserById[a.professional_id] === userId
+  }
 
   function openEdit(a: Appt) {
     const d = new Date(a.starts_at)
     setEditing(a)
     setEditServiceId(a.service_id)
     setEditProfessionalId(a.professional_id)
-    setEditDate(toISO(d))
-    setEditTime(d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }))
+    // Data/hora sempre exibidas no fuso de São Paulo — o mesmo usado ao salvar,
+    // para que abrir e salvar sem mexer não desloque o horário.
+    setEditDate(d.toLocaleDateString('en-CA', { timeZone: 'America/Sao_Paulo' }))
+    setEditTime(d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', timeZone: 'America/Sao_Paulo' }))
     setEditStatus(a.status)
+    setEditCustomerName(a.customer_name ?? '')
+    setEditCustomerLastName(a.customer_last_name ?? '')
+    setEditNotes(a.notes ?? '')
   }
 
   const editService = services?.find((s: any) => s.id === editServiceId)
   const editPrice = editService?.price ?? editing?.price ?? 0
 
   const editMutation = useMutation({
-    mutationFn: () => {
-      const startsAt = new Date(`${editDate}T${editTime}:00`)
+    mutationFn: async () => {
+      // Nome do cliente mudou? Atualiza primeiro o cadastro do cliente.
+      const name = editCustomerName.trim()
+      const lastName = editCustomerLastName.trim()
+      const nameChanged =
+        name !== (editing!.customer_name ?? '').trim() ||
+        lastName !== (editing!.customer_last_name ?? '').trim()
+      if (nameChanged) {
+        await tenantApi.updateCustomer(editing!.customer_id, { name, last_name: lastName })
+      }
+      // Horário digitado é horário de São Paulo (UTC−03) → converter para UTC "Z",
+      // igual à correção dos slots no backend, para gravar o instante certo
+      // independente do fuso do aparelho.
+      const startsAt = new Date(`${editDate}T${editTime}:00-03:00`)
       return appointmentsApiExt.put(editing!.id, {
         professional_id: editProfessionalId,
         service_id: editServiceId,
         starts_at: startsAt.toISOString(),
         status: editStatus,
+        notes: editNotes.trim() ? editNotes.trim() : null,
       })
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['appointments'] })
-      if (editing) queryClient.invalidateQueries({ queryKey: ['appointment', editing.id] })
+      queryClient.invalidateQueries({ queryKey: ['customers'] })
+      if (editing) {
+        queryClient.invalidateQueries({ queryKey: ['appointment', editing.id] })
+        queryClient.invalidateQueries({ queryKey: ['customer', editing.customer_id] })
+      }
       setEditing(null)
       toast.show('Agendamento atualizado!', 'success')
     },
@@ -186,6 +227,10 @@ export default function CalendarScreen() {
   })
 
   function saveEdit() {
+    if (!editCustomerName.trim()) {
+      toast.show('Informe o nome do cliente.', 'warning')
+      return
+    }
     if (!TIME_RE.test(editTime)) {
       toast.show('Horário inválido. Use o formato HH:MM (ex.: 14:30).', 'warning')
       return
@@ -380,7 +425,16 @@ export default function CalendarScreen() {
             {hasFilters ? 'Nenhum agendamento encontrado com esses filtros.' : 'Nenhum agendamento nesse dia.'}
           </Text>
         ) : (
-          sorted.map((a) => <AgendaRow key={a.id} appointment={a} onPress={() => openEdit(a)} />)
+          sorted.map((a) => (
+            <AgendaRow
+              key={a.id}
+              appointment={a}
+              // Quem pode editar abre o modal; quem não pode vê os detalhes (leitura).
+              onPress={() =>
+                canEditAppt(a) ? openEdit(a) : router.push(`/(app)/appointments/${a.id}`)
+              }
+            />
+          ))
         )}
 
         {/* FAB */}
@@ -441,16 +495,31 @@ export default function CalendarScreen() {
                   </TouchableOpacity>
                 </View>
                 <ScrollView contentContainerStyle={styles.editContent} keyboardShouldPersistTaps="handled">
-                  {/* Cliente + WhatsApp */}
+                  {/* Cliente (nome editável) + WhatsApp */}
                   <View style={styles.clientRow}>
-                    <View style={{ flex: 1 }}>
-                      <Text style={styles.fieldLabel}>Cliente</Text>
-                      <Text style={styles.clientName}>{fullName(editing)}</Text>
-                    </View>
+                    <Text style={[styles.fieldLabel, { flex: 1 }]}>Cliente</Text>
                     <TouchableOpacity style={styles.waBtn} onPress={() => openWhatsApp(editing.customer_phone)}>
                       <Ionicons name="logo-whatsapp" size={16} color="#fff" />
                       <Text style={styles.waBtnText}>{editing.customer_phone}</Text>
                     </TouchableOpacity>
+                  </View>
+                  <View style={styles.nameRow}>
+                    <TextInput
+                      style={[styles.nameInput, { flex: 1 }]}
+                      value={editCustomerName}
+                      onChangeText={setEditCustomerName}
+                      placeholder="Nome do cliente"
+                      placeholderTextColor={colors.textDisabled}
+                      autoCapitalize="words"
+                    />
+                    <TextInput
+                      style={[styles.nameInput, { flex: 1 }]}
+                      value={editCustomerLastName}
+                      onChangeText={setEditCustomerLastName}
+                      placeholder="Sobrenome (opcional)"
+                      placeholderTextColor={colors.textDisabled}
+                      autoCapitalize="words"
+                    />
                   </View>
 
                   {/* Serviço */}
@@ -513,6 +582,17 @@ export default function CalendarScreen() {
                       )
                     })}
                   </View>
+
+                  {/* Observações */}
+                  <Text style={styles.fieldLabel}>Observações</Text>
+                  <TextInput
+                    style={styles.messageInput}
+                    value={editNotes}
+                    onChangeText={setEditNotes}
+                    placeholder="Observações internas (opcional)"
+                    placeholderTextColor={colors.textDisabled}
+                    multiline
+                  />
 
                   {/* Valor */}
                   <View style={styles.priceRow}>
@@ -930,7 +1010,17 @@ const styles = StyleSheet.create({
   },
   editContent: { paddingHorizontal: spacing.lg, paddingBottom: spacing.xl, gap: spacing.sm },
   clientRow: { flexDirection: 'row', alignItems: 'flex-end', gap: spacing.md, marginBottom: spacing.xs },
-  clientName: { fontSize: font.lg, fontWeight: '700', color: colors.text, marginTop: 2 },
+  nameRow: { flexDirection: 'row', gap: spacing.sm },
+  nameInput: {
+    height: 44,
+    borderWidth: 1.5,
+    borderColor: colors.border,
+    borderRadius: radius.md,
+    backgroundColor: colors.surface,
+    paddingHorizontal: spacing.md,
+    fontSize: font.md,
+    color: colors.text,
+  },
   waBtn: {
     flexDirection: 'row',
     alignItems: 'center',
