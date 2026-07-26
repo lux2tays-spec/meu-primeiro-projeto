@@ -1,7 +1,7 @@
 'use client'
 import { useEffect, useRef, useState, FormEvent } from 'react'
 import { authApi } from '@/lib/api'
-import { GOOGLE_CLIENT_ID } from '@/lib/google'
+import { useGoogleClientId } from '@/lib/google'
 
 declare global {
   interface Window {
@@ -37,7 +37,7 @@ export default function GoogleSignIn({
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
 
-  const clientId = GOOGLE_CLIENT_ID
+  const clientId = useGoogleClientId()
 
   useEffect(() => {
     if (!clientId) return
@@ -51,7 +51,7 @@ export default function GoogleSignIn({
       try { document.head.removeChild(script) } catch {}
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [clientId])
 
   function init(cid: string) {
     if (!window.google || !btnRef.current) return

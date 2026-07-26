@@ -4,7 +4,7 @@ import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { authApi, setToken } from '@/lib/api'
 import BrandLogo from '@/components/BrandLogo'
-import { GOOGLE_CLIENT_ID } from '@/lib/google'
+import { useGoogleClientId } from '@/lib/google'
 
 declare global {
   interface Window {
@@ -56,18 +56,19 @@ export default function RegisterPage() {
   }
 
   // ── Google Identity Services ─────────────────────────────────────────────
+  const googleClientId = useGoogleClientId()
   useEffect(() => {
-    const clientId = GOOGLE_CLIENT_ID
-    if (!clientId) return
+    if (!googleClientId) return
 
     const script = document.createElement('script')
     script.src = 'https://accounts.google.com/gsi/client'
     script.async = true
     script.defer = true
-    script.onload = () => initGoogle(clientId)
+    script.onload = () => initGoogle(googleClientId)
     document.head.appendChild(script)
-    return () => { document.head.removeChild(script) }
-  }, [])
+    return () => { try { document.head.removeChild(script) } catch {} }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [googleClientId])
 
   function initGoogle(clientId: string) {
     if (!window.google) return
@@ -221,7 +222,7 @@ export default function RegisterPage() {
 
       <div className="bg-white rounded-2xl p-8 shadow-xl space-y-4">
         {/* Google button */}
-        {GOOGLE_CLIENT_ID && (
+        {googleClientId && (
           <>
             <div ref={googleBtnRef} className="w-full flex justify-center" />
             <div className="flex items-center gap-3">

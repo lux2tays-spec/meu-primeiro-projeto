@@ -2,6 +2,7 @@ import { FastifyPluginAsync } from 'fastify'
 import { db } from '../lib/db'
 import { getBrandConfig } from '../lib/brandConfig'
 import { getSupportBotConfig } from '../lib/supportBotConfig'
+import { getGoogleConfig } from '../lib/integrationConfig'
 
 // Public branding — consumed by mobile + tenant-web at runtime so the platform
 // owner can rebrand (name, colors, logo, favicon) WITHOUT a redeploy. Everything
@@ -57,6 +58,15 @@ export const brandingRoutes: FastifyPluginAsync = async (app) => {
       active,
       phone_number: active ? cfg.phone_number : null,
     })
+  })
+
+  // Public Google Sign-In "Web" client ID (Root Admin → Integrações → Google).
+  // Not secret — it ships in the browser and is locked to authorized origins.
+  // The apps read it at runtime so the platform owner can change it with no deploy.
+  app.get('/google-client-id', async (_request, reply) => {
+    const g = await getGoogleConfig()
+    reply.header('Cache-Control', 'public, max-age=60')
+    return reply.send({ client_id: g.client_id || '' })
   })
 
   // Serve a single asset with its content-type (bytea → binary).
