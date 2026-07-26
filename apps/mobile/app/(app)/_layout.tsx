@@ -2,6 +2,7 @@ import { Redirect } from 'expo-router'
 import { Tabs } from 'expo-router'
 import { Ionicons } from '@expo/vector-icons'
 import { useQuery } from '@tanstack/react-query'
+import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useAuthStore } from '@/lib/store'
 import { tenantApi } from '@/lib/api'
 import { onboardingSession } from '@/lib/onboarding-session'
@@ -9,6 +10,7 @@ import { colors } from '@/lib/theme'
 
 export default function AppLayout() {
   const token = useAuthStore((s) => s.token)
+  const insets = useSafeAreaInsets()
 
   const { data: onboarding, isLoading: onboardingLoading } = useQuery({
     queryKey: ['onboarding'],
@@ -31,10 +33,13 @@ export default function AppLayout() {
         headerShown: false,
         tabBarActiveTintColor: colors.primary,
         tabBarInactiveTintColor: colors.textDisabled,
+        // Lift the tab bar above the Android system navigation bar (home/back/
+        // recents) so it never overlaps the menu icons. On iPhones with a home
+        // indicator this also reserves the right space.
         tabBarStyle: {
           borderTopColor: colors.border,
-          paddingBottom: 6,
-          height: 60,
+          paddingBottom: insets.bottom + 6,
+          height: 60 + insets.bottom,
         },
         tabBarLabelStyle: { fontSize: 11, fontWeight: '600' },
       }}
