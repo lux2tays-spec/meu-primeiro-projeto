@@ -72,6 +72,7 @@ export default function TenantsPage() {
             <tr className="border-b border-gray-100 bg-gray-50">
               <th className="text-left px-6 py-3 font-medium text-gray-500">Negócio</th>
               <th className="text-left px-4 py-3 font-medium text-gray-500">Proprietário</th>
+              <th className="text-left px-4 py-3 font-medium text-gray-500">Tipo de negócio</th>
               <th className="text-left px-4 py-3 font-medium text-gray-500">Plano</th>
               <th className="text-left px-4 py-3 font-medium text-gray-500">Status</th>
               <th className="text-left px-4 py-3 font-medium text-gray-500">WhatsApp</th>
@@ -82,9 +83,9 @@ export default function TenantsPage() {
           </thead>
           <tbody>
             {isLoading ? (
-              <tr><td colSpan={8} className="text-center py-12 text-gray-400">Carregando...</td></tr>
+              <tr><td colSpan={9} className="text-center py-12 text-gray-400">Carregando...</td></tr>
             ) : tenants.length === 0 ? (
-              <tr><td colSpan={8} className="text-center py-12 text-gray-400">Nenhum tenant encontrado</td></tr>
+              <tr><td colSpan={9} className="text-center py-12 text-gray-400">Nenhum tenant encontrado</td></tr>
             ) : tenants.map((t: any) => (
               <tr key={t.id} className="border-b border-gray-50 last:border-0 hover:bg-gray-50 transition-colors">
                 <td className="px-6 py-4">
@@ -101,6 +102,9 @@ export default function TenantsPage() {
                 <td className="px-4 py-4">
                   <div className="text-gray-700">{t.owner_name ?? '—'}</div>
                   <div className="text-xs text-gray-400">{t.owner_email ?? '—'}</div>
+                </td>
+                <td className="px-4 py-4 text-gray-700">
+                  {t.business_type_name ?? t.business_type ?? <span className="text-gray-300">—</span>}
                 </td>
                 <td className="px-4 py-4">
                   <Badge label={planLabel[t.plan] ?? t.plan} variant={planVariant[t.plan]} />

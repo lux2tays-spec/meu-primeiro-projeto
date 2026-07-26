@@ -36,6 +36,9 @@ export default function TenantDetailPage() {
     queryFn: () => rootApi.tenant(id),
   })
 
+  // Registered business types (AI templates) — used to pick the tenant's segment.
+  const { data: bizTemplates = [] } = useQuery({ queryKey: ['ai-templates'], queryFn: rootApi.businessTypeTemplates })
+
   useEffect(() => {
     if (tenant && !form) {
       setForm({
@@ -275,13 +278,21 @@ export default function TenantDetailPage() {
               <div className="space-y-4">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Tipo de negócio</label>
-                  <input
-                    type="text"
-                    value={agent.business_type}
+                  <select
+                    value={agent.business_type ?? ''}
                     onChange={(e) => setAgent((a: any) => ({ ...a, business_type: e.target.value }))}
-                    className="w-full h-10 px-3 rounded-xl border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary"
-                  />
-                  <p className="text-xs text-gray-400 mt-1">Ex: salão de beleza, clínica, pet shop. Ajuda o bot a se comportar conforme o segmento.</p>
+                    className="w-full h-10 px-3 rounded-xl border border-gray-200 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-primary"
+                  >
+                    <option value="">— Nenhum —</option>
+                    {(bizTemplates as any[]).map((tpl) => (
+                      <option key={tpl.id} value={tpl.business_type}>{tpl.display_name}</option>
+                    ))}
+                    {/* Preserva um valor antigo que não está mais na lista de templates */}
+                    {agent.business_type && !(bizTemplates as any[]).some((tpl) => tpl.business_type === agent.business_type) && (
+                      <option value={agent.business_type}>{agent.business_type} (não cadastrado)</option>
+                    )}
+                  </select>
+                  <p className="text-xs text-gray-400 mt-1">Escolha um dos tipos cadastrados em <strong>Templates de IA</strong>. Define o comportamento padrão do bot para o segmento.</p>
                 </div>
 
                 <div>

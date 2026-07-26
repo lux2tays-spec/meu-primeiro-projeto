@@ -117,6 +117,8 @@ export const rootRoutes: FastifyPluginAsync = async (app) => {
       db.query(`
         SELECT t.*,
           u.name as owner_name, u.email as owner_email,
+          ac.business_type,
+          btt.display_name AS business_type_name,
           (SELECT COUNT(*) FROM user_roles ur WHERE ur.tenant_id = t.id) as user_count,
           (SELECT COUNT(*) FROM appointments a WHERE a.tenant_id = t.id) as appointment_count,
           wi.status as whatsapp_status
@@ -124,6 +126,8 @@ export const rootRoutes: FastifyPluginAsync = async (app) => {
         LEFT JOIN user_roles ur2 ON ur2.tenant_id = t.id AND ur2.role = 'owner'
         LEFT JOIN users u ON u.id = ur2.user_id
         LEFT JOIN whatsapp_instances wi ON wi.tenant_id = t.id
+        LEFT JOIN agent_config ac ON ac.tenant_id = t.id
+        LEFT JOIN business_type_templates btt ON btt.business_type = ac.business_type
         ${where}
         ORDER BY t.created_at DESC
         LIMIT $${i} OFFSET $${i + 1}
