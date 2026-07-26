@@ -81,7 +81,8 @@ async function start() {
   const allowedOrigins = process.env.ALLOWED_ORIGINS
     ? process.env.ALLOWED_ORIGINS.split(',').map((o) => o.trim())
     : true
-  await app.register(cors, { origin: allowedOrigins, credentials: true })
+  // exposedHeaders: the admin panel reads Content-Disposition to name CSV exports.
+  await app.register(cors, { origin: allowedOrigins, credentials: true, exposedHeaders: ['Content-Disposition'] })
 
   await app.register(rateLimit, { max: 100, timeWindow: '1 minute' })
   await app.register(jwt, { secret: process.env.JWT_SECRET! })

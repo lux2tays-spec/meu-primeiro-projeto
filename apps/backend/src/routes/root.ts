@@ -1244,4 +1244,171 @@ export const rootRoutes: FastifyPluginAsync = async (app) => {
       recent,
     })
   })
+
+  // ── Exportação de dados (CSV para Excel pt-BR) ──────────────────────────────
+  // Excel pt-BR expects: UTF-8 BOM, ';' as separator, CRLF line endings and
+  // decimal comma. Dates are formatted in America/Sao_Paulo by Postgres.
+  const csvField = (v: string | number | null): string => {
+    if (v === null || v === undefined) return ''
+    const s = String(v)
+    return /[";\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s
+  }
+
+  const toCsv = (headers: string[], rows: (string | number | null)[][]): string =>
+    '\uFEFF' + [headers, ...rows].map((r) => r.map(csvField).join(';')).join('\r\n') + '\r\n'
+
+  // NUMERIC comes back from pg as string — normalize to pt-BR decimal comma.
+  const brNumber = (v: unknown): string => {
+    const n = Number(v ?? 0)
+    return (Number.isFinite(n) ? n : 0).toFixed(2).replace('.', ',')
+  }
+
+  const sendCsv = (reply: any, name: string, csv: string) => {
+    const date = new Date().toISOString().slice(0, 10)
+    return reply
+      .header('Content-Type', 'text/csv; charset=utf-8')
+      .header('Content-Disposition', `attachment; filename="${name}-${date}.csv"`)
+      .send(csv)
+  }
+
+  const TENANT_STATUS_PT: Record<string, string> = {
+    trial: 'Trial', active: 'Ativo', suspended: 'Suspenso', cancelled: 'Cancelado',
+  }
+  const APPT_STATUS_PT: Record<string, string> = {
+    pending: 'Pendente', confirmed: 'Confirmado', completed: 'Concluído', cancelled: 'Cancelado',
+  }
+  // Same plan prices used for the MRR calculation in GET /root/stats.
+  const PLAN_PRICE: Record<string, number> = { basico: 89, premium: 169, profissional: 299, free: 0 }
+
+  // All customers across all tenants, with attendance + revenue aggregates.
+  app.get('/export/customers', async (request, reply) => {
+    const { rows } = await db.query(`
+      SELECT t.name AS tenant_name,
+             c.name, c.last_name, c.phone, c.email,
+             COALESCE(ag.cnt, 0)::int          AS appointment_count,
+             COALESCE(ag.total, 0)             AS total_value,
+             ag.last_service,
+             ag.last_at,
+             to_char(c.created_at AT TIME ZONE 'America/Sao_Paulo', 'DD/MM/YYYY') AS created_at
+      FROM customers c
+      JOIN tenants t ON t.id = c.tenant_id
+      LEFT JOIN LATERAL (
+        SELECT COUNT(*) AS cnt,
+               COALESCE(SUM(s.price), 0) AS total,
+               (ARRAY_AGG(s.name ORDER BY a.starts_at DESC))[1] AS last_service,
+               to_char(MAX(a.starts_at) AT TIME ZONE 'America/Sao_Paulo', 'DD/MM/YYYY HH24:MI') AS last_at
+        FROM appointments a
+        LEFT JOIN services s ON s.id = a.service_id
+        WHERE a.customer_id = c.id AND a.status != 'cancelled'
+      ) ag ON TRUE
+      ORDER BY t.name, c.name
+    `)
+    const csv = toCsv(
+      ['Estabelecimento', 'Nome', 'Sobrenome', 'Telefone', 'E-mail',
+       'Nº de atendimentos', 'Valor total', 'Último serviço', 'Último atendimento', 'Cliente desde'],
+      (rows as any[]).map((r) => [
+        r.tenant_name, r.name, r.last_name, r.phone, r.email,
+        r.appointment_count, brNumber(r.total_value), r.last_service, r.last_at, r.created_at,
+      ])
+    )
+    await logAdminAction(auditFromRequest(request, 'export.customers', 'csv', `${rows.length} clientes`))
+    return sendCsv(reply, 'clientes', csv)
+  })
+
+  // All tenants with owner, contact, address and usage counters.
+  app.get('/export/tenants', async (request, reply) => {
+    const { rows } = await db.query(`
+      SELECT t.name, t.slug,
+             btt.display_name AS business_type_name,
+             t.plan, t.status,
+             u.name AS owner_name, u.email AS owner_email, u.phone AS owner_phone,
+             t.contact_email, t.contact_phone, t.responsible_name,
+             ac.address, ac.neighborhood, ac.city, ac.state,
+             (SELECT COUNT(*) FROM user_roles ur WHERE ur.tenant_id = t.id)::int   AS user_count,
+             (SELECT COUNT(*) FROM appointments a WHERE a.tenant_id = t.id)::int   AS appointment_count,
+             wi.status AS whatsapp_status,
+             to_char(t.trial_ends_at AT TIME ZONE 'America/Sao_Paulo', 'DD/MM/YYYY') AS trial_ends_at,
+             to_char(t.created_at AT TIME ZONE 'America/Sao_Paulo', 'DD/MM/YYYY HH24:MI') AS created_at
+      FROM tenants t
+      LEFT JOIN user_roles ur2 ON ur2.tenant_id = t.id AND ur2.role = 'owner'
+      LEFT JOIN users u ON u.id = ur2.user_id
+      LEFT JOIN agent_config ac ON ac.tenant_id = t.id
+      LEFT JOIN business_type_templates btt ON btt.business_type = ac.business_type
+      LEFT JOIN whatsapp_instances wi ON wi.tenant_id = t.id
+      ORDER BY t.created_at DESC
+    `)
+    const csv = toCsv(
+      ['Nome', 'Slug', 'Tipo de negócio', 'Plano', 'Status',
+       'Dono', 'E-mail do dono', 'Telefone do dono',
+       'E-mail de contato', 'Telefone de contato', 'Responsável', 'Endereço',
+       'Nº de usuários', 'Nº de agendamentos', 'WhatsApp', 'Trial até', 'Criado em'],
+      (rows as any[]).map((r) => [
+        r.name, r.slug, r.business_type_name, r.plan,
+        TENANT_STATUS_PT[r.status] ?? r.status,
+        r.owner_name, r.owner_email, r.owner_phone,
+        r.contact_email, r.contact_phone, r.responsible_name,
+        [r.address, r.neighborhood, r.city, r.state].filter(Boolean).join(', ') || null,
+        r.user_count, r.appointment_count, r.whatsapp_status, r.trial_ends_at, r.created_at,
+      ])
+    )
+    await logAdminAction(auditFromRequest(request, 'export.tenants', 'csv', `${rows.length} tenants`))
+    return sendCsv(reply, 'estabelecimentos', csv)
+  })
+
+  // All appointments (financial view) — price comes from services via service_id.
+  app.get('/export/appointments', async (request, reply) => {
+    const { rows } = await db.query(`
+      SELECT to_char(a.starts_at AT TIME ZONE 'America/Sao_Paulo', 'DD/MM/YYYY') AS date,
+             to_char(a.starts_at AT TIME ZONE 'America/Sao_Paulo', 'HH24:MI')    AS time,
+             t.name AS tenant_name,
+             TRIM(CONCAT(c.name, ' ', COALESCE(c.last_name, ''))) AS customer_name,
+             c.phone AS customer_phone,
+             s.name AS service_name,
+             p.name AS professional_name,
+             s.price,
+             a.status,
+             to_char(a.created_at AT TIME ZONE 'America/Sao_Paulo', 'DD/MM/YYYY HH24:MI') AS created_at
+      FROM appointments a
+      JOIN tenants t ON t.id = a.tenant_id
+      LEFT JOIN customers c ON c.id = a.customer_id
+      LEFT JOIN services s ON s.id = a.service_id
+      LEFT JOIN professionals p ON p.id = a.professional_id
+      ORDER BY a.starts_at DESC
+    `)
+    const csv = toCsv(
+      ['Data', 'Hora', 'Estabelecimento', 'Cliente', 'Telefone do cliente',
+       'Serviço', 'Profissional', 'Valor', 'Status', 'Criado em'],
+      (rows as any[]).map((r) => [
+        r.date, r.time, r.tenant_name, r.customer_name, r.customer_phone,
+        r.service_name, r.professional_name,
+        r.price !== null && r.price !== undefined ? brNumber(r.price) : null,
+        APPT_STATUS_PT[r.status] ?? r.status, r.created_at,
+      ])
+    )
+    await logAdminAction(auditFromRequest(request, 'export.appointments', 'csv', `${rows.length} agendamentos`))
+    return sendCsv(reply, 'agendamentos', csv)
+  })
+
+  // Subscription/revenue data per tenant (includes tenants without subscription).
+  app.get('/export/subscriptions', async (request, reply) => {
+    const { rows } = await db.query(`
+      SELECT t.name AS tenant_name, t.plan,
+             s.status AS subscription_status,
+             to_char(s.next_billing_date, 'DD/MM/YYYY') AS next_billing_date,
+             s.mp_subscription_id
+      FROM tenants t
+      LEFT JOIN subscriptions s ON s.tenant_id = t.id
+      ORDER BY t.name
+    `)
+    const csv = toCsv(
+      ['Estabelecimento', 'Plano', 'Status da assinatura', 'Próxima cobrança',
+       'ID Mercado Pago', 'Valor do plano'],
+      (rows as any[]).map((r) => [
+        r.tenant_name, r.plan, r.subscription_status, r.next_billing_date,
+        r.mp_subscription_id, brNumber(PLAN_PRICE[r.plan] ?? 0),
+      ])
+    )
+    await logAdminAction(auditFromRequest(request, 'export.subscriptions', 'csv', `${rows.length} tenants`))
+    return sendCsv(reply, 'assinaturas', csv)
+  })
 }

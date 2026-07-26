@@ -37,6 +37,40 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
   return res.json()
 }
 
+// Authenticated file download (CSV exports). The regular `request` helper
+// assumes JSON — here we fetch a blob and trigger a browser download using the
+// filename from Content-Disposition (exposed via CORS) or a fallback name.
+export async function downloadFile(path: string, fallbackName: string): Promise<void> {
+  const token = getToken()
+  const res = await fetch(`${BASE_URL}${path}`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  })
+
+  if (!res.ok) {
+    if (res.status === 401) {
+      clearToken()
+      window.location.href = '/login'
+      throw new Error('Sessão expirada')
+    }
+    const err = await res.json().catch(() => ({ error: undefined as string | undefined }))
+    throw new Error(err.error ?? `Erro ${res.status} ao exportar`)
+  }
+
+  const blob = await res.blob()
+  const disposition = res.headers.get('Content-Disposition') ?? ''
+  const match = disposition.match(/filename="?([^";]+)"?/)
+  const filename = match?.[1] ?? fallbackName
+
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  URL.revokeObjectURL(url)
+}
+
 export const api = {
   get: <T>(path: string) => request<T>(path),
   post: <T>(path: string, body?: unknown) =>
@@ -154,6 +188,12 @@ export const rootApi = {
     api.post<any>(`/root/support/tickets/${id}/reply`, { body }),
   updateSupportTicket: (id: string, data: { status: 'open' | 'resolved' }) =>
     api.patch<any>(`/root/support/tickets/${id}`, data),
+
+  // Exportações (CSV para Excel)
+  exportCustomers: () => downloadFile('/root/export/customers', 'clientes.csv'),
+  exportTenants: () => downloadFile('/root/export/tenants', 'estabelecimentos.csv'),
+  exportAppointments: () => downloadFile('/root/export/appointments', 'agendamentos.csv'),
+  exportSubscriptions: () => downloadFile('/root/export/subscriptions', 'assinaturas.csv'),
 
   // Business Type Templates
   businessTypeTemplates: () => api.get<any[]>('/root/business-type-templates'),

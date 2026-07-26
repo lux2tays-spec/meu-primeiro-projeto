@@ -9,6 +9,7 @@ const nav = [
   { href: '/dashboard/tenants',     icon: '🏢', label: 'Tenants' },
   { href: '/dashboard/users',       icon: '👥', label: 'Usuários' },
   { href: '/dashboard/revenue',     icon: '💰', label: 'Receita' },
+  { href: '/dashboard/exportacoes', icon: '📤', label: 'Exportar' },
   { href: '/dashboard/affiliates',  icon: '🤝', label: 'Afiliados' },
   { href: '/dashboard/ai-templates', icon: '🤖', label: 'Templates IA' },
   { href: '/dashboard/ai',          icon: '⚡', label: 'IA & Custos' },
