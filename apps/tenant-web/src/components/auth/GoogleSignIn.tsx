@@ -1,6 +1,7 @@
 'use client'
 import { useEffect, useRef, useState, FormEvent } from 'react'
 import { authApi } from '@/lib/api'
+import { GOOGLE_CLIENT_ID } from '@/lib/google'
 
 declare global {
   interface Window {
@@ -36,7 +37,7 @@ export default function GoogleSignIn({
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
 
-  const clientId = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID
+  const clientId = GOOGLE_CLIENT_ID
 
   useEffect(() => {
     if (!clientId) return

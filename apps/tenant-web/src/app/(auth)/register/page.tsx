@@ -4,6 +4,7 @@ import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { authApi, setToken } from '@/lib/api'
 import BrandLogo from '@/components/BrandLogo'
+import { GOOGLE_CLIENT_ID } from '@/lib/google'
 
 declare global {
   interface Window {
@@ -56,7 +57,7 @@ export default function RegisterPage() {
 
   // ── Google Identity Services ─────────────────────────────────────────────
   useEffect(() => {
-    const clientId = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID
+    const clientId = GOOGLE_CLIENT_ID
     if (!clientId) return
 
     const script = document.createElement('script')
@@ -220,7 +221,7 @@ export default function RegisterPage() {
 
       <div className="bg-white rounded-2xl p-8 shadow-xl space-y-4">
         {/* Google button */}
-        {process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID && (
+        {GOOGLE_CLIENT_ID && (
           <>
             <div ref={googleBtnRef} className="w-full flex justify-center" />
             <div className="flex items-center gap-3">
