@@ -81,6 +81,8 @@ export const authApi = {
     api.post<{ needs_verification: boolean }>('/auth/register', data),
   verifyEmail: (token: string) =>
     api.get<{ token: string; verified: boolean }>(`/auth/verify-email?token=${encodeURIComponent(token)}`),
+  resendVerification: (email: string) =>
+    api.post<{ message: string }>('/auth/resend-verification', { email }),
   googleAuth: (data: { id_token: string; business_name?: string; phone?: string; referral_code?: string }) =>
     api.post<{ token: string; tenant_id: string; is_new: boolean }>('/auth/google', data),
   forgotPassword: (email: string) =>

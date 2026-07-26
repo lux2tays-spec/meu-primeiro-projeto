@@ -1,11 +1,33 @@
 'use client'
 import { useSearchParams } from 'next/navigation'
 import Link from 'next/link'
-import { Suspense } from 'react'
+import { Suspense, useState } from 'react'
+import { authApi } from '@/lib/api'
 
 function Content() {
   const params = useSearchParams()
   const email = params.get('email') ?? 'seu e-mail'
+
+  const [sending, setSending] = useState(false)
+  const [msg, setMsg] = useState('')
+  const [cooldown, setCooldown] = useState(false)
+
+  async function resend() {
+    const target = params.get('email')
+    if (!target) { setMsg('E-mail não identificado. Volte e faça login para reenviar.'); return }
+    setSending(true)
+    setMsg('')
+    try {
+      await authApi.resendVerification(target)
+      setMsg('Enviamos um novo link de confirmação. Confira sua caixa de entrada e o spam.')
+      setCooldown(true)
+      setTimeout(() => setCooldown(false), 30000) // evita spam de reenvio
+    } catch (e: any) {
+      setMsg(e?.message || 'Não foi possível reenviar agora. Tente novamente em instantes.')
+    } finally {
+      setSending(false)
+    }
+  }
 
   return (
     <div className="w-full max-w-sm text-center">
@@ -29,6 +51,16 @@ function Content() {
         <p className="text-gray-500 text-xs">
           Não recebeu? Verifique a pasta de spam ou lixo eletrônico.
         </p>
+
+        <button
+          onClick={resend}
+          disabled={sending || cooldown}
+          className="w-full h-11 border border-primary text-primary font-semibold rounded-xl hover:bg-primary/5 transition-colors disabled:opacity-50"
+        >
+          {sending ? 'Reenviando...' : cooldown ? 'Reenviado ✓' : 'Reenviar e-mail'}
+        </button>
+        {msg && <p className="text-sm text-gray-600">{msg}</p>}
+
         <div className="pt-2 border-t border-gray-100">
           <p className="text-center text-sm text-gray-500">
             Já confirmou?{' '}
