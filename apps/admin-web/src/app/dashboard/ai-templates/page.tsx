@@ -5,6 +5,56 @@ import { rootApi } from '@/lib/api'
 
 const BLANK = { business_type: '', display_name: '', system_prompt: '', custom_instructions: '', tone: 'amigável e profissional' }
 
+const inputCls = 'w-full h-10 px-3 rounded-lg border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary'
+const textareaCls = 'w-full px-3 py-2 rounded-lg border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary resize-none'
+
+type FormState = typeof BLANK
+
+// Top-level component (NOT defined inside the page) — defining it inside the render
+// re-created it on every keystroke, remounting the inputs and stealing focus (só
+// digitava 1 caractere por clique). Kept stable here so inputs keep focus.
+function FormFields({ isNew, form, setForm }: {
+  isNew: boolean
+  form: FormState
+  setForm: React.Dispatch<React.SetStateAction<FormState>>
+}) {
+  return (
+    <div className="space-y-3 mt-3">
+      <div className="grid grid-cols-2 gap-3">
+        {isNew && (
+          <div>
+            <label className="block text-xs font-medium text-gray-600 mb-1">Chave (slug) *</label>
+            <input value={form.business_type} onChange={e => setForm(f => ({ ...f, business_type: e.target.value }))}
+              className={inputCls} placeholder="clinica_estetica" />
+          </div>
+        )}
+        <div className={isNew ? '' : 'col-span-2'}>
+          <label className="block text-xs font-medium text-gray-600 mb-1">Nome de exibição *</label>
+          <input value={form.display_name} onChange={e => setForm(f => ({ ...f, display_name: e.target.value }))}
+            className={inputCls} placeholder="Clínica Estética" />
+        </div>
+        <div className={isNew ? 'col-span-2' : ''}>
+          <label className="block text-xs font-medium text-gray-600 mb-1">Tom de voz</label>
+          <input value={form.tone} onChange={e => setForm(f => ({ ...f, tone: e.target.value }))}
+            className={inputCls} placeholder="amigável e profissional" />
+        </div>
+      </div>
+      <div>
+        <label className="block text-xs font-medium text-gray-600 mb-1">Prompt base do agente</label>
+        <p className="text-xs text-gray-400 mb-1">Instrução principal que define como o bot se comporta neste tipo de negócio.</p>
+        <textarea value={form.system_prompt} onChange={e => setForm(f => ({ ...f, system_prompt: e.target.value }))}
+          className={textareaCls} rows={4} placeholder="Você é a atendente virtual de uma clínica de estética..." />
+      </div>
+      <div>
+        <label className="block text-xs font-medium text-gray-600 mb-1">Instruções específicas do ramo</label>
+        <p className="text-xs text-gray-400 mb-1">Regras e orientações específicas para este tipo de negócio (aplicadas a todos os tenants do ramo).</p>
+        <textarea value={form.custom_instructions} onChange={e => setForm(f => ({ ...f, custom_instructions: e.target.value }))}
+          className={textareaCls} rows={4} placeholder="Sempre pergunte se o cliente já veio antes..." />
+      </div>
+    </div>
+  )
+}
+
 export default function AITemplatesPage() {
   const qc = useQueryClient()
   const { data: templates = [], isLoading } = useQuery({ queryKey: ['ai-templates'], queryFn: rootApi.businessTypeTemplates })
@@ -37,54 +87,6 @@ export default function AITemplatesPage() {
     setError('')
   }
 
-  const inputCls = 'w-full h-10 px-3 rounded-lg border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary'
-  const textareaCls = 'w-full px-3 py-2 rounded-lg border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary resize-none'
-
-  const FormFields = ({ isNew }: { isNew: boolean }) => (
-    <div className="space-y-3 mt-3">
-      <div className="grid grid-cols-2 gap-3">
-        {isNew && (
-          <div>
-            <label className="block text-xs font-medium text-gray-600 mb-1">Chave (slug) *</label>
-            <input value={form.business_type} onChange={e => setForm(f => ({ ...f, business_type: e.target.value }))}
-              className={inputCls} placeholder="clinica_estetica" />
-          </div>
-        )}
-        <div className={isNew ? '' : 'col-span-2'}>
-          <label className="block text-xs font-medium text-gray-600 mb-1">Nome de exibição *</label>
-          <input value={form.display_name} onChange={e => setForm(f => ({ ...f, display_name: e.target.value }))}
-            className={inputCls} placeholder="Clínica Estética" />
-        </div>
-        {!isNew && (
-          <div>
-            <label className="block text-xs font-medium text-gray-600 mb-1">Tom de voz</label>
-            <input value={form.tone} onChange={e => setForm(f => ({ ...f, tone: e.target.value }))}
-              className={inputCls} placeholder="amigável e profissional" />
-          </div>
-        )}
-        {isNew && (
-          <div className="col-span-2">
-            <label className="block text-xs font-medium text-gray-600 mb-1">Tom de voz</label>
-            <input value={form.tone} onChange={e => setForm(f => ({ ...f, tone: e.target.value }))}
-              className={inputCls} placeholder="amigável e profissional" />
-          </div>
-        )}
-      </div>
-      <div>
-        <label className="block text-xs font-medium text-gray-600 mb-1">Prompt base do agente</label>
-        <p className="text-xs text-gray-400 mb-1">Instrução principal que define como o bot se comporta neste tipo de negócio.</p>
-        <textarea value={form.system_prompt} onChange={e => setForm(f => ({ ...f, system_prompt: e.target.value }))}
-          className={textareaCls} rows={4} placeholder="Você é a atendente virtual de uma clínica de estética..." />
-      </div>
-      <div>
-        <label className="block text-xs font-medium text-gray-600 mb-1">Instruções específicas do ramo</label>
-        <p className="text-xs text-gray-400 mb-1">Regras e orientações específicas para este tipo de negócio (aplicadas a todos os tenants do ramo).</p>
-        <textarea value={form.custom_instructions} onChange={e => setForm(f => ({ ...f, custom_instructions: e.target.value }))}
-          className={textareaCls} rows={4} placeholder="Sempre pergunte se o cliente já veio antes..." />
-      </div>
-    </div>
-  )
-
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
@@ -101,7 +103,7 @@ export default function AITemplatesPage() {
       {showNew && (
         <div className="bg-white rounded-2xl p-5 border border-primary/30 shadow-sm">
           <p className="font-semibold text-gray-900 text-sm">Novo template</p>
-          <FormFields isNew={true} />
+          <FormFields isNew={true} form={form} setForm={setForm} />
           {error && <p className="text-red-500 text-xs mt-2">{error}</p>}
           <div className="flex gap-2 mt-4">
             <button onClick={() => createMutation.mutate(form)} disabled={createMutation.isPending}
@@ -128,7 +130,7 @@ export default function AITemplatesPage() {
                     <p className="font-semibold text-gray-900 text-sm">{t.display_name}</p>
                     <span className="text-xs bg-gray-100 text-gray-500 px-2 py-0.5 rounded-full font-mono">{t.business_type}</span>
                   </div>
-                  <FormFields isNew={false} />
+                  <FormFields isNew={false} form={form} setForm={setForm} />
                   {error && <p className="text-red-500 text-xs mt-2">{error}</p>}
                   <div className="flex gap-2 mt-4">
                     <button onClick={() => updateMutation.mutate({ id: t.id, data: { display_name: form.display_name, system_prompt: form.system_prompt, custom_instructions: form.custom_instructions, tone: form.tone } })}
