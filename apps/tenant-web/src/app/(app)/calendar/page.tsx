@@ -708,6 +708,8 @@ function BulkRescheduleModal({ professionals, onClose, onDone }: {
   const todayISO = toISODate(new Date())
   const [fromDate, setFromDate] = useState(todayISO)
   const [toDate, setToDate] = useState(todayISO)
+  const [fromTime, setFromTime] = useState('00:00')
+  const [toTime, setToTime] = useState('23:59')
   const [professionalId, setProfessionalId] = useState('')
   const [message, setMessage] = useState('')
   const [error, setError] = useState('')
@@ -715,10 +717,9 @@ function BulkRescheduleModal({ professionals, onClose, onDone }: {
 
   const mutation = useMutation({
     mutationFn: () => {
-      const [fy, fm, fd] = fromDate.split('-').map(Number)
-      const [ty, tm, td] = toDate.split('-').map(Number)
-      const from = new Date(fy, fm - 1, fd) // start of from-day (local)
-      const to = new Date(ty, tm - 1, td + 1) // exclusive: start of the day after to-day
+      // Horários digitados são horário de São Paulo (UTC−03) → converter para UTC "Z"
+      const from = new Date(`${fromDate}T${fromTime}:00-03:00`)
+      const to = new Date(`${toDate}T${toTime}:59-03:00`) // inclusivo até o fim do minuto final
       return appointmentsApi.bulkReschedule({
         from: from.toISOString(),
         to: to.toISOString(),
@@ -733,7 +734,9 @@ function BulkRescheduleModal({ professionals, onClose, onDone }: {
   function confirm() {
     setError('')
     if (!fromDate || !toDate) { setError('Informe o período.'); return }
+    if (!fromTime || !toTime) { setError('Informe os horários de início e fim.'); return }
     if (fromDate > toDate) { setError('A data inicial deve ser anterior à final.'); return }
+    if (`${toDate}T${toTime}` <= `${fromDate}T${fromTime}`) { setError('O horário final deve ser depois do horário inicial.'); return }
     if (!window.confirm('Tem certeza? Os agendamentos do período serão CANCELADOS e os clientes receberão um WhatsApp para remarcar.')) return
     mutation.mutate()
   }
@@ -771,6 +774,14 @@ function BulkRescheduleModal({ professionals, onClose, onDone }: {
           <div>
             <label className={labelCls}>Até</label>
             <input type="date" value={toDate} onChange={(e) => setToDate(e.target.value)} className={inputCls} />
+          </div>
+          <div>
+            <label className={labelCls}>Hora início</label>
+            <input type="time" value={fromTime} onChange={(e) => setFromTime(e.target.value)} className={inputCls} />
+          </div>
+          <div>
+            <label className={labelCls}>Hora fim</label>
+            <input type="time" value={toTime} onChange={(e) => setToTime(e.target.value)} className={inputCls} />
           </div>
         </div>
 

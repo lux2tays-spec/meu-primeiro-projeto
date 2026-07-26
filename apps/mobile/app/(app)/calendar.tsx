@@ -208,6 +208,8 @@ export default function CalendarScreen() {
   const [bulkOpen, setBulkOpen] = useState(false)
   const [bulkFrom, setBulkFrom] = useState(todayStr)
   const [bulkTo, setBulkTo] = useState(todayStr)
+  const [bulkFromTime, setBulkFromTime] = useState('00:00')
+  const [bulkToTime, setBulkToTime] = useState('23:59')
   const [bulkProfessionalId, setBulkProfessionalId] = useState<string | null>(null)
   const [bulkMessage, setBulkMessage] = useState('')
   const [bulkConfirm, setBulkConfirm] = useState(false)
@@ -216,6 +218,8 @@ export default function CalendarScreen() {
     const t = toISO(new Date())
     setBulkFrom(t)
     setBulkTo(t)
+    setBulkFromTime('00:00')
+    setBulkToTime('23:59')
     setBulkProfessionalId(null)
     setBulkMessage('')
     setBulkOpen(true)
@@ -223,8 +227,10 @@ export default function CalendarScreen() {
 
   const bulkMutation = useMutation({
     mutationFn: () => appointmentsApi.bulkReschedule({
-      from: new Date(`${bulkFrom}T00:00:00`).toISOString(),
-      to: new Date(`${bulkTo}T23:59:59`).toISOString(),
+      // Horários digitados são horário de São Paulo (UTC−03) → converter para UTC "Z"
+      from: new Date(`${bulkFrom}T${bulkFromTime}:00-03:00`).toISOString(),
+      to: new Date(`${bulkTo}T${bulkToTime}:59-03:00`).toISOString(), // inclusivo até o fim do minuto final
+
       professional_id: bulkProfessionalId ?? undefined,
       message: bulkMessage.trim() || undefined,
     }),
@@ -239,6 +245,18 @@ export default function CalendarScreen() {
       toast.show(err.message ?? 'Não foi possível remarcar os agendamentos.', 'error')
     },
   })
+
+  function confirmBulk() {
+    if (!TIME_RE.test(bulkFromTime) || !TIME_RE.test(bulkToTime)) {
+      toast.show('Horário inválido. Use o formato HH:MM (ex.: 14:30).', 'warning')
+      return
+    }
+    if (`${bulkTo}T${bulkToTime}` <= `${bulkFrom}T${bulkFromTime}`) {
+      toast.show('O horário final deve ser depois do horário inicial.', 'warning')
+      return
+    }
+    setBulkConfirm(true)
+  }
 
   // ── Render ────────────────────────────────────────────────────────────────
   const monthLabel = `${MONTHS[selected.getMonth()]} ${selected.getFullYear()}`
@@ -538,10 +556,32 @@ export default function CalendarScreen() {
               </View>
 
               <Text style={styles.fieldLabel}>De</Text>
-              <DateStepper value={bulkFrom} onChange={(v) => { setBulkFrom(v); if (v > bulkTo) setBulkTo(v) }} />
+              <View style={styles.dateTimeRow}>
+                <DateStepper value={bulkFrom} onChange={(v) => { setBulkFrom(v); if (v > bulkTo) setBulkTo(v) }} />
+                <TextInput
+                  style={styles.timeInput}
+                  value={bulkFromTime}
+                  onChangeText={setBulkFromTime}
+                  placeholder="HH:MM"
+                  placeholderTextColor={colors.textDisabled}
+                  keyboardType="numbers-and-punctuation"
+                  maxLength={5}
+                />
+              </View>
 
               <Text style={styles.fieldLabel}>Até</Text>
-              <DateStepper value={bulkTo} onChange={(v) => { setBulkTo(v); if (v < bulkFrom) setBulkFrom(v) }} />
+              <View style={styles.dateTimeRow}>
+                <DateStepper value={bulkTo} onChange={(v) => { setBulkTo(v); if (v < bulkFrom) setBulkFrom(v) }} />
+                <TextInput
+                  style={styles.timeInput}
+                  value={bulkToTime}
+                  onChangeText={setBulkToTime}
+                  placeholder="HH:MM"
+                  placeholderTextColor={colors.textDisabled}
+                  keyboardType="numbers-and-punctuation"
+                  maxLength={5}
+                />
+              </View>
 
               <Text style={styles.fieldLabel}>Profissional (opcional)</Text>
               <View style={styles.chipWrap}>
@@ -572,7 +612,7 @@ export default function CalendarScreen() {
               <Button
                 label="Cancelar horários e avisar clientes"
                 variant="danger"
-                onPress={() => setBulkConfirm(true)}
+                onPress={confirmBulk}
                 loading={bulkMutation.isPending}
               />
             </ScrollView>
@@ -583,7 +623,7 @@ export default function CalendarScreen() {
       <ConfirmDialog
         visible={bulkConfirm}
         title="Remarcação em massa"
-        message={`Cancelar todos os agendamentos de ${dateLabelPt(bulkFrom)} até ${dateLabelPt(bulkTo)}${bulkProfessionalId ? ' do profissional selecionado' : ''} e avisar os clientes por WhatsApp?`}
+        message={`Cancelar todos os agendamentos de ${dateLabelPt(bulkFrom)} às ${bulkFromTime} até ${dateLabelPt(bulkTo)} às ${bulkToTime}${bulkProfessionalId ? ' do profissional selecionado' : ''} e avisar os clientes por WhatsApp?`}
         confirmLabel="Cancelar e avisar"
         cancelLabel="Voltar"
         variant="danger"
