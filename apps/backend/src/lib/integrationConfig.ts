@@ -93,6 +93,51 @@ export async function invalidateSmtpConfig(): Promise<void> {
   await redis.del(SMTP_CACHE_KEY)
 }
 
+// ── E-mail (provedor + remetentes) ───────────────────────────────────────────
+// Escolhe o provedor de envio (API do Resend ou SMTP legado) e define os
+// remetentes por finalidade. Campos vazios caem no smtp_config.from / default.
+
+export type EmailConfig = {
+  provider: 'smtp' | 'resend'
+  resend_api_key: string // secret
+  from_contato: string   // validação, reset de senha, troca de e-mail, cobrança
+  from_agenda: string    // convites de agendamento (.ics)
+  from_suporte: string   // e-mails de suporte
+}
+
+const EMAIL_DEFAULTS: EmailConfig = {
+  provider: 'smtp',
+  resend_api_key: '',
+  from_contato: '',
+  from_agenda: '',
+  from_suporte: '',
+}
+
+const EMAIL_CACHE_KEY = 'integration:email:config'
+
+export async function getEmailConfig(): Promise<EmailConfig> {
+  const cached = await redis.get(EMAIL_CACHE_KEY)
+  if (cached) return JSON.parse(cached)
+  const { rows: [row] } = await db.query(
+    'SELECT value FROM platform_settings WHERE key = $1', ['email_config']
+  )
+  const raw: Record<string, any> = row?.value ?? {}
+  const cfg: EmailConfig = {
+    provider: raw.provider === 'resend' ? 'resend' : 'smtp',
+    // Secret stored encrypted at rest (decrypt tolerates legacy plaintext).
+    resend_api_key: decrypt(String(raw.resend_api_key ?? '')) || (process.env.RESEND_API_KEY ?? ''),
+    from_contato: String(raw.from_contato ?? ''),
+    from_agenda: String(raw.from_agenda ?? ''),
+    from_suporte: String(raw.from_suporte ?? ''),
+  }
+  await redis.setex(EMAIL_CACHE_KEY, CACHE_TTL, JSON.stringify(cfg))
+  return cfg
+}
+
+export async function invalidateEmailConfig(): Promise<void> {
+  await redis.del(EMAIL_CACHE_KEY)
+}
+
 // ── Google OAuth ─────────────────────────────────────────────────────────────
 
 export type GoogleConfig = {

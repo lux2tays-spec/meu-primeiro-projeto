@@ -15,7 +15,8 @@ const APPT_QUERY = `
          c.name AS customer_name, c.email AS customer_email,
          t.name AS business_name,
          COALESCE(NULLIF(TRIM(CONCAT_WS(', ',
-           NULLIF(ac.address, ''), NULLIF(ac.neighborhood, ''), NULLIF(ac.city, ''))), ''), '') AS location
+           NULLIF(ac.address, ''), NULLIF(ac.neighborhood, ''),
+           NULLIF(TRIM(CONCAT_WS(' - ', NULLIF(ac.city, ''), NULLIF(ac.state, ''))), ''))), ''), '') AS location
   FROM appointments a
   JOIN services      s  ON s.id = a.service_id
   JOIN professionals p  ON p.id = a.professional_id

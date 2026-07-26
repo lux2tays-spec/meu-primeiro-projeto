@@ -1,6 +1,6 @@
 import nodemailer from 'nodemailer'
 import { buildAppointmentIcs } from './ics'
-import { getSmtpConfig } from './integrationConfig'
+import { getEmailConfig, getSmtpConfig } from './integrationConfig'
 
 let _transporter: nodemailer.Transporter | null = null
 let _transporterSig = '' // config signature — rebuild when Root Admin changes SMTP
@@ -45,13 +45,118 @@ async function getMailer(): Promise<Mailer> {
   return { transporter: _transporter, hasSmtp: !!cfg.host, from: cfg.from || DEFAULT_FROM }
 }
 
+// ── Remetentes por finalidade ────────────────────────────────────────────────
+
+type FromKind = 'contato' | 'agenda' | 'suporte'
+
+/**
+ * Resolves the "from" address for a given purpose. Falls back to the SMTP
+ * from / DEFAULT_FROM when the specific sender is not configured.
+ */
+async function resolveFrom(kind: FromKind): Promise<string> {
+  const cfg = await getEmailConfig()
+  const specific =
+    kind === 'contato' ? cfg.from_contato :
+    kind === 'agenda' ? cfg.from_agenda :
+    cfg.from_suporte
+  if (specific) return specific
+  const smtp = await getSmtpConfig()
+  return smtp.from || DEFAULT_FROM
+}
+
+/** Extracts the bare address from 'Name <email@x>' (or returns the input as-is). */
+function extractEmailAddress(from: string): string {
+  return from.replace(/.*<|>.*/g, '').trim()
+}
+
+// ── Envio central (Resend API com fallback SMTP) ─────────────────────────────
+
+export interface SendEmailParams {
+  from: string
+  to: string
+  subject: string
+  html: string
+  /** iCalendar content — attached as convite.ics (method=REQUEST) when present. */
+  ics?: string
+}
+
+/**
+ * Central email dispatcher. When the Root Admin selects the Resend provider
+ * (and an API key is configured) the email goes out via Resend's HTTP API;
+ * otherwise it uses the existing SMTP/nodemailer path.
+ * Returns true when the email was accepted by the transport.
+ */
+export async function sendEmail(p: SendEmailParams): Promise<boolean> {
+  const cfg = await getEmailConfig()
+  if (cfg.provider === 'resend' && cfg.resend_api_key) {
+    return sendViaResend(cfg.resend_api_key, p)
+  }
+  return sendViaSmtp(p)
+}
+
+async function sendViaResend(apiKey: string, p: SendEmailParams): Promise<boolean> {
+  try {
+    const body: Record<string, unknown> = {
+      from: p.from,
+      to: p.to,
+      subject: p.subject,
+      html: p.html,
+    }
+    if (p.ics) {
+      body.attachments = [
+        { filename: 'convite.ics', content: Buffer.from(p.ics, 'utf8').toString('base64') },
+      ]
+    }
+    const res = await fetch('https://api.resend.com/emails', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(body),
+    })
+    if (!res.ok) {
+      const errText = await res.text().catch(() => '')
+      console.error(`[EMAIL] Resend retornou erro ${res.status}:`, errText)
+      return false
+    }
+    return true
+  } catch (err) {
+    // Never let an email failure break the caller's flow.
+    console.error('[EMAIL] Falha ao enviar via Resend:', err)
+    return false
+  }
+}
+
+async function sendViaSmtp(p: SendEmailParams): Promise<boolean> {
+  const { transporter, hasSmtp, from: defaultFrom } = await getMailer()
+  const mail: nodemailer.SendMailOptions = {
+    from: p.from || defaultFrom,
+    to: p.to,
+    subject: p.subject,
+    html: p.html,
+  }
+  if (p.ics) {
+    ;(mail as any).icalEvent = { method: 'REQUEST', content: p.ics }
+    mail.attachments = [
+      { filename: 'convite.ics', content: p.ics, contentType: 'text/calendar; method=REQUEST' },
+    ]
+  }
+  const info = await transporter.sendMail(mail)
+  if (!hasSmtp) {
+    console.log('[EMAIL DEV] Preview URL:', nodemailer.getTestMessageUrl(info))
+  }
+  return !!info?.accepted?.length || !hasSmtp
+}
+
+// ── E-mails transacionais (remetente: contato) ───────────────────────────────
+
 export async function sendVerificationEmail(to: string, name: string, token: string) {
   const baseUrl = process.env.TENANT_WEB_URL ?? 'http://localhost:3002'
   const link = `${baseUrl}/confirmar-email?token=${token}`
 
-  const { transporter, hasSmtp, from } = await getMailer()
-  const info = await transporter.sendMail({
-    from,
+  await sendEmail({
+    from: await resolveFrom('contato'),
     to,
     subject: 'Confirme seu e-mail — AiConfirma',
     html: `
@@ -67,16 +172,11 @@ export async function sendVerificationEmail(to: string, name: string, token: str
       </div>
     `,
   })
-
-  if (!hasSmtp) {
-    console.log('[EMAIL DEV] Preview URL:', nodemailer.getTestMessageUrl(info))
-  }
 }
 
 export async function sendPasswordResetEmail(to: string, name: string, link: string) {
-  const { transporter, hasSmtp, from } = await getMailer()
-  const info = await transporter.sendMail({
-    from,
+  await sendEmail({
+    from: await resolveFrom('contato'),
     to,
     subject: 'Redefinição de senha — AiConfirma',
     html: `
@@ -92,19 +192,14 @@ export async function sendPasswordResetEmail(to: string, name: string, link: str
       </div>
     `,
   })
-
-  if (!hasSmtp) {
-    console.log('[EMAIL DEV] Preview URL:', nodemailer.getTestMessageUrl(info))
-  }
 }
 
 export async function sendEmailChangeEmail(to: string, name: string, token: string) {
   const baseUrl = process.env.TENANT_WEB_URL ?? 'http://localhost:3002'
   const link = `${baseUrl}/confirmar-troca-email?token=${token}`
 
-  const { transporter, hasSmtp, from } = await getMailer()
-  const info = await transporter.sendMail({
-    from,
+  await sendEmail({
+    from: await resolveFrom('contato'),
     to,
     subject: 'Confirme seu novo e-mail — AiConfirma',
     html: `
@@ -120,11 +215,9 @@ export async function sendEmailChangeEmail(to: string, name: string, token: stri
       </div>
     `,
   })
-
-  if (!hasSmtp) {
-    console.log('[EMAIL DEV] Preview URL:', nodemailer.getTestMessageUrl(info))
-  }
 }
+
+// ── Convite de agendamento (remetente: agenda) ───────────────────────────────
 
 export interface AppointmentInvite {
   to: string
@@ -151,10 +244,17 @@ export async function sendAppointmentInvite(inv: AppointmentInvite): Promise<boo
     timeZone: 'America/Sao_Paulo', hour: '2-digit', minute: '2-digit',
   }).format(inv.start)
 
-  const title = `${inv.serviceName} — ${inv.businessName}`
-  const description = `Agendamento de ${inv.serviceName} com ${inv.professionalName} na ${inv.businessName}.`
+  const from = await resolveFrom('agenda')
+  const organizerEmail = extractEmailAddress(from) || 'noreply@aiconfirma.com.br'
 
-  const { transporter, hasSmtp, from } = await getMailer()
+  const title = `${inv.serviceName} — ${inv.businessName}`
+  const description = [
+    `Estabelecimento: ${inv.businessName}`,
+    `Serviço: ${inv.serviceName}`,
+    ...(inv.professionalName ? [`Profissional: ${inv.professionalName}`] : []),
+    `Quando: ${dateFmt} às ${timeFmt}`,
+    ...(inv.location ? [`Endereço: ${inv.location}`] : []),
+  ].join('\n')
 
   const ics = buildAppointmentIcs({
     uid: inv.uid,
@@ -165,10 +265,10 @@ export async function sendAppointmentInvite(inv: AppointmentInvite): Promise<boo
     description,
     location: inv.location,
     organizerName: inv.businessName,
-    organizerEmail: from.replace(/.*<|>.*/g, '') || 'noreply@aiconfirma.com.br',
+    organizerEmail,
   })
 
-  const info = await transporter.sendMail({
+  return sendEmail({
     from,
     to: inv.to,
     subject: `Seu agendamento: ${inv.serviceName} — ${dateFmt} às ${timeFmt}`,
@@ -185,12 +285,6 @@ export async function sendAppointmentInvite(inv: AppointmentInvite): Promise<boo
         <p style="color:#666;font-size:13px">O convite de calendário está anexado — abra para adicionar à sua agenda. 📅</p>
       </div>
     `,
-    icalEvent: { method: 'REQUEST', content: ics },
-    attachments: [{ filename: 'agendamento.ics', content: ics, contentType: 'text/calendar; method=REQUEST' }],
+    ics,
   })
-
-  if (!hasSmtp) {
-    console.log('[EMAIL DEV] Invite preview URL:', nodemailer.getTestMessageUrl(info))
-  }
-  return !!info?.accepted?.length || !hasSmtp
 }

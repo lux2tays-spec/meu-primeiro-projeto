@@ -85,23 +85,31 @@ function WhatsAppTab() {
   )
 }
 
-// ── E-mail (SMTP) ─────────────────────────────────────────────────────────────
+// ── E-mail (provedor, remetentes e SMTP) ──────────────────────────────────────
 const SMTP_DEFAULT = { host: '', port: 587, user: '', pass: '', secure: false, from: '' }
+const EMAIL_DEFAULT = { provider: 'smtp', resend_api_key: '', from_contato: '', from_agenda: '', from_suporte: '' }
 
 function EmailTab() {
   const qc = useQueryClient()
   const [success, setSuccess] = useState('')
   const [smtp, setSmtp] = useState<any>(SMTP_DEFAULT)
+  const [email, setEmail] = useState<any>(EMAIL_DEFAULT)
 
   const { data: settings, isLoading, isError } = useQuery({ queryKey: ['root-settings'], queryFn: rootApi.settings })
 
   useEffect(() => {
     if (settings?.smtp_config) setSmtp({ ...SMTP_DEFAULT, ...settings.smtp_config })
+    if (settings?.email_config) setEmail({ ...EMAIL_DEFAULT, ...settings.email_config })
   }, [settings])
 
   const showSuccess = (msg: string) => { setSuccess(msg); setTimeout(() => setSuccess(''), 3000) }
 
-  const mutation = useMutation({
+  const emailMutation = useMutation({
+    mutationFn: () => rootApi.updateSettings('email_config', email),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['root-settings'] }); showSuccess('Configuração de e-mail salva!') },
+  })
+
+  const smtpMutation = useMutation({
     mutationFn: () => rootApi.updateSettings('smtp_config', { ...smtp, port: Number(smtp.port) || 587 }),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['root-settings'] }); showSuccess('Configuração SMTP salva!') },
   })
@@ -112,11 +120,44 @@ function EmailTab() {
   return (
     <div className="space-y-6">
       {success && <SuccessBox msg={success} />}
+
+      {/* Provedor + remetentes */}
       <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100 space-y-4">
         <div>
-          <h2 className="font-semibold text-gray-900">Servidor de E-mail (SMTP)</h2>
+          <h2 className="font-semibold text-gray-900">Envio de E-mail (provedor e remetentes)</h2>
           <p className="text-xs text-gray-500 mt-1">
-            Usado para enviar e-mails automáticos da plataforma (confirmações, redefinição de senha, convites). A Senha
+            Escolha por onde os e-mails da plataforma saem. Com o <strong>Resend (API)</strong>, o domínio dos
+            remetentes precisa estar <strong>verificado no painel do Resend</strong> (registros DNS: SPF/DKIM) —
+            caso contrário os envios são recusados. A API Key fica mascarada — deixe como está para manter.
+          </p>
+        </div>
+        <div className="grid grid-cols-2 gap-4">
+          <div className="col-span-1">
+            <label className="block text-sm font-medium text-gray-700 mb-1">Provedor de envio</label>
+            <select value={email.provider} onChange={(e) => setEmail((s: any) => ({ ...s, provider: e.target.value }))}
+              className="w-full h-10 px-3 rounded-xl border border-gray-200 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-primary">
+              <option value="smtp">SMTP</option>
+              <option value="resend">Resend (API)</option>
+            </select>
+          </div>
+          <SF label="Resend API Key 🔒" value={email.resend_api_key} onChange={(v: string) => setEmail((s: any) => ({ ...s, resend_api_key: v }))} type="password" placeholder="re_••••••••" />
+          <SF label="Remetente — Contato (validação/senha/cobrança)" value={email.from_contato} onChange={(v: string) => setEmail((s: any) => ({ ...s, from_contato: v }))} placeholder="AíConfirma <contato@aiconfirma.com.br>" full />
+          <SF label="Remetente — Agenda (convites)" value={email.from_agenda} onChange={(v: string) => setEmail((s: any) => ({ ...s, from_agenda: v }))} placeholder="AíConfirma Agenda <agenda@aiconfirma.com.br>" full />
+          <SF label="Remetente — Suporte" value={email.from_suporte} onChange={(v: string) => setEmail((s: any) => ({ ...s, from_suporte: v }))} placeholder="Suporte AíConfirma <suporte@aiconfirma.com.br>" full />
+        </div>
+        <div className="bg-amber-50 rounded-xl p-3 text-xs text-amber-700">
+          Remetentes vazios usam o "Remetente (from)" do SMTP abaixo como padrão. Se o provedor for Resend mas a
+          API Key estiver vazia, o envio cai automaticamente no SMTP (fallback).
+        </div>
+        <SaveBtn pending={emailMutation.isPending} onClick={() => emailMutation.mutate()} label="Salvar Envio de E-mail" />
+      </div>
+
+      {/* SMTP (fallback) */}
+      <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100 space-y-4">
+        <div>
+          <h2 className="font-semibold text-gray-900">SMTP (fallback)</h2>
+          <p className="text-xs text-gray-500 mt-1">
+            Usado quando o provedor é "SMTP" ou como fallback do Resend sem API Key. A Senha
             fica mascarada — deixe como está para manter.
           </p>
         </div>
@@ -131,7 +172,7 @@ function EmailTab() {
           <input type="checkbox" checked={smtp.secure} onChange={(e) => setSmtp((s: any) => ({ ...s, secure: e.target.checked }))} className="rounded" />
           Usar SSL/TLS (porta 465)
         </label>
-        <SaveBtn pending={mutation.isPending} onClick={() => mutation.mutate()} label="Salvar SMTP" />
+        <SaveBtn pending={smtpMutation.isPending} onClick={() => smtpMutation.mutate()} label="Salvar SMTP" />
       </div>
     </div>
   )

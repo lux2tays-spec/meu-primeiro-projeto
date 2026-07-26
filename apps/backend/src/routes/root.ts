@@ -29,12 +29,14 @@ const SECRET_FIELDS: Record<string, string[]> = {
   ai_config: ['api_key', 'transcription_api_key'],
   evolution_config: ['key', 'webhook_secret'],
   smtp_config: ['pass'],
+  email_config: ['resend_api_key'],
   google_config: ['client_secret'],
 }
 import { invalidatePaymentConfig } from '../lib/paymentConfig'
 import {
   invalidateEvolutionConfig,
   invalidateSmtpConfig,
+  invalidateEmailConfig,
   invalidateGoogleConfig,
   getEvolutionConfig,
 } from '../lib/integrationConfig'
@@ -486,6 +488,7 @@ export const rootRoutes: FastifyPluginAsync = async (app) => {
     if (key === 'payment_config') await invalidatePaymentConfig()
     if (key === 'evolution_config') await invalidateEvolutionConfig()
     if (key === 'smtp_config') await invalidateSmtpConfig()
+    if (key === 'email_config') await invalidateEmailConfig()
     if (key === 'google_config') await invalidateGoogleConfig()
     if (key === 'brand_config') await invalidateBrandConfig()
     // Governance: record WHO changed the config (secret values never logged).
