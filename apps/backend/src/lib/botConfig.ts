@@ -50,6 +50,7 @@ export type BotConfig = {
   // base behaviour rules (global)
   never_reveal_ai: boolean
   allow_payment_talk: boolean    // may the bot discuss payment/pix/discounts?
+  use_emojis: boolean            // when false (or formal tone) → no emojis at all
   max_reply_lines: number        // "mensagens de no máximo N linhas"
   base_extra_instructions: string
   // global defaults for per-tenant toggles (agent_config overrides these)
@@ -70,6 +71,7 @@ export const BOT_DEFAULTS: BotConfig = {
   hybrid_sales_signal: 'agend|marc|hor[aá]ri|pre[cç]o|valor|quero|fech|confirm|dispon|cancel|remarc|reserv|quanto|orç',
   never_reveal_ai: true,
   allow_payment_talk: false,
+  use_emojis: true,
   max_reply_lines: 4,
   base_extra_instructions: '',
   allow_price_list_default: false,

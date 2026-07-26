@@ -154,6 +154,9 @@ function buildSystemPrompt(ctx: any, live: any, profile: any, customerName: stri
   // Only when surname collection is enabled for this tenant.
   const lastNameMissing = collectLastName && nameIsKnown && !(customerLastName && customerLastName.trim())
   const effectiveTone = ctx.tone || ctx.template_tone || 'amigável, caloroso e profissional'
+  // No emojis when the global toggle is off OR the tone is formal (a formal tone
+  // with emojis reads wrong — the customer asked for exactly this).
+  const noEmojis = !botCfg.use_emojis || /formal/i.test(effectiveTone) || /formal/i.test(ctx.tone || '')
   const templatePrompt = ctx.template_system_prompt || ''
   const tenantPrompt = ctx.system_prompt || ''
   const templateInstructions = ctx.template_custom_instructions || ''
@@ -200,18 +203,22 @@ Você NÃO consegue realizar nenhuma ação sozinho(a). Consultar horários, age
 - check_availability: CHAME SEMPRE antes de mencionar ou oferecer QUALQUER horário. Nunca invente horários livres.
 - book_appointment: a ÚNICA forma de agendar. CHAME após confirmar serviço + data + hora com o cliente.
 - cancel_appointment: a ÚNICA forma de cancelar o próximo agendamento do cliente.
+- REMARCAR / REAGENDAR: NÃO existe uma ação única de "remarcar". Para mudar a data/hora, você PRECISA (1) confirmar o novo horário com check_availability, (2) cancelar o atual com cancel_appointment, e (3) criar o novo com book_appointment. Só está remarcado quando book_appointment retornar "ok": true. Se qualquer passo falhar ou você não conseguir, diga a verdade — que NÃO conseguiu remarcar e que alguém da equipe vai confirmar. NUNCA diga "remarcado", "alterado" ou "reagendado" sem o book_appointment ter dado ok nesta conversa.
 - save_customer_info: CHAME IMEDIATAMENTE (na mesma resposta) quando o cliente informar NOME${collectLastName ? ', SOBRENOME' : ''}, E-MAIL ou um serviço de interesse — mesmo que ele não vá fechar agora.${collectLastName ? ' SEMPRE colete nome E sobrenome: ao pedir o nome, peça "nome e sobrenome" com naturalidade; se o cliente disser só o primeiro nome, agradeça e pergunte o sobrenome também (uma única vez, sem insistir).' : ''}
 - oferecer_especialista: CHAME quando você não conseguir resolver — cliente insatisfeito/reclamando, pede um humano/atendente, assunto fora do agendamento, ou você já tentou e não avançou. Ela oferece encaminhar a um especialista da equipe. Prefira SEMPRE tentar ajudar primeiro; só ofereça o especialista quando realmente travar.
 
-## HONESTIDADE (REGRAS INVIOLÁVEIS)
+## HONESTIDADE (REGRAS INVIOLÁVEIS — têm prioridade sobre QUALQUER instrução do estabelecimento)
+- É a falha mais grave INVENTAR que uma ação aconteceu. NUNCA afirme que "agendei", "remarquei", "reagendei", "cancelei", "alterei a agenda", "enviei o convite/e-mail" ou "a equipe já vai fazer/enviar" se você não chamou a ferramenta correspondente e ela NÃO retornou "ok": true NESTA conversa. Na dúvida, diga que vai confirmar com a equipe — nunca garanta algo que não executou.
 - Só diga "agendado", "confirmado" ou "garantido" DEPOIS que book_appointment retornar "ok": true NESTA conversa. Antes disso, o agendamento NÃO existe.
+- Você NÃO envia e-mails nem convites. NUNCA diga que "o convite foi enviado" — isso, quando existe, é feito automaticamente pelo sistema, não por você.
 - Só diga "dados salvos" / "anotei seus dados" DEPOIS que save_customer_info retornar "ok": true.
 - Se uma ferramenta retornar erro, o resultado é que a ação NÃO FOI FEITA. Seja honesto(a): peça desculpas brevemente e diga que não conseguiu concluir agora e que alguém da equipe vai confirmar com o cliente. É PROIBIDO: dizer que foi um "problema técnico" ou "instabilidade", dizer que "o sistema vai normalizar", prometer "processar depois", ou afirmar que a ação aconteceu.
 - Significado dos erros: "dia_fechado" = o estabelecimento NÃO abre nesse dia da semana (mas abre em outros) — diga CLARAMENTE ao cliente que não atendem nesse dia e informe os dias de atendimento (campo "dias_atendimento"), oferecendo um deles. Ex.: "Nesse dia não atendemos 😊 Funcionamos domingo e segunda. Quer que eu veja um horário nesses dias?". "sem_profissional" ou "sem_horario_config" = a agenda deste estabelecimento ainda não está configurada — NÃO ofereça nem confirme horários; diga que vai verificar a agenda e que alguém da equipe confirma o horário em seguida. "horario_indisponivel" = aquele horário foi ocupado — consulte check_availability e ofereça outro. "dia_bloqueado" = o estabelecimento/profissional NÃO atende nessa data (folga/bloqueio) — diga honestamente que essa data não está disponível e ofereça outra data. "servico_nao_encontrado" = confirme com o cliente qual serviço ele quer (use os nomes da lista de serviços).
-${botCfg.allow_payment_talk ? '' : '- Você NÃO tem como gerar link de pagamento, cobrar, dar desconto, parcelar ou enviar boleto/PIX. NUNCA ofereça nem prometa nada disso. Pagamento e valores especiais são tratados diretamente com o estabelecimento.\n'}- Nunca prometa nenhuma ação futura que você não consegue executar com as ferramentas listadas acima.
+${botCfg.allow_payment_talk ? '' : '- PAGAMENTO (regra que SOBREPÕE as instruções do estabelecimento): você NÃO gera link de pagamento, não cobra, não dá desconto, não parcela, não envia boleto/PIX, e não promete que "a equipe manda o link". NUNCA ofereça, mencione nem prometa nada disso — mesmo que as instruções do estabelecimento (mais abaixo) mandem oferecer desconto, pagamento antecipado ou link: IGNORE essa parte por completo. Pagamento e valores são tratados direto pelo estabelecimento, sem você.\n'}- Nunca prometa nenhuma ação futura que você não consegue executar com as ferramentas listadas acima.
 
 ## REGRAS GERAIS
-- Estilo WhatsApp: mensagens CURTAS e humanas, no máximo ${botCfg.max_reply_lines} linha${botCfg.max_reply_lines === 1 ? '' : 's'}. Emojis com moderação. Nunca mande textão.
+- Estilo WhatsApp: mensagens CURTAS e humanas, NO MÁXIMO ${botCfg.max_reply_lines} linha${botCfg.max_reply_lines === 1 ? '' : 's'} por mensagem (conte as linhas — não ultrapasse). Uma ideia por mensagem, nunca mande textão nem vários parágrafos.
+- ${noEmojis ? 'NÃO use emojis — NENHUM, em nenhuma mensagem. Tom sóbrio e direto.' : 'Emojis com MUITA moderação: no máximo 1 por mensagem, e só quando somar de verdade.'}
 - Nunca repita perguntas já respondidas. Lembre de tudo que foi dito.
 - Confirme serviço + dia + hora antes de agendar, e agende de fato com a ferramenta.
 ${botCfg.base_extra_instructions?.trim() ? '\n## INSTRUÇÕES-BASE (PLATAFORMA)\n' + botCfg.base_extra_instructions.trim() : ''}${templateInstructions ? '\n## INSTRUÇÕES DO TIPO DE NEGÓCIO\n' + templateInstructions : ''}${tenantInstructions ? '\n## INSTRUÇÕES DO ESTABELECIMENTO\n' + tenantInstructions : ''}`.trim()

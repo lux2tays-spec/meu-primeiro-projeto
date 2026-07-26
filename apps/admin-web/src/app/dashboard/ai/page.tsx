@@ -47,6 +47,7 @@ const BOT_DEFAULTS = {
   hybrid_sales_signal: 'agend|marc|hor[aá]ri|pre[cç]o|valor|quero|fech|confirm|dispon|cancel|remarc|reserv|quanto|orç',
   never_reveal_ai: true,
   allow_payment_talk: false,
+  use_emojis: true,
   max_reply_lines: 4,
   base_extra_instructions: '',
   allow_price_list_default: false,
@@ -129,7 +130,8 @@ function BotConfigPanel() {
       <div className="border-t border-gray-100 pt-5 space-y-4">
         <h3 className="font-semibold text-gray-900 text-sm">Regras-base de comportamento</h3>
         <Toggle label="Nunca revelar que é uma IA" hint="Faz o bot se apresentar como atendente humano." checked={cfg.never_reveal_ai} onChange={(b) => set('never_reveal_ai', b)} />
-        <Toggle label="Pode falar de pagamento" hint="Se desligado, o bot nunca oferece link/PIX/desconto/parcelamento." checked={cfg.allow_payment_talk} onChange={(b) => set('allow_payment_talk', b)} />
+        <Toggle label="Pode falar de pagamento" hint="Se desligado, o bot nunca oferece link/PIX/desconto/parcelamento — ignora até instruções do tenant que peçam isso." checked={cfg.allow_payment_talk} onChange={(b) => set('allow_payment_talk', b)} />
+        <Toggle label="Usar emojis" hint="Se desligado, o bot não usa nenhum emoji. Tom 'formal' no tenant também desliga os emojis automaticamente." checked={cfg.use_emojis} onChange={(b) => set('use_emojis', b)} />
         <NumField label="Máx. de linhas por mensagem" hint="Estilo WhatsApp: mensagens curtas." value={cfg.max_reply_lines} min={1} onChange={(n) => set('max_reply_lines', n)} />
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-1">Instruções-base extras (texto livre)</label>
