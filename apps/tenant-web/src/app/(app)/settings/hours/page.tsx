@@ -1,7 +1,8 @@
 'use client'
 import { useState, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { tenantApi } from '@/lib/api'
+import { tenantApi, friendlyMessage } from '@/lib/api'
+import Loading from '@/components/ui/Loading'
 
 const DAYS = ['Domingo', 'Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado']
 
@@ -14,23 +15,42 @@ const DEFAULT_ROWS: Row[] = DAYS.map((_, i) => ({
   enabled: i > 0 && i < 6,
 }))
 
+const selectCls = 'h-9 px-3 rounded-xl border border-gray-200 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-primary'
+
 export default function HoursPage() {
   const qc = useQueryClient()
-  const { data: saved, isLoading } = useQuery({ queryKey: ['hours'], queryFn: () => tenantApi.hours() })
+
+  // CFG-8: horário por PROFISSIONAL — '' = horário padrão do estabelecimento.
+  const [professionalId, setProfessionalId] = useState('')
+  const { data: professionals = [] } = useQuery({ queryKey: ['professionals'], queryFn: () => tenantApi.professionals() })
+
+  const { data: saved, isLoading } = useQuery({
+    queryKey: ['hours', professionalId],
+    queryFn: () => tenantApi.hours(professionalId || undefined),
+  })
   const [rows, setRows] = useState<Row[]>(DEFAULT_ROWS)
   const [ok, setOk] = useState(false)
+  const [error, setError] = useState('')
 
   useEffect(() => {
     if (!saved) return
+    // Sem professional_id o backend devolve TODAS as linhas (inclusive as de
+    // profissionais) — aqui filtramos só as do estabelecimento (professional_id nulo).
+    const relevant = (saved as any[]).filter((r) =>
+      professionalId ? r.professional_id === professionalId : !r.professional_id
+    )
     setRows(DEFAULT_ROWS.map((def) => {
-      const match = (saved as any[]).find((r) => r.day_of_week === def.day_of_week)
+      const match = relevant.find((r) => r.day_of_week === def.day_of_week)
       return match ? { ...def, start_time: match.start_time.slice(0, 5), end_time: match.end_time.slice(0, 5), enabled: true } : { ...def, enabled: false }
     }))
-  }, [saved])
+    setError('')
+  }, [saved, professionalId])
 
   const mutation = useMutation({
-    mutationFn: (data: Row[]) => tenantApi.saveHours(data),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['hours'] }); setOk(true); setTimeout(() => setOk(false), 2500) },
+    mutationFn: (data: Row[]) => tenantApi.saveHours(data, professionalId || undefined),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['hours'] }); setError(''); setOk(true); setTimeout(() => setOk(false), 2500) },
+    // CFG-6: falha ao salvar mostra mensagem amigável (nunca erro técnico).
+    onError: (e: any) => setError(friendlyMessage(e, 'Não foi possível salvar os horários. Tente novamente em instantes.')),
   })
 
   function toggle(i: number) { setRows((rs) => rs.map((r, idx) => idx === i ? { ...r, enabled: !r.enabled } : r)) }
@@ -38,11 +58,44 @@ export default function HoursPage() {
     setRows((rs) => rs.map((r, idx) => idx === i ? { ...r, [field]: v } : r))
   }
 
-  if (isLoading) return <div className="text-gray-400 text-sm">Carregando...</div>
+  // CFG-5: valida no cliente que a abertura vem antes do fechamento.
+  function save() {
+    setError('')
+    for (const r of rows) {
+      if (!r.enabled) continue
+      if (!r.start_time || !r.end_time || r.start_time >= r.end_time) {
+        setError(`${DAYS[r.day_of_week]}: o horário de abertura deve ser antes do horário de fechamento.`)
+        return
+      }
+    }
+    mutation.mutate(rows)
+  }
+
+  if (isLoading) return <Loading card />
+
+  const selectedPro = (professionals as any[]).find((p) => p.id === professionalId)
 
   return (
     <div className="max-w-2xl space-y-6">
-      <h1 className="text-2xl font-bold text-gray-900">Horários de funcionamento</h1>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <h1 className="text-2xl font-bold text-gray-900">Horários de funcionamento</h1>
+        <select
+          value={professionalId}
+          onChange={(e) => setProfessionalId(e.target.value)}
+          className={selectCls}
+          aria-label="Horários de qual profissional"
+        >
+          <option value="">Estabelecimento (padrão)</option>
+          {(professionals as any[]).map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+        </select>
+      </div>
+
+      {professionalId && (
+        <p className="text-sm text-gray-500 bg-blue-50 border border-blue-100 rounded-xl px-4 py-2.5">
+          Editando os horários de <span className="font-semibold">{selectedPro?.name}</span>.
+          Dias desativados seguem o horário padrão do estabelecimento.
+        </p>
+      )}
 
       <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
         {rows.map((row, i) => (
@@ -77,8 +130,10 @@ export default function HoursPage() {
         ))}
       </div>
 
+      {error && <div className="bg-red-50 text-red-600 text-sm rounded-xl px-4 py-2.5">{error}</div>}
+
       <button
-        onClick={() => mutation.mutate(rows)}
+        onClick={save}
         disabled={mutation.isPending}
         className="w-full h-11 bg-primary hover:bg-primary-dark text-white font-semibold rounded-xl transition-colors disabled:opacity-50"
       >
@@ -108,12 +163,14 @@ function DaysOffSection() {
       setForm({ date: '', professional_id: '', reason: '' })
       setError('')
     },
-    onError: (err: any) => setError(err.message),
+    onError: (err: any) => setError(friendlyMessage(err, 'Não foi possível adicionar a folga. Tente novamente.')),
   })
 
   const removeMutation = useMutation({
     mutationFn: (id: string) => tenantApi.removeDayOff(id),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['days-off'] }),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['days-off'] }); setError('') },
+    // CFG-6: remover folga com falha mostra mensagem amigável.
+    onError: (err: any) => setError(friendlyMessage(err, 'Não foi possível remover a folga. Tente novamente.')),
   })
 
   const inputClass = 'h-9 px-3 rounded-xl border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary bg-white'
@@ -127,7 +184,7 @@ function DaysOffSection() {
 
       <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
         {isLoading ? (
-          <p className="p-4 text-gray-400 text-sm">Carregando...</p>
+          <Loading />
         ) : (daysOff as any[]).length === 0 ? (
           <p className="p-4 text-gray-400 text-sm">Nenhuma folga ou bloqueio cadastrado.</p>
         ) : (

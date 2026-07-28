@@ -51,8 +51,31 @@ export const agentRoutes: FastifyPluginAsync = async (app) => {
   })
 
   app.patch('/config', async (request, reply) => {
-    const { tenant_id } = request.user
+    const { tenant_id, role } = request.user
+    if (!['owner', 'admin', 'root'].includes(role)) return reply.status(403).send({ error: 'Sem permissão' })
+
     const body = updateSchema.parse(request.body)
+
+    // CFG-15: ao remover um arquivo de catálogo do array, o arquivo físico em
+    // uploads/catalogs ficava órfão no disco para sempre. Calcula ANTES do
+    // UPDATE quais arquivos deste tenant saíram da lista, e os apaga do disco
+    // (best-effort) DEPOIS que o banco confirmar a gravação.
+    let removedCatalogPaths: string[] = []
+    if (body.catalog_files !== undefined) {
+      const { rows: [cur] } = await db.query(
+        'SELECT catalog_files FROM agent_config WHERE tenant_id = $1',
+        [tenant_id]
+      )
+      const currentFiles: { name?: string; url?: string }[] = Array.isArray(cur?.catalog_files)
+        ? cur.catalog_files
+        : []
+      const keptUrls = new Set(body.catalog_files.map((f) => f.url))
+      const ownPrefix = `/agent/uploads/${tenant_id}/`
+      removedCatalogPaths = currentFiles
+        .filter((f) => f.url && !keptUrls.has(f.url) && f.url.startsWith(ownPrefix))
+        // basename barra path traversal — só nomes de arquivo dentro da pasta do tenant
+        .map((f) => path.join(UPLOADS_DIR, tenant_id!, path.basename(f.url!)))
+    }
 
     const sets: string[] = []
     const values: unknown[] = []
@@ -74,6 +97,16 @@ export const agentRoutes: FastifyPluginAsync = async (app) => {
       values
     )
 
+    // CFG-15: banco atualizado com sucesso → remove do disco os arquivos que
+    // saíram do catálogo. Falha ao apagar não derruba a resposta (só loga).
+    for (const filePath of removedCatalogPaths) {
+      try {
+        if (fs.existsSync(filePath)) fs.unlinkSync(filePath)
+      } catch (err) {
+        request.log.warn({ err, filePath }, 'catálogo: falha ao remover arquivo do disco')
+      }
+    }
+
     await redis.del(`tenant:config:${tenant_id}`)
     // The tenant's own save can change handoff_* fields — drop the handoff cache too.
     await invalidateHandoffConfig(tenant_id!)
@@ -82,7 +115,8 @@ export const agentRoutes: FastifyPluginAsync = async (app) => {
 
   // Upload a catalog file (PDF or image)
   app.post('/config/upload', async (request, reply) => {
-    const { tenant_id } = request.user
+    const { tenant_id, role } = request.user
+    if (!['owner', 'admin', 'root'].includes(role)) return reply.status(403).send({ error: 'Sem permissão' })
 
     const tenantDir = path.join(UPLOADS_DIR, tenant_id!)
     if (!fs.existsSync(tenantDir)) fs.mkdirSync(tenantDir, { recursive: true })

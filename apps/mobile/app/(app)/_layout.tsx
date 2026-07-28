@@ -7,10 +7,15 @@ import { useAuthStore } from '@/lib/store'
 import { tenantApi } from '@/lib/api'
 import { onboardingSession } from '@/lib/onboarding-session'
 import { colors } from '@/lib/theme'
+import { useTheme } from '@/lib/theme-context'
 
 export default function AppLayout() {
   const token = useAuthStore((s) => s.token)
+  const role = useAuthStore((s) => s.role)
+  const theme = useTheme()
   const insets = useSafeAreaInsets()
+  // Colaborador (staff) não vê o módulo Financeiro na navegação.
+  const canSeeFinance = ['owner', 'admin', 'root'].includes(role ?? '')
 
   const { data: onboarding, isLoading: onboardingLoading } = useQuery({
     queryKey: ['onboarding'],
@@ -31,7 +36,7 @@ export default function AppLayout() {
     <Tabs
       screenOptions={{
         headerShown: false,
-        tabBarActiveTintColor: colors.primary,
+        tabBarActiveTintColor: theme.primary,
         tabBarInactiveTintColor: colors.textDisabled,
         // Lift the tab bar above the Android system navigation bar (home/back/
         // recents) so it never overlaps the menu icons. On iPhones with a home
@@ -60,10 +65,14 @@ export default function AppLayout() {
       />
       <Tabs.Screen
         name="financeiro"
-        options={{
-          title: 'Financeiro',
-          tabBarIcon: ({ color, size }) => <Ionicons name="cash-outline" size={size} color={color} />,
-        }}
+        options={
+          canSeeFinance
+            ? {
+                title: 'Financeiro',
+                tabBarIcon: ({ color, size }) => <Ionicons name="cash-outline" size={size} color={color} />,
+              }
+            : { href: null } // staff: fora da navegação
+        }
       />
       <Tabs.Screen
         name="customers"

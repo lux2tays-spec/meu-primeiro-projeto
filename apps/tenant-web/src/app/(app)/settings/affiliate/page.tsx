@@ -1,11 +1,12 @@
 'use client'
 import { useQuery } from '@tanstack/react-query'
 import { affiliateApi } from '@/lib/api'
+import Loading from '@/components/ui/Loading'
 
 export default function AffiliatePage() {
   const { data: affiliate, isLoading } = useQuery({ queryKey: ['affiliate'], queryFn: affiliateApi.me })
 
-  if (isLoading) return <div className="text-gray-400 text-sm">Carregando...</div>
+  if (isLoading) return <Loading card />
 
   const referralUrl = `${typeof window !== 'undefined' ? window.location.origin.replace(':3002', ':3002') : 'https://app.aiconfirma.com.br'}/register?ref=${affiliate?.referral_code}`
 
@@ -19,7 +20,8 @@ export default function AffiliatePage() {
       </div>
 
       {/* Stats */}
-      <div className="grid grid-cols-3 gap-4">
+      {/* UI-9: 1 coluna no mobile, 3 em telas maiores */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         {[
           { label: 'Indicações', value: affiliate?.total_referrals ?? 0 },
           { label: 'Pendentes', value: affiliate?.pending_count ?? 0 },

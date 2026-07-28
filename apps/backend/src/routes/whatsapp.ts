@@ -18,7 +18,8 @@ export const whatsappRoutes: FastifyPluginAsync = async (app) => {
   app.post('/connect', {
     config: { rateLimit: { max: 5, timeWindow: '1 minute' } },
   }, async (request, reply) => {
-    const { tenant_id } = request.user
+    const { tenant_id, role } = request.user
+    if (!['owner', 'admin', 'root'].includes(role)) return reply.status(403).send({ error: 'Sem permissão' })
     if (!tenant_id) return reply.status(400).send({ error: 'No tenant' })
 
     const instanceName = `tenant_${tenant_id.replace(/-/g, '')}`
@@ -121,7 +122,8 @@ export const whatsappRoutes: FastifyPluginAsync = async (app) => {
 
   // Disconnect WhatsApp
   app.post('/disconnect', async (request, reply) => {
-    const { tenant_id } = request.user
+    const { tenant_id, role } = request.user
+    if (!['owner', 'admin', 'root'].includes(role)) return reply.status(403).send({ error: 'Sem permissão' })
 
     const { rows: [instance] } = await db.query(
       'SELECT instance_name FROM whatsapp_instances WHERE tenant_id = $1',

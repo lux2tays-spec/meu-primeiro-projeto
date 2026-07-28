@@ -1,7 +1,7 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
-  ActivityIndicator, TextInput, Alert
+  ActivityIndicator, TextInput,
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { router, useLocalSearchParams } from 'expo-router'
@@ -10,7 +10,7 @@ import { useQuery, useMutation } from '@tanstack/react-query'
 import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
 import { Input } from '@/components/ui/Input'
-import { tenantApi, appointmentsApi, slotsApi, api } from '@/lib/api'
+import { tenantApi, appointmentsApi, slotsApi, customersApi, customerFullName, api, isPlanLimitError } from '@/lib/api'
 import { useToast } from '@/lib/toast'
 import { colors, font, spacing, radius } from '@/lib/theme'
 
@@ -41,7 +41,13 @@ function toDateStr(d: Date) {
 
 export default function NewAppointmentScreen() {
   const toast = useToast()
-  const { prefillDate } = useLocalSearchParams<{ prefillDate?: string }>()
+  const { prefillDate, prefillCustomerId, prefillCustomerName, prefillCustomerPhone } =
+    useLocalSearchParams<{
+      prefillDate?: string
+      prefillCustomerId?: string
+      prefillCustomerName?: string
+      prefillCustomerPhone?: string
+    }>()
 
   const [step, setStep] = useState<Step>('professional')
   const [selected, setSelected] = useState<{
@@ -51,16 +57,36 @@ export default function NewAppointmentScreen() {
     slot?: string
     date?: string
     notes?: string
-  }>({ date: prefillDate ?? toDateStr(new Date()) })
+  }>({
+    date: prefillDate ?? toDateStr(new Date()),
+    // SAL-22: vindo do detalhe do cliente, já entra com ele selecionado.
+    customer: prefillCustomerId
+      ? { id: prefillCustomerId, name: prefillCustomerName ?? '', phone: prefillCustomerPhone ?? '' }
+      : undefined,
+  })
+  // Pula o passo "cliente" só na primeira passagem quando veio pré-selecionado;
+  // voltar (seta) ainda permite trocar o cliente.
+  const [skipCustomerStep, setSkipCustomerStep] = useState(!!prefillCustomerId)
 
   const [customerSearch, setCustomerSearch] = useState('')
+  const [debouncedCustomerSearch, setDebouncedCustomerSearch] = useState('')
   const [newCustomerName, setNewCustomerName] = useState('')
   const [newCustomerPhone, setNewCustomerPhone] = useState('')
   const [isNewCustomer, setIsNewCustomer] = useState(false)
 
+  // Busca de clientes no SERVIDOR com debounce (não filtra lista limitada localmente).
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedCustomerSearch(customerSearch.trim()), 350)
+    return () => clearTimeout(t)
+  }, [customerSearch])
+
   const { data: professionals, isLoading: loadingPros } = useQuery({ queryKey: ['professionals'], queryFn: tenantApi.professionals })
-  const { data: services } = useQuery({ queryKey: ['services'], queryFn: tenantApi.services })
-  const { data: customers } = useQuery({ queryKey: ['customers'], queryFn: () => api.get<any[]>('/tenant/customers') })
+  const { data: services } = useQuery({ queryKey: ['services'], queryFn: () => tenantApi.services() })
+  const { data: customers, isLoading: loadingCustomers } = useQuery({
+    queryKey: ['customers', debouncedCustomerSearch],
+    queryFn: () => customersApi.list(debouncedCustomerSearch || undefined),
+    enabled: step === 'customer' && !isNewCustomer,
+  })
 
   const { data: slots, isLoading: loadingSlots } = useQuery({
     queryKey: ['slots', selected.professional?.id, selected.service?.id, selected.date],
@@ -93,14 +119,21 @@ export default function NewAppointmentScreen() {
       toast.show('Agendamento criado com sucesso!', 'success')
       router.back()
     },
-    onError: (err: any) => toast.show(err.message ?? 'Não foi possível criar o agendamento.', 'error'),
+    onError: (err: any) => {
+      if (isPlanLimitError(err)) {
+        toast.show(
+          'Você atingiu o limite de agendamentos do seu plano. Faça upgrade para continuar agendando.',
+          'warning',
+          { label: 'Ver planos', onPress: () => router.push('/(app)/settings/subscription') }
+        )
+      } else {
+        toast.show(err.message ?? 'Não foi possível criar o agendamento.', 'error')
+      }
+    },
   })
 
   const stepIndex = STEPS.indexOf(step) + 1
-  const filteredCustomers = customers?.filter((c) =>
-    c.name.toLowerCase().includes(customerSearch.toLowerCase()) ||
-    c.phone.includes(customerSearch)
-  ) ?? []
+  const filteredCustomers = customers ?? []
 
   const dateObj = new Date(selected.date + 'T12:00:00')
 
@@ -112,13 +145,24 @@ export default function NewAppointmentScreen() {
 
   function nextStep() {
     const idx = STEPS.indexOf(step)
-    if (idx < STEPS.length - 1) setStep(STEPS[idx + 1])
+    if (idx >= STEPS.length - 1) return
+    let next = STEPS[idx + 1]
+    if (next === 'customer' && skipCustomerStep && selected.customer?.id) {
+      setSkipCustomerStep(false)
+      next = 'datetime'
+    }
+    setStep(next)
   }
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
       <View style={styles.header}>
-        <TouchableOpacity onPress={prevStep} style={styles.backBtn}>
+        <TouchableOpacity
+          onPress={prevStep}
+          style={styles.backBtn}
+          accessibilityRole="button"
+          accessibilityLabel="Voltar"
+        >
           <Ionicons name="arrow-back" size={22} color={colors.text} />
         </TouchableOpacity>
         <Text style={styles.title}>Novo agendamento</Text>
@@ -167,25 +211,62 @@ export default function NewAppointmentScreen() {
           </View>
         )}
 
-        {/* Step 2: Service */}
-        {step === 'service' && (
-          <View style={styles.step}>
-            <Text style={styles.stepTitle}>Qual serviço?</Text>
-            {services?.map((s) => (
-              <TouchableOpacity
-                key={s.id}
-                style={[styles.optionCard, selected.service?.id === s.id && styles.optionCardActive]}
-                onPress={() => { setSelected((prev) => ({ ...prev, service: s })); nextStep() }}
-              >
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.optionLabel}>{s.name}</Text>
-                  <Text style={styles.optionSub}>{s.duration_minutes} min · R$ {Number(s.price).toFixed(2).replace('.', ',')}</Text>
+        {/* Step 2: Service — SAL-17: só serviços do profissional escolhido */}
+        {step === 'service' && (() => {
+          // Serviço com profissionais vinculados só aparece se incluir o
+          // escolhido (agendar fora do vínculo não gera comissão). Serviço sem
+          // vínculo nenhum aparece para todos, com aviso.
+          const availableServices = (services ?? []).filter(
+            (s: any) =>
+              !s.professionals?.length ||
+              s.professionals.some((p: any) => p.id === selected.professional?.id)
+          )
+          return (
+            <View style={styles.step}>
+              <Text style={styles.stepTitle}>Qual serviço?</Text>
+              {selected.professional && (
+                <Text style={styles.stepHint}>
+                  Mostrando os serviços que {selected.professional.name} realiza.
+                </Text>
+              )}
+              {availableServices.length === 0 ? (
+                <View style={styles.emptyState}>
+                  <Ionicons name="cut-outline" size={48} color={colors.textDisabled} />
+                  <Text style={styles.emptyStateTitle}>Nenhum serviço para este profissional</Text>
+                  <Text style={styles.emptyStateSub}>
+                    Vá em Configurações → Serviços e vincule {selected.professional?.name ?? 'o profissional'} aos
+                    serviços que ele realiza.
+                  </Text>
+                  <TouchableOpacity
+                    style={styles.emptyStateBtn}
+                    onPress={() => router.replace('/(app)/settings/services')}
+                  >
+                    <Text style={styles.emptyStateBtnText}>Ir para Serviços</Text>
+                  </TouchableOpacity>
                 </View>
-                <Ionicons name="chevron-forward" size={18} color={colors.textDisabled} />
-              </TouchableOpacity>
-            ))}
-          </View>
-        )}
+              ) : (
+                availableServices.map((s: any) => (
+                  <TouchableOpacity
+                    key={s.id}
+                    style={[styles.optionCard, selected.service?.id === s.id && styles.optionCardActive]}
+                    onPress={() => { setSelected((prev) => ({ ...prev, service: s })); nextStep() }}
+                  >
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.optionLabel}>{s.name}</Text>
+                      <Text style={styles.optionSub}>{s.duration_minutes} min · R$ {Number(s.price).toFixed(2).replace('.', ',')}</Text>
+                      {!s.professionals?.length && (
+                        <Text style={styles.optionWarning}>
+                          Sem profissional vinculado — não gera comissão
+                        </Text>
+                      )}
+                    </View>
+                    <Ionicons name="chevron-forward" size={18} color={colors.textDisabled} />
+                  </TouchableOpacity>
+                ))
+              )}
+            </View>
+          )
+        })()}
 
         {/* Step 3: Customer */}
         {step === 'customer' && (
@@ -229,22 +310,32 @@ export default function NewAppointmentScreen() {
                     onChangeText={setCustomerSearch}
                   />
                 </View>
-                {filteredCustomers.map((c) => (
-                  <TouchableOpacity
-                    key={c.id}
-                    style={[styles.optionCard, selected.customer?.id === c.id && styles.optionCardActive]}
-                    onPress={() => { setSelected((s) => ({ ...s, customer: c })); nextStep() }}
-                  >
-                    <View style={styles.optionAvatar}>
-                      <Text style={styles.optionAvatarText}>{c.name.charAt(0)}</Text>
-                    </View>
-                    <View style={{ flex: 1 }}>
-                      <Text style={styles.optionLabel}>{c.name}</Text>
-                      <Text style={styles.optionSub}>{c.phone}</Text>
-                    </View>
-                    <Ionicons name="chevron-forward" size={18} color={colors.textDisabled} />
-                  </TouchableOpacity>
-                ))}
+                {loadingCustomers ? (
+                  <ActivityIndicator color={colors.primary} style={{ marginTop: spacing.lg }} />
+                ) : filteredCustomers.length === 0 ? (
+                  <Text style={styles.noSlots}>
+                    {debouncedCustomerSearch ? 'Nenhum cliente encontrado.' : 'Nenhum cliente cadastrado ainda.'}
+                  </Text>
+                ) : (
+                  filteredCustomers.map((c: any) => (
+                    <TouchableOpacity
+                      key={c.id}
+                      style={[styles.optionCard, selected.customer?.id === c.id && styles.optionCardActive]}
+                      onPress={() => { setSelected((s) => ({ ...s, customer: c })); nextStep() }}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Selecionar cliente ${customerFullName(c) || c.name}`}
+                    >
+                      <View style={styles.optionAvatar}>
+                        <Text style={styles.optionAvatarText}>{c.name.charAt(0)}</Text>
+                      </View>
+                      <View style={{ flex: 1 }}>
+                        <Text style={styles.optionLabel}>{customerFullName(c) || c.name}</Text>
+                        <Text style={styles.optionSub}>{c.phone}</Text>
+                      </View>
+                      <Ionicons name="chevron-forward" size={18} color={colors.textDisabled} />
+                    </TouchableOpacity>
+                  ))
+                )}
               </>
             )}
           </View>
@@ -361,6 +452,8 @@ const styles = StyleSheet.create({
   content: { paddingHorizontal: spacing.lg, paddingBottom: spacing.xxl },
   step: { gap: spacing.md },
   stepTitle: { fontSize: font.xl, fontWeight: '700', color: colors.text, marginBottom: spacing.xs },
+  stepHint: { fontSize: font.sm, color: colors.textSecondary, marginTop: -spacing.xs },
+  optionWarning: { fontSize: font.sm, color: colors.warning, marginTop: 2 },
   optionCard: {
     flexDirection: 'row',
     alignItems: 'center',

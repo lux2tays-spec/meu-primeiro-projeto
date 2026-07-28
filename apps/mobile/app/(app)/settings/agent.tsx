@@ -3,12 +3,13 @@ import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity, Alert, Platform, Switch,
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
+import { router } from 'expo-router'
 import * as DocumentPicker from 'expo-document-picker'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Input } from '@/components/ui/Input'
 import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
-import { agentApi } from '@/lib/api'
+import { agentApi, tenantApi, isPlanLimitError } from '@/lib/api'
 import { useToast } from '@/lib/toast'
 import { colors, font, spacing, radius } from '@/lib/theme'
 
@@ -18,7 +19,9 @@ const TONES = [
   { value: 'casual',   label: '🤙 Casual',   desc: 'Informal e bem-humorado' },
 ]
 
-const BUSINESS_TYPES = [
+// Fonte única: /tenant/business-type-templates. Esta lista é apenas o fallback
+// caso a query falhe (offline etc.) — mesmos rótulos exibidos como valor.
+const FALLBACK_BUSINESS_TYPES = [
   'Clínica de Estética', 'Salão de Beleza', 'Barbearia', 'Pet Shop',
   'Clínica Odontológica', 'Clínica Médica', 'Academia', 'Pilates',
   'Massoterapia', 'Fisioterapia', 'Nutrição', 'Nail Designer',
@@ -54,8 +57,34 @@ export default function AgentScreen() {
   const queryClient = useQueryClient()
   const toast = useToast()
   const { data: config, isLoading } = useQuery({ queryKey: ['agent-config'], queryFn: agentApi.getConfig })
+  // CFG-17: tipos de negócio vêm do backend (mesma lista usada no onboarding);
+  // o hardcode fica só como fallback quando a query falha.
+  const { data: btTemplates } = useQuery({
+    queryKey: ['business-type-templates'],
+    queryFn: tenantApi.businessTypeTemplates,
+    staleTime: 5 * 60 * 1000,
+  })
   const [form, setForm] = useState(BLANK)
   const [section, setSection] = useState<'identity' | 'behavior' | 'catalogs'>('identity')
+
+  const businessTypes: { value: string; label: string }[] =
+    btTemplates && btTemplates.length > 0
+      ? btTemplates.map((t) => ({ value: t.business_type, label: t.display_name }))
+      : FALLBACK_BUSINESS_TYPES.map((b) => ({ value: b, label: b }))
+
+  // Valor salvo antes desta padronização (ou personalizado) que não está na
+  // lista atual: mantém visível como chip para o usuário não "perder" a seleção.
+  const hasCustomBusinessType =
+    !!form.business_type && !businessTypes.some((t) => t.value === form.business_type)
+
+  // CTA padrão quando o backend recusa por limite do plano (ex.: catálogos).
+  function showPlanLimitToast() {
+    toast.show(
+      'Você atingiu o limite do seu plano. Faça upgrade para liberar mais recursos.',
+      'warning',
+      { label: 'Ver planos', onPress: () => router.push('/(app)/settings/subscription') }
+    )
+  }
 
   useEffect(() => {
     if (!config) return
@@ -113,7 +142,10 @@ export default function AgentScreen() {
       queryClient.invalidateQueries({ queryKey: ['agent-config'] })
       toast.show('Configuração salva com sucesso!', 'success')
     },
-    onError: (err: any) => toast.show(err.message ?? 'Erro ao salvar', 'error'),
+    onError: (err: any) => {
+      if (isPlanLimitError(err)) showPlanLimitToast()
+      else toast.show(err.message ?? 'Não foi possível salvar a configuração.', 'error')
+    },
   })
 
   const uploadMutation = useMutation({
@@ -132,7 +164,10 @@ export default function AgentScreen() {
       set('catalog_files', next)
       saveMutation.mutate({ ...form, catalog_files: next })
     },
-    onError: (err: any) => toast.show(err.message ?? 'Erro no upload', 'error'),
+    onError: (err: any) => {
+      if (isPlanLimitError(err)) showPlanLimitToast()
+      else toast.show(err.message ?? 'Não foi possível enviar o arquivo.', 'error')
+    },
   })
 
   function removeCatalog(url: string) {
@@ -187,14 +222,23 @@ export default function AgentScreen() {
             <Label>Tipo de negócio</Label>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} style={s.typeScroll}>
               <View style={s.typeRow}>
-                {BUSINESS_TYPES.map((bt) => (
+                {hasCustomBusinessType && (
                   <TouchableOpacity
-                    key={bt}
-                    style={[s.typeChip, form.business_type === bt && s.typeChipActive]}
-                    onPress={() => set('business_type', form.business_type === bt ? '' : bt)}
+                    key={form.business_type}
+                    style={[s.typeChip, s.typeChipActive]}
+                    onPress={() => set('business_type', '')}
                   >
-                    <Text style={[s.typeChipText, form.business_type === bt && s.typeChipTextActive]}>
-                      {bt}
+                    <Text style={[s.typeChipText, s.typeChipTextActive]}>{form.business_type}</Text>
+                  </TouchableOpacity>
+                )}
+                {businessTypes.map((bt) => (
+                  <TouchableOpacity
+                    key={bt.value}
+                    style={[s.typeChip, form.business_type === bt.value && s.typeChipActive]}
+                    onPress={() => set('business_type', form.business_type === bt.value ? '' : bt.value)}
+                  >
+                    <Text style={[s.typeChipText, form.business_type === bt.value && s.typeChipTextActive]}>
+                      {bt.label}
                     </Text>
                   </TouchableOpacity>
                 ))}

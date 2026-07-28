@@ -1,7 +1,7 @@
 'use client'
-import { useState } from 'react'
+import { Suspense, useEffect, useMemo, useRef, useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { useRouter } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { tenantApi, appointmentsApi } from '@/lib/api'
 
 // Local date (not UTC) so the default day doesn't jump ahead in the evening (BRT).
@@ -210,14 +210,42 @@ function CustomerStep({ selected, onSelect }: { selected: SelectedCustomer | nul
   )
 }
 
-export default function NewAppointmentPage() {
+// SAL-17: serviço só é oferecido se o profissional escolhido o executa (ou se o
+// serviço não tem profissionais vinculados — nesse caso não gera comissão mesmo).
+function serviceAllowedFor(s: any, proId: string) {
+  if (!proId) return true
+  if (!s.professionals?.length) return true
+  return (s.professionals as any[]).some((p) => p.id === proId)
+}
+
+function NewAppointmentContent() {
   const router = useRouter()
   const [customer, setCustomer] = useState<SelectedCustomer | null>(null)
   const [form, setForm] = useState({ professional_id: '', service_id: '', date: localToday(), slot: '', notes: '' })
   const [error, setError] = useState('')
 
+  // SAL-22: chegando de Clientes → "Novo agendamento", o cliente já vem selecionado.
+  const params = useSearchParams()
+  const preselectId = params.get('customer_id')
+  const { data: preCustomer } = useQuery({
+    queryKey: ['customer', preselectId],
+    queryFn: () => tenantApi.customer(preselectId!),
+    enabled: !!preselectId,
+  })
+  const preselectApplied = useRef(false)
+  useEffect(() => {
+    if (preselectApplied.current || !preCustomer) return
+    preselectApplied.current = true
+    setCustomer({
+      id: preCustomer.id,
+      name: preCustomer.name,
+      last_name: preCustomer.last_name ?? null,
+      phone: preCustomer.phone,
+    })
+  }, [preCustomer])
+
   const { data: professionals = [], isLoading: loadingPros } = useQuery({ queryKey: ['professionals'], queryFn: tenantApi.professionals })
-  const { data: services = [] } = useQuery({ queryKey: ['services'], queryFn: tenantApi.services })
+  const { data: services = [] } = useQuery({ queryKey: ['services'], queryFn: () => tenantApi.services() })
   const { data: slots = [] } = useQuery({
     queryKey: ['slots', form.professional_id, form.service_id, form.date],
     queryFn: () => appointmentsApi.slots(form.professional_id, form.service_id, form.date),
@@ -231,6 +259,22 @@ export default function NewAppointmentPage() {
   })
 
   function set(k: string, v: string) { setForm((f) => ({ ...f, [k]: v })) }
+
+  // SAL-17: lista de serviços filtrada pelo profissional escolhido.
+  const availableServices = useMemo(
+    () => (services as any[]).filter((s) => serviceAllowedFor(s, form.professional_id)),
+    [services, form.professional_id],
+  )
+  const selectedProName = (professionals as any[]).find((p) => p.id === form.professional_id)?.name
+
+  function setProfessional(proId: string) {
+    setForm((f) => {
+      const current = (services as any[]).find((s) => s.id === f.service_id)
+      const keepService = !!current && serviceAllowedFor(current, proId)
+      // Trocar de profissional sempre zera o horário (os slots mudam).
+      return { ...f, professional_id: proId, service_id: keepService ? f.service_id : '', slot: '' }
+    })
+  }
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -281,7 +325,7 @@ export default function NewAppointmentPage() {
             ) : (professionals as any[]).length === 0 ? (
               <p className="text-sm text-gray-400 italic">Nenhum profissional disponível.</p>
             ) : (
-              <select value={form.professional_id} onChange={(e) => set('professional_id', e.target.value)} className={selectClass} required>
+              <select value={form.professional_id} onChange={(e) => setProfessional(e.target.value)} className={selectClass} required>
                 <option value="">Selecione o profissional</option>
                 {(professionals as any[]).map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
               </select>
@@ -290,10 +334,31 @@ export default function NewAppointmentPage() {
 
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Serviço</label>
-            <select value={form.service_id} onChange={(e) => set('service_id', e.target.value)} className={selectClass} required>
-              <option value="">Selecione o serviço</option>
-              {(services as any[]).map((s) => <option key={s.id} value={s.id}>{s.name} · {s.duration_minutes} min · R$ {Number(s.price).toFixed(2)}</option>)}
-            </select>
+            {/* SAL-17: profissional escolhido não executa nenhum serviço → aviso claro */}
+            {form.professional_id && availableServices.length === 0 ? (
+              <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3">
+                <p className="text-sm font-semibold text-amber-800">
+                  {selectedProName ?? 'Este profissional'} não realiza nenhum serviço cadastrado
+                </p>
+                <p className="text-xs text-amber-700 mt-0.5">
+                  Vincule os serviços em{' '}
+                  <a href="/settings/services" className="underline font-medium">Configurações → Serviços</a>{' '}
+                  ou escolha outro profissional. Agendar sem vínculo não gera comissão.
+                </p>
+              </div>
+            ) : (
+              <>
+                <select value={form.service_id} onChange={(e) => set('service_id', e.target.value)} className={selectClass} required>
+                  <option value="">Selecione o serviço</option>
+                  {availableServices.map((s) => <option key={s.id} value={s.id}>{s.name} · {s.duration_minutes} min · R$ {Number(s.price).toFixed(2)}</option>)}
+                </select>
+                {form.professional_id && availableServices.length < (services as any[]).length && (
+                  <p className="text-xs text-gray-400 mt-1">
+                    Mostrando apenas os serviços que {selectedProName ?? 'este profissional'} realiza.
+                  </p>
+                )}
+              </>
+            )}
           </div>
 
           <div>
@@ -307,7 +372,8 @@ export default function NewAppointmentPage() {
               {slots.length === 0 ? (
                 <p className="text-gray-400 text-sm">Nenhum horário disponível nesta data</p>
               ) : (
-                <div className="grid grid-cols-4 gap-2">
+                // UI-9: responsivo — 3 colunas no mobile, 4 em telas maiores
+                <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
                   {(slots as string[]).map((s) => (
                     <button
                       key={s}
@@ -348,5 +414,14 @@ export default function NewAppointmentPage() {
         </form>
       )}
     </div>
+  )
+}
+
+export default function NewAppointmentPage() {
+  // useSearchParams (pré-seleção de cliente, SAL-22) exige Suspense no App Router.
+  return (
+    <Suspense>
+      <NewAppointmentContent />
+    </Suspense>
   )
 }

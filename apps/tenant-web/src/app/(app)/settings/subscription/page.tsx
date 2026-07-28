@@ -2,6 +2,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { tenantApi, subscriptionApi } from '@/lib/api'
+import { useModalA11y } from '@/lib/useModalA11y'
 
 declare global {
   interface Window {
@@ -45,7 +46,8 @@ function loadMercadoPagoSdk(): Promise<void> {
   return mpSdkPromise
 }
 
-type Plan = { slug: string; name: string; price_cents: number }
+// PAY-6: `notice` explica a mudança de cobrança em upgrade/downgrade.
+type Plan = { slug: string; name: string; price_cents: number; notice?: string }
 
 function CheckoutModal({ plan, onClose, onSuccess }: { plan: Plan; onClose: () => void; onSuccess: () => void }) {
   const [loading, setLoading] = useState(true)
@@ -53,6 +55,8 @@ function CheckoutModal({ plan, onClose, onSuccess }: { plan: Plan; onClose: () =
   const [fatalError, setFatalError] = useState('')
   const [error, setError] = useState('')
   const brickRef = useRef<{ unmount?: () => void } | null>(null)
+  // UI-8: ESC fecha + focus trap básico
+  const dialogRef = useModalA11y<HTMLDivElement>(onClose)
 
   useEffect(() => {
     let cancelled = false
@@ -126,7 +130,8 @@ function CheckoutModal({ plan, onClose, onSuccess }: { plan: Plan; onClose: () =
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       <div className="absolute inset-0 bg-black/30" onClick={onClose} />
-      <div className="relative w-full max-w-md bg-white rounded-2xl shadow-2xl p-6 space-y-4 max-h-[90vh] overflow-y-auto">
+      <div ref={dialogRef} tabIndex={-1} role="dialog" aria-modal="true" aria-label="Assinar plano"
+        className="relative w-full max-w-md bg-white rounded-2xl shadow-2xl p-6 space-y-4 max-h-[90vh] overflow-y-auto focus:outline-none">
         <div className="flex items-center justify-between">
           <h2 className="text-lg font-bold text-gray-900">Assinar plano</h2>
           <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-xl leading-none" aria-label="Fechar">✕</button>
@@ -136,6 +141,11 @@ function CheckoutModal({ plan, onClose, onSuccess }: { plan: Plan; onClose: () =
           <span className="font-semibold text-gray-900">{plan.name}</span>
           <span className="text-primary font-bold">{fmtPrice(plan.price_cents)}</span>
         </div>
+
+        {/* PAY-6: aviso sobre a mudança de cobrança (upgrade/downgrade) */}
+        {plan.notice && (
+          <div className="bg-blue-50 border border-blue-100 text-blue-800 rounded-xl px-4 py-3 text-sm">{plan.notice}</div>
+        )}
 
         {unavailable ? (
           <div className="bg-yellow-50 text-yellow-800 rounded-xl px-4 py-3 text-sm">
@@ -156,6 +166,45 @@ function CheckoutModal({ plan, onClose, onSuccess }: { plan: Plan; onClose: () =
             <p className="text-gray-400 text-xs text-center">🔒 Dados do cartão processados com segurança pelo Mercado Pago</p>
           </>
         )}
+      </div>
+    </div>
+  )
+}
+
+function CancelDialog({ cancelling, cancelError, onClose, onConfirm }: {
+  cancelling: boolean
+  cancelError: string
+  onClose: () => void
+  onConfirm: () => void
+}) {
+  // UI-8: ESC fecha (respeitando o "cancelando...") + focus trap básico
+  const dialogRef = useModalA11y<HTMLDivElement>(onClose)
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      <div className="absolute inset-0 bg-black/30" onClick={onClose} />
+      <div ref={dialogRef} tabIndex={-1} role="dialog" aria-modal="true" aria-label="Cancelar assinatura"
+        className="relative w-full max-w-md bg-white rounded-2xl shadow-2xl p-6 space-y-4 focus:outline-none">
+        <h2 className="text-lg font-bold text-gray-900">Cancelar assinatura?</h2>
+        {/* PAY-5: deixa explícito que o cancelamento vale NA HORA (não até o fim do ciclo). */}
+        <p className="text-gray-600 text-sm">
+          O cancelamento é <strong>imediato</strong>: sua conta volta para o plano gratuito agora mesmo —
+          o acesso <strong>não</strong> permanece até o fim do período já pago. Você pode assinar novamente quando quiser.
+        </p>
+        {cancelError && <div role="alert" className="bg-red-50 text-red-700 rounded-xl px-4 py-3 text-sm">{cancelError}</div>}
+        <div className="flex gap-3">
+          <button
+            onClick={onClose}
+            disabled={cancelling}
+            className="flex-1 h-10 bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-semibold rounded-xl transition-colors disabled:opacity-50">
+            Voltar
+          </button>
+          <button
+            onClick={onConfirm}
+            disabled={cancelling}
+            className="flex-1 h-10 bg-red-500 hover:bg-red-600 text-white text-sm font-semibold rounded-xl transition-colors disabled:opacity-50">
+            {cancelling ? 'Cancelando...' : 'Cancelar agora'}
+          </button>
+        </div>
       </div>
     </div>
   )
@@ -236,10 +285,20 @@ export default function SubscriptionPage() {
         </div>
       )}
 
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+      {/* UI-9: 1 coluna no mobile, subindo até 4 em telas grandes */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         {(plans ?? []).map((plan: any) => {
           const isCurrent = tenant?.plan === plan.slug
           const isFree = plan.price_cents <= 0
+          // PAY-6: upgrade x downgrade em relação ao plano pago ativo
+          const currentPrice = Number((plans ?? []).find((p: any) => p.slug === tenant?.plan)?.price_cents ?? 0)
+          const isUpgrade = hasActivePaid && plan.price_cents > currentPrice
+          const isDowngrade = hasActivePaid && plan.price_cents < currentPrice && !isFree
+          const changeNotice = isUpgrade
+            ? 'Você está fazendo um upgrade: a nova mensalidade (maior) substitui a atual e passa a valer imediatamente.'
+            : isDowngrade
+              ? 'Você está fazendo um downgrade: a mensalidade menor e os novos limites do plano passam a valer imediatamente.'
+              : undefined
           const features: string[] = Array.isArray(plan.features) && plan.features.length
             ? plan.features
             : [`${plan.max_agendas} agenda${plan.max_agendas > 1 ? 's' : ''}`, `${plan.max_users} usuário${plan.max_users > 1 ? 's' : ''}`, 'Bot WhatsApp IA']
@@ -253,11 +312,22 @@ export default function SubscriptionPage() {
                 {features.map((f, i) => <p key={i} className="text-gray-500 text-xs">✓ {f}</p>)}
               </div>
               {!isCurrent && !isFree && (
-                <button
-                  onClick={() => { setSuccess(false); setCheckoutPlan({ slug: plan.slug, name: plan.name, price_cents: plan.price_cents }) }}
-                  className="mt-4 w-full h-9 bg-primary hover:bg-primary-dark text-white text-sm font-semibold rounded-xl transition-colors">
-                  Assinar
-                </button>
+                <>
+                  <button
+                    onClick={() => { setSuccess(false); setCheckoutPlan({ slug: plan.slug, name: plan.name, price_cents: plan.price_cents, notice: changeNotice }) }}
+                    className={`mt-4 w-full h-9 text-sm font-semibold rounded-xl transition-colors ${
+                      isDowngrade
+                        ? 'border border-primary text-primary hover:bg-primary/5'
+                        : 'bg-primary hover:bg-primary-dark text-white'
+                    }`}>
+                    {isUpgrade ? 'Fazer upgrade' : isDowngrade ? 'Fazer downgrade' : 'Assinar'}
+                  </button>
+                  {changeNotice && (
+                    <p className="text-[11px] text-gray-400 mt-1.5 leading-snug">
+                      {isUpgrade ? 'A nova cobrança substitui a atual imediatamente.' : 'Limites e cobrança menores valem imediatamente.'}
+                    </p>
+                  )}
+                </>
               )}
             </div>
           )
@@ -295,30 +365,12 @@ export default function SubscriptionPage() {
       <p className="text-gray-400 text-xs text-center">Pagamentos processados com segurança via Mercado Pago</p>
 
       {cancelOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-          <div className="absolute inset-0 bg-black/30" onClick={() => { if (!cancelling) setCancelOpen(false) }} />
-          <div className="relative w-full max-w-md bg-white rounded-2xl shadow-2xl p-6 space-y-4">
-            <h2 className="text-lg font-bold text-gray-900">Cancelar assinatura?</h2>
-            <p className="text-gray-600 text-sm">
-              Sua assinatura será cancelada e sua conta voltará para o plano gratuito. Você pode assinar novamente quando quiser.
-            </p>
-            {cancelError && <div className="bg-red-50 text-red-700 rounded-xl px-4 py-3 text-sm">{cancelError}</div>}
-            <div className="flex gap-3">
-              <button
-                onClick={() => setCancelOpen(false)}
-                disabled={cancelling}
-                className="flex-1 h-10 bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-semibold rounded-xl transition-colors disabled:opacity-50">
-                Voltar
-              </button>
-              <button
-                onClick={handleCancelSubscription}
-                disabled={cancelling}
-                className="flex-1 h-10 bg-red-500 hover:bg-red-600 text-white text-sm font-semibold rounded-xl transition-colors disabled:opacity-50">
-                {cancelling ? 'Cancelando...' : 'Cancelar assinatura'}
-              </button>
-            </div>
-          </div>
-        </div>
+        <CancelDialog
+          cancelling={cancelling}
+          cancelError={cancelError}
+          onClose={() => { if (!cancelling) setCancelOpen(false) }}
+          onConfirm={handleCancelSubscription}
+        />
       )}
 
       {checkoutPlan && (

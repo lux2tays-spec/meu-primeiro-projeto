@@ -1,5 +1,6 @@
-import { TouchableOpacity, Text, ActivityIndicator, StyleSheet, ViewStyle } from 'react-native'
+import { TouchableOpacity, Text, ActivityIndicator, StyleSheet, ViewStyle, TextStyle } from 'react-native'
 import { colors, radius, font } from '@/lib/theme'
+import { useTheme } from '@/lib/theme-context'
 
 interface Props {
   label: string
@@ -11,19 +12,33 @@ interface Props {
 }
 
 export function Button({ label, onPress, variant = 'primary', loading, disabled, style }: Props) {
+  const theme = useTheme()
   const isDisabled = disabled || loading
+
+  // Cor de marca do tenant aplicada em runtime (fallback: verde padrão).
+  const dynamicStyle: ViewStyle | null =
+    variant === 'primary'
+      ? { backgroundColor: theme.primary }
+      : variant === 'outline'
+        ? { borderColor: theme.primary }
+        : null
+  const dynamicLabel: TextStyle | null =
+    variant === 'outline' || variant === 'ghost' ? { color: theme.primary } : null
 
   return (
     <TouchableOpacity
       onPress={onPress}
       disabled={isDisabled}
       activeOpacity={0.8}
-      style={[styles.base, styles[variant], isDisabled && styles.disabled, style]}
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      accessibilityState={{ disabled: !!isDisabled, busy: !!loading }}
+      style={[styles.base, styles[variant], dynamicStyle, isDisabled && styles.disabled, style]}
     >
       {loading ? (
-        <ActivityIndicator color={variant === 'primary' ? '#fff' : colors.primary} />
+        <ActivityIndicator color={variant === 'primary' || variant === 'danger' ? '#fff' : theme.primary} />
       ) : (
-        <Text style={[styles.label, styles[`${variant}Label`]]}>{label}</Text>
+        <Text style={[styles.label, styles[`${variant}Label`], dynamicLabel]}>{label}</Text>
       )}
     </TouchableOpacity>
   )

@@ -186,6 +186,7 @@ export async function sendVerificationEmail(to: string, name: string, token: str
            style="display:inline-block;margin:16px 0;padding:14px 28px;background:#6366f1;color:#fff;border-radius:10px;text-decoration:none;font-weight:700;font-size:16px">
           Confirmar e-mail
         </a>
+        <p style="color:#444;font-size:14px"><strong>Fez seu cadastro pelo aplicativo?</strong> Depois de confirmar por aqui, é só voltar ao app e fazer login normalmente — a confirmação vale para o app e para a web.</p>
         <p style="color:#666;font-size:13px">O link expira em 24 horas. Se você não criou uma conta, ignore este e-mail.</p>
       </div>
     `,

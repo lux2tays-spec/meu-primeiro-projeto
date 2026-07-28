@@ -2,6 +2,7 @@
 import { useEffect, useRef, useState, FormEvent } from 'react'
 import { authApi } from '@/lib/api'
 import { useGoogleClientId } from '@/lib/google'
+import { formatBRPhone, normalizeBRPhone, isValidBRPhone } from '@/lib/phone'
 
 declare global {
   interface Window {
@@ -85,13 +86,14 @@ export default function GoogleSignIn({
     e.preventDefault()
     setError('')
     if (!extra.business_name.trim()) return setError('Informe o nome do seu estabelecimento')
-    if (!extra.phone.trim()) return setError('Informe seu telefone (WhatsApp)')
+    if (!isValidBRPhone(extra.phone)) return setError('Informe um telefone válido com DDD, ex.: (11) 99999-9999')
     setLoading(true)
     try {
       const res = await authApi.googleAuth({
         id_token: pendingToken,
         business_name: extra.business_name.trim(),
-        phone: extra.phone.trim(),
+        // AUTH-9: telefone normalizado (somente dígitos) no envio
+        phone: normalizeBRPhone(extra.phone),
         referral_code: referralCode,
       })
       onAuthenticated(res.token)
@@ -117,8 +119,8 @@ export default function GoogleSignIn({
         </div>
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-1">Telefone (WhatsApp)</label>
-          <input type="tel" value={extra.phone} onChange={(e) => setExtra((s) => ({ ...s, phone: e.target.value }))}
-            className={inputCls} placeholder="5511999999999" />
+          <input type="tel" value={extra.phone} onChange={(e) => setExtra((s) => ({ ...s, phone: formatBRPhone(e.target.value) }))}
+            className={inputCls} placeholder="(11) 99999-9999" />
         </div>
         {error && <div className="bg-red-50 text-red-600 text-sm rounded-lg px-4 py-3">{error}</div>}
         <button type="submit" disabled={loading}

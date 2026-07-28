@@ -1,9 +1,13 @@
 'use client'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { financeiroApi } from '@/lib/api'
+import { financeiroApi, getToken, friendlyMessage } from '@/lib/api'
+import Loading from '@/components/ui/Loading'
+import { getTokenPayload } from '@/lib/auth'
 
 const MONTHS = ['Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez']
+
+const VENDAS_PAGE_SIZE = 20
 
 function fmtBRL(v: number) {
   return v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
@@ -20,6 +24,15 @@ export default function FinanceiroPage() {
   const [year,  setYear]  = useState(now.getFullYear())
   const [tab, setTab] = useState<'vendas' | 'links'>('vendas')
 
+  // SAL-11: papel "staff" não acessa o financeiro (o backend também bloqueia).
+  const [role, setRole] = useState<string | null>(null)
+  useEffect(() => { setRole(getTokenPayload(getToken())?.role ?? null) }, [])
+  const isManager = role === null || role === 'owner' || role === 'admin' || role === 'root'
+
+  // SAL-5: paginação da lista de vendas
+  const [vendasPage, setVendasPage] = useState(1)
+  useEffect(() => { setVendasPage(1) }, [month, year])
+
   // Forms
   const [showLinkForm, setShowLinkForm] = useState(false)
   const [linkForm, setLinkForm] = useState({ title: '', description: '', amount: '' })
@@ -28,13 +41,17 @@ export default function FinanceiroPage() {
   const { data: resumo } = useQuery({
     queryKey: ['fin-resumo', month, year],
     queryFn: () => financeiroApi.resumo(month, year),
+    enabled: isManager && role !== null,
   })
 
-  const { data: vendas = [], isLoading: loadingVendas } = useQuery({
-    queryKey: ['fin-vendas', month, year],
-    queryFn: () => financeiroApi.vendas(month, year),
-    enabled: tab === 'vendas',
+  const { data: vendasRes, isLoading: loadingVendas, isError: vendasError } = useQuery({
+    queryKey: ['fin-vendas', month, year, vendasPage],
+    queryFn: () => financeiroApi.vendas(month, year, vendasPage, VENDAS_PAGE_SIZE),
+    enabled: tab === 'vendas' && isManager && role !== null,
   })
+  const vendas = vendasRes?.data ?? []
+  const vendasTotal = vendasRes?.total ?? 0
+  const vendasPages = Math.max(1, Math.ceil(vendasTotal / VENDAS_PAGE_SIZE))
 
   const { data: links = [], isLoading: loadingLinks } = useQuery({
     queryKey: ['fin-links'],
@@ -50,12 +67,13 @@ export default function FinanceiroPage() {
       setLinkForm({ title: '', description: '', amount: '' })
       setLinkError('')
     },
-    onError: (e: any) => setLinkError(e.message),
+    onError: (e: any) => setLinkError(friendlyMessage(e, 'Não foi possível criar o link de pagamento. Tente novamente.')),
   })
 
   const deleteLink = useMutation({
     mutationFn: financeiroApi.deletePaymentLink,
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['fin-links'] }),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['fin-links'] }); setLinkError('') },
+    onError: (e: any) => setLinkError(friendlyMessage(e, 'Não foi possível excluir o link. Tente novamente.')),
   })
 
   const years = Array.from({ length: 3 }, (_, i) => now.getFullYear() - i)
@@ -63,6 +81,20 @@ export default function FinanceiroPage() {
   const cardCls = 'bg-white rounded-2xl p-5 border border-gray-100 shadow-sm'
   const btnPrimary = 'bg-primary hover:bg-primary-dark text-white text-sm font-semibold px-4 py-2 rounded-xl transition-colors disabled:opacity-50'
   const inputCls = 'w-full h-10 px-3 rounded-xl border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary'
+
+  if (role !== null && !isManager) {
+    return (
+      <div className="max-w-lg space-y-4">
+        <h1 className="text-2xl font-bold text-gray-900">Financeiro</h1>
+        <div className={`${cardCls} text-center py-10`}>
+          <p className="text-gray-700 text-sm font-medium">Acesso restrito</p>
+          <p className="text-gray-400 text-sm mt-1">
+            O financeiro do negócio é visível apenas para proprietários e administradores.
+          </p>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className="max-w-4xl space-y-6">
@@ -80,8 +112,8 @@ export default function FinanceiroPage() {
         </div>
       </div>
 
-      {/* KPIs */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+      {/* KPIs (SAL-8: inclui ticket médio e taxa de cancelamento) */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
         <div className={cardCls}>
           <p className="text-xs text-gray-500 mb-1">Receita do mês</p>
           <p className="text-2xl font-bold text-green-600">{fmtBRL(resumo?.receita_total ?? 0)}</p>
@@ -91,10 +123,61 @@ export default function FinanceiroPage() {
           <p className="text-2xl font-bold text-gray-900">{resumo?.total_vendas ?? 0}</p>
         </div>
         <div className={cardCls}>
+          <p className="text-xs text-gray-500 mb-1">Ticket médio</p>
+          <p className="text-2xl font-bold text-gray-900">{fmtBRL(resumo?.ticket_medio ?? 0)}</p>
+        </div>
+        <div className={cardCls}>
           <p className="text-xs text-gray-500 mb-1">Agendamentos abertos</p>
           <p className="text-2xl font-bold text-blue-600">{resumo?.agendamentos_abertos ?? 0}</p>
         </div>
+        <div className={cardCls}>
+          <p className="text-xs text-gray-500 mb-1">Taxa de cancelamento</p>
+          <p className="text-2xl font-bold text-red-500">{(resumo?.taxa_cancelamento ?? 0).toLocaleString('pt-BR')}%</p>
+          <p className="text-[11px] text-gray-400 mt-0.5">
+            {resumo?.agendamentos_cancelados ?? 0} de {resumo?.total_agendamentos ?? 0} agendamentos
+          </p>
+        </div>
       </div>
+
+      {/* SAL-8: receita por profissional + serviços mais vendidos */}
+      {((resumo?.receita_por_profissional?.length ?? 0) > 0 || (resumo?.servicos_mais_vendidos?.length ?? 0) > 0) && (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          <div className={cardCls}>
+            <p className="text-sm font-semibold text-gray-900 mb-3">Receita por profissional</p>
+            {(resumo?.receita_por_profissional?.length ?? 0) === 0 ? (
+              <p className="text-gray-400 text-sm">Sem vendas concluídas neste período.</p>
+            ) : (
+              <div className="space-y-2.5">
+                {resumo!.receita_por_profissional.map((p) => (
+                  <div key={p.professional_id} className="flex items-center justify-between gap-3 text-sm">
+                    <span className="text-gray-700 truncate">{p.professional_nome}</span>
+                    <span className="text-gray-400 text-xs shrink-0">{p.vendas} venda(s)</span>
+                    <span className="font-semibold text-green-600 shrink-0">{fmtBRL(Number(p.receita))}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+          <div className={cardCls}>
+            <p className="text-sm font-semibold text-gray-900 mb-3">Serviços mais vendidos</p>
+            {(resumo?.servicos_mais_vendidos?.length ?? 0) === 0 ? (
+              <p className="text-gray-400 text-sm">Sem vendas concluídas neste período.</p>
+            ) : (
+              <div className="space-y-2.5">
+                {resumo!.servicos_mais_vendidos.map((s, i) => (
+                  <div key={s.service_id} className="flex items-center justify-between gap-3 text-sm">
+                    <span className="text-gray-700 truncate">
+                      <span className="text-gray-400 mr-1.5">{i + 1}.</span>{s.servico_nome}
+                    </span>
+                    <span className="text-gray-400 text-xs shrink-0">{s.vendas} venda(s)</span>
+                    <span className="font-semibold text-gray-900 shrink-0">{fmtBRL(Number(s.receita))}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Tabs */}
       <div className="flex gap-1 bg-gray-100 p-1 rounded-xl w-fit">
@@ -112,7 +195,11 @@ export default function FinanceiroPage() {
       {tab === 'vendas' && (
         <div className={cardCls}>
           {loadingVendas ? (
-            <p className="text-gray-400 text-sm">Carregando...</p>
+            <Loading />
+          ) : vendasError ? (
+            <p className="text-gray-400 text-sm text-center py-8">
+              Não foi possível carregar as vendas. Tente novamente em instantes.
+            </p>
           ) : (vendas as any[]).length === 0 ? (
             <p className="text-gray-400 text-sm text-center py-8">Nenhuma venda concluída neste período</p>
           ) : (
@@ -142,6 +229,31 @@ export default function FinanceiroPage() {
                   ))}
                 </tbody>
               </table>
+
+              {/* SAL-5: paginação */}
+              {vendasPages > 1 && (
+                <div className="flex items-center justify-between pt-4 border-t border-gray-100 mt-2">
+                  <p className="text-xs text-gray-400">
+                    {vendasTotal} venda(s) · página {vendasPage} de {vendasPages}
+                  </p>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => setVendasPage((p) => Math.max(1, p - 1))}
+                      disabled={vendasPage <= 1 || loadingVendas}
+                      className="px-3 py-1.5 rounded-xl border border-gray-200 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-40"
+                    >
+                      Anterior
+                    </button>
+                    <button
+                      onClick={() => setVendasPage((p) => Math.min(vendasPages, p + 1))}
+                      disabled={vendasPage >= vendasPages || loadingVendas}
+                      className="px-3 py-1.5 rounded-xl border border-gray-200 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-40"
+                    >
+                      Próxima
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -155,6 +267,10 @@ export default function FinanceiroPage() {
               + Novo link de pagamento
             </button>
           </div>
+
+          {linkError && !showLinkForm && (
+            <div className="bg-red-50 border border-red-200 rounded-xl px-4 py-3 text-red-600 text-sm">{linkError}</div>
+          )}
 
           {showLinkForm && (
             <div className={`${cardCls} border-primary/30 space-y-3`}>
@@ -192,7 +308,7 @@ export default function FinanceiroPage() {
           )}
 
           {loadingLinks ? (
-            <p className="text-gray-400 text-sm">Carregando...</p>
+            <Loading card />
           ) : (links as any[]).length === 0 ? (
             <div className={`${cardCls} text-center py-8`}>
               <p className="text-gray-400 text-sm">Nenhum link criado ainda</p>

@@ -1,19 +1,13 @@
 'use client'
 import { useState, useEffect, useRef } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { agentApi } from '@/lib/api'
+import { agentApi, tenantApi, friendlyMessage } from '@/lib/api'
+import Loading from '@/components/ui/Loading'
 
 const TONES = [
   { value: 'friendly', label: '😊 Amigável', desc: 'Descontraído e próximo do cliente' },
   { value: 'formal',   label: '👔 Formal',   desc: 'Profissional e respeitoso' },
   { value: 'casual',   label: '🤙 Casual',   desc: 'Informal e bem-humorado' },
-]
-
-const BUSINESS_TYPES = [
-  'Clínica de Estética', 'Salão de Beleza', 'Barbearia', 'Pet Shop', 'Clínica Odontológica',
-  'Clínica Médica', 'Consultório de Psicologia', 'Academia', 'Estúdio de Pilates',
-  'Estúdio de Tatuagem', 'Nail Designer', 'Massoterapia', 'Fisioterapia', 'Nutrição',
-  'Outro',
 ]
 
 const TABS = ['Identidade', 'Comportamento', 'Catálogos'] as const
@@ -50,6 +44,16 @@ export default function AgentPage() {
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   const { data: config, isLoading } = useQuery({ queryKey: ['agent-config'], queryFn: agentApi.getConfig })
+
+  // CFG-17: tipos de negócio vêm do backend (fonte única, mesma lista do onboarding
+  // e do app mobile) — nada de lista hardcoded divergente.
+  const { data: btTemplates = [] } = useQuery({
+    queryKey: ['business-type-templates'],
+    queryFn: tenantApi.businessTypeTemplates,
+  })
+  const businessTypes = btTemplates.map((t) => ({ value: t.business_type, label: t.display_name }))
+  // Valor legado (salvo antes da lista dinâmica) continua visível até o usuário trocar.
+  const legacyBusinessType = !!form.business_type && !businessTypes.some((t) => t.value === form.business_type)
 
   useEffect(() => {
     if (!config) return
@@ -102,8 +106,10 @@ export default function AgentPage() {
     }
   }
 
+  // CFG-3: a mutation recebe o payload EXPLÍCITO (sem stale closure sobre `form`)
+  // — quem chama monta o payload a partir do estado mais recente.
   const saveMutation = useMutation({
-    mutationFn: () => agentApi.updateConfig(toPayload(form)),
+    mutationFn: (payload: ReturnType<typeof toPayload>) => agentApi.updateConfig(payload),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['agent-config'] })
       setSaved(true)
@@ -114,17 +120,20 @@ export default function AgentPage() {
   const uploadMutation = useMutation({
     mutationFn: (file: File) => agentApi.uploadCatalog(file),
     onSuccess: (uploaded) => {
-      const next = [...form.catalog_files, uploaded]
-      set('catalog_files', next)
-      saveMutation.mutate()
+      // CFG-3: persiste com o payload já incluindo o arquivo recém-enviado.
+      const nextForm = { ...form, catalog_files: [...form.catalog_files, uploaded] }
+      setForm(nextForm)
+      saveMutation.mutate(toPayload(nextForm))
       setUploadErr('')
     },
-    onError: (e: any) => setUploadErr(e.message),
+    onError: (e: any) => setUploadErr(friendlyMessage(e, 'Não foi possível enviar o arquivo. Tente novamente.')),
   })
 
+  // CFG-4: remover catálogo PERSISTE imediatamente (não só no estado local).
   const removeCatalog = (url: string) => {
-    const next = form.catalog_files.filter((f) => f.url !== url)
-    set('catalog_files', next)
+    const nextForm = { ...form, catalog_files: form.catalog_files.filter((f) => f.url !== url) }
+    setForm(nextForm)
+    saveMutation.mutate(toPayload(nextForm))
   }
 
   function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
@@ -134,7 +143,7 @@ export default function AgentPage() {
     uploadMutation.mutate(file)
   }
 
-  if (isLoading) return <div className="text-gray-400 text-sm p-8">Carregando...</div>
+  if (isLoading) return <Loading card />
 
   return (
     <div className="max-w-2xl space-y-6">
@@ -169,7 +178,8 @@ export default function AgentPage() {
                 className="w-full h-10 px-3 rounded-xl border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary bg-white"
               >
                 <option value="">Selecione o tipo de negócio...</option>
-                {BUSINESS_TYPES.map((bt) => <option key={bt} value={bt}>{bt}</option>)}
+                {legacyBusinessType && <option value={form.business_type}>{form.business_type}</option>}
+                {businessTypes.map((bt) => <option key={bt.value} value={bt.value}>{bt.label}</option>)}
               </select>
             </Field>
 
@@ -228,7 +238,7 @@ export default function AgentPage() {
         {tab === 'Comportamento' && (
           <>
             <Field label="Tom de voz do agente">
-              <div className="grid grid-cols-3 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 {TONES.map((t) => (
                   <button
                     key={t.value}
@@ -528,21 +538,21 @@ export default function AgentPage() {
           </>
         )}
 
+        {/* UI-2: nunca renderizar o objeto de erro cru — sempre mensagem amigável */}
         {saveMutation.isError && (
           <p className="text-sm text-red-600 bg-red-50 rounded-xl px-4 py-2">
-            {(saveMutation.error as any)?.message}
+            {friendlyMessage(saveMutation.error, 'Não foi possível salvar as configurações. Verifique os campos e tente novamente.')}
           </p>
         )}
 
-        {tab !== 'Catálogos' && (
-          <button
-            onClick={() => saveMutation.mutate()}
-            disabled={saveMutation.isPending}
-            className="w-full h-11 bg-primary hover:bg-primary-dark text-white font-semibold rounded-xl transition-colors disabled:opacity-50"
-          >
-            {saveMutation.isPending ? 'Salvando...' : saved ? '✓ Salvo!' : 'Salvar configurações'}
-          </button>
-        )}
+        {/* CFG-4: o botão Salvar aparece em TODAS as abas, inclusive Catálogos */}
+        <button
+          onClick={() => saveMutation.mutate(toPayload(form))}
+          disabled={saveMutation.isPending}
+          className="w-full h-11 bg-primary hover:bg-primary-dark text-white font-semibold rounded-xl transition-colors disabled:opacity-50"
+        >
+          {saveMutation.isPending ? 'Salvando...' : saved ? '✓ Salvo!' : 'Salvar configurações'}
+        </button>
       </div>
     </div>
   )

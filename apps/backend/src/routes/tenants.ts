@@ -12,6 +12,10 @@ const serviceSchema = z.object({
   duration_minutes: z.number().int().positive(),
   price: z.number().nonnegative(),
   reminder_days: z.number().int().min(0).nullable().optional(),
+  // CFG-16: pausar/reativar o serviço sem excluir (a coluna services.active já
+  // existia, mas só o DELETE a usava). false = pausado: some do bot e das
+  // listagens padrão, mas o histórico/vínculos ficam intactos.
+  active: z.boolean().optional(),
   // Legacy shape (no commission): just the professional ids.
   professional_ids: z.array(z.string().uuid()).optional(),
   // Rich shape (#3): per-professional commission for this service.
@@ -30,7 +34,13 @@ const hoursRowSchema = z.object({
   start_time: z.string().regex(/^\d{2}:\d{2}$/),
   end_time: z.string().regex(/^\d{2}:\d{2}$/),
   enabled: z.boolean(),
-})
+}).refine(
+  // CFG-5: abertura precisa vir antes do fechamento (comparação lexicográfica
+  // funciona para HH:MM). Só valida dias habilitados — dias desligados podem
+  // vir com placeholders.
+  (r) => !r.enabled || r.start_time < r.end_time,
+  { message: 'O horário de abertura deve ser antes do horário de fechamento' }
+)
 
 const staffCreateSchema = z.object({
   name: z.string().min(1),
@@ -55,11 +65,23 @@ const customerCreateSchema = z.object({
 
 // Update: only keys present in the body are applied; empty string CLEARS the
 // field (stored as NULL) — unlike COALESCE, which would keep the old value.
+// SAL-7: `phone` também é editável (corrigir número digitado errado pelo bot
+// ou pelo cadastro manual). É normalizado para só dígitos no handler.
 const customerUpdateSchema = z.object({
   name: z.string().min(1).max(120).optional(),
   last_name: z.string().max(120).nullable().optional(),
   email: z.string().email().or(z.literal('')).nullable().optional(),
+  phone: z.string().min(8).max(30).optional(),
 })
+
+// SAL-7: normaliza telefone para o padrão armazenado (só dígitos, como o bot
+// grava a partir do JID do WhatsApp: 55 + DDD + número). Retorna null se o
+// resultado não tiver um tamanho plausível para número BR (10–13 dígitos).
+function normalizePhoneBR(raw: string): string | null {
+  const digits = raw.replace(/\D/g, '')
+  if (digits.length < 10 || digits.length > 13) return null
+  return digits
+}
 
 const businessSchema = z.object({
   name: z.string().min(1).max(120),
@@ -114,6 +136,10 @@ export const tenantRoutes: FastifyPluginAsync = async (app) => {
 
   app.get('/services', async (request, reply) => {
     const { tenant_id } = request.user
+    // CFG-16: as telas de gestão pedem também os inativos (?include_inactive=1)
+    // para permitir reativar; os demais consumidores seguem vendo só os ativos.
+    const { include_inactive } = request.query as { include_inactive?: string }
+    const includeInactive = include_inactive === '1' || include_inactive === 'true'
     const { rows } = await db.query(
       `SELECT s.*,
          COALESCE(
@@ -129,9 +155,9 @@ export const tenantRoutes: FastifyPluginAsync = async (app) => {
        FROM services s
        LEFT JOIN service_professionals sp ON sp.service_id = s.id
        LEFT JOIN professionals p ON p.id = sp.professional_id AND p.active = TRUE
-       WHERE s.tenant_id = $1 AND s.active = TRUE
+       WHERE s.tenant_id = $1 ${includeInactive ? '' : 'AND s.active = TRUE'}
        GROUP BY s.id
-       ORDER BY s.name`,
+       ORDER BY s.active DESC, s.name`,
       [tenant_id]
     )
     return reply.send(rows)
@@ -175,9 +201,9 @@ export const tenantRoutes: FastifyPluginAsync = async (app) => {
     try {
       await client.query('BEGIN')
       const { rows: [service] } = await client.query(
-        `INSERT INTO services (tenant_id, name, description, duration_minutes, price, reminder_days)
-         VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
-        [tenant_id, body.name, body.description ?? null, body.duration_minutes, body.price, body.reminder_days ?? null]
+        `INSERT INTO services (tenant_id, name, description, duration_minutes, price, reminder_days, active)
+         VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *`,
+        [tenant_id, body.name, body.description ?? null, body.duration_minutes, body.price, body.reminder_days ?? null, body.active ?? true]
       )
       const pros = normalizePros(body)
       if (pros?.length) {
@@ -266,11 +292,28 @@ export const tenantRoutes: FastifyPluginAsync = async (app) => {
     return reply.send(rows)
   })
 
+  // CFG-7: `user_id` é OPCIONAL por design — profissional SEM conta de acesso
+  // ao app (não consome max_users do plano; o limite de usuários vale só para
+  // user_roles, em POST /staff). A UI pode criar "profissional sem acesso"
+  // simplesmente omitindo user_id.
+  const professionalCreateSchema = z.object({
+    name: z.string().min(1).max(120),
+    phone: z.string().max(30).nullable().optional(),
+    bio: z.string().max(1000).nullable().optional(),
+    user_id: z.string().uuid().nullable().optional(),
+  })
+
+  const professionalUpdateSchema = z.object({
+    name: z.string().min(1).max(120).optional(),
+    phone: z.string().max(30).nullable().optional(),
+    bio: z.string().max(1000).nullable().optional(),
+  }).refine((d) => Object.values(d).some((v) => v !== undefined), { message: 'Nenhum campo para atualizar' })
+
   app.post('/professionals', async (request, reply) => {
     const { tenant_id, role } = request.user
     if (!['owner', 'admin'].includes(role)) return reply.status(403).send({ error: 'Sem permissão' })
 
-    const { name, phone, bio, user_id } = request.body as any
+    const { name, phone, bio, user_id } = professionalCreateSchema.parse(request.body)
 
     // If user_id provided, validate it belongs to this tenant
     if (user_id) {
@@ -294,6 +337,32 @@ export const tenantRoutes: FastifyPluginAsync = async (app) => {
       [tenant_id, name, phone ?? null, bio ?? null, user_id ?? null]
     )
     return reply.status(201).send(pro)
+  })
+
+  // CFG-7: editar profissional (corrigir nome órfão, telefone, bio) — antes só
+  // era possível excluir e recriar, o que perdia vínculos de serviço/comissão.
+  app.patch<{ Params: { id: string } }>('/professionals/:id', async (request, reply) => {
+    const { tenant_id, role } = request.user
+    if (!['owner', 'admin'].includes(role)) return reply.status(403).send({ error: 'Sem permissão' })
+
+    const body = professionalUpdateSchema.parse(request.body ?? {})
+
+    const sets: string[] = []
+    const values: unknown[] = []
+    let i = 1
+    if (body.name !== undefined)  { sets.push(`name = $${i++}`);  values.push(body.name) }
+    if (body.phone !== undefined) { sets.push(`phone = $${i++}`); values.push(body.phone || null) }
+    if (body.bio !== undefined)   { sets.push(`bio = $${i++}`);   values.push(body.bio || null) }
+
+    values.push(request.params.id, tenant_id)
+    const { rows: [pro] } = await db.query(
+      `UPDATE professionals SET ${sets.join(', ')}
+       WHERE id = $${i} AND tenant_id = $${i + 1} AND active = TRUE
+       RETURNING *`,
+      values
+    )
+    if (!pro) return reply.status(404).send({ error: 'Profissional não encontrado' })
+    return reply.send(pro)
   })
 
   app.delete<{ Params: { id: string } }>('/professionals/:id', async (request, reply) => {
@@ -645,28 +714,73 @@ export const tenantRoutes: FastifyPluginAsync = async (app) => {
 
   // ── Customers ─────────────────────────────────────────────────────────────
 
+  // SAL-6: busca (nome/telefone/e-mail) e paginação no SERVIDOR. Sem
+  // page/limit na query mantém o formato legado (array, até 200) para não
+  // quebrar clientes antigos; com page/limit responde { data, total, page,
+  // limit } para o app paginar a base inteira.
   app.get('/customers', async (request, reply) => {
     const { tenant_id } = request.user
-    const { search } = request.query as { search?: string }
+    const { search, page, limit } = request.query as { search?: string; page?: string; limit?: string }
 
-    const { rows } = await db.query(
+    const conds = ['c.tenant_id = $1', 'c.deleted_at IS NULL']
+    const params: unknown[] = [tenant_id]
+    let i = 2
+
+    const term = search?.trim()
+    if (term) {
+      const like = `%${term.toLowerCase()}%`
+      const digits = term.replace(/\D/g, '')
+      if (digits.length >= 3) {
+        // Busca por telefone ignora máscara: "(11) 9999" encontra "11999998888"
+        conds.push(`(LOWER(c.name) LIKE $${i} OR LOWER(c.last_name) LIKE $${i} OR LOWER(c.email) LIKE $${i}
+                     OR regexp_replace(c.phone, '\\D', '', 'g') LIKE $${i + 1})`)
+        params.push(like, `%${digits}%`)
+        i += 2
+      } else {
+        conds.push(`(LOWER(c.name) LIKE $${i} OR LOWER(c.last_name) LIKE $${i} OR c.phone LIKE $${i} OR LOWER(c.email) LIKE $${i})`)
+        params.push(like)
+        i += 1
+      }
+    }
+    const where = conds.join(' AND ')
+
+    const paginated = page !== undefined || limit !== undefined
+    const lim = paginated ? Math.min(Math.max(Number(limit) || 50, 1), 200) : 200
+    const pg = Math.max(Number(page) || 1, 1)
+    const offset = paginated ? (pg - 1) * lim : 0
+
+    const dataPromise = db.query(
       `SELECT c.id, c.name, c.last_name, c.phone, c.email, c.created_at,
          (SELECT COUNT(*) FROM appointments a WHERE a.customer_id = c.id AND a.tenant_id = c.tenant_id) AS appointment_count,
          (SELECT MAX(a.starts_at) FROM appointments a WHERE a.customer_id = c.id AND a.tenant_id = c.tenant_id) AS last_appointment_at
        FROM customers c
-       WHERE c.tenant_id = $1
-       ${search ? `AND (LOWER(c.name) LIKE $2 OR LOWER(c.last_name) LIKE $2 OR c.phone LIKE $2 OR LOWER(c.email) LIKE $2)` : ''}
-       ORDER BY c.name LIMIT 200`,
-      search ? [tenant_id, `%${search.toLowerCase()}%`] : [tenant_id]
+       WHERE ${where}
+       ORDER BY c.name LIMIT $${i} OFFSET $${i + 1}`,
+      [...params, lim, offset]
     )
-    return reply.send(rows)
+
+    if (!paginated) {
+      const { rows } = await dataPromise
+      return reply.send(rows)
+    }
+
+    const [dataRes, countRes] = await Promise.all([
+      dataPromise,
+      db.query(`SELECT COUNT(*)::int AS total FROM customers c WHERE ${where}`, params),
+    ])
+    return reply.send({
+      data: dataRes.rows,
+      total: Number(countRes.rows[0].total),
+      page: pg,
+      limit: lim,
+    })
   })
 
   app.get<{ Params: { id: string } }>('/customers/:id', async (request, reply) => {
     const { tenant_id } = request.user
 
     const { rows: [customer] } = await db.query(
-      `SELECT id, name, last_name, phone, email, created_at FROM customers WHERE id = $1 AND tenant_id = $2`,
+      `SELECT id, name, last_name, phone, email, created_at FROM customers WHERE id = $1 AND tenant_id = $2 AND deleted_at IS NULL`,
       [request.params.id, tenant_id]
     )
     if (!customer) return reply.status(404).send({ error: 'Cliente não encontrado' })
@@ -724,29 +838,51 @@ export const tenantRoutes: FastifyPluginAsync = async (app) => {
 
     const body = customerUpdateSchema.parse(request.body ?? {})
 
+    // SAL-7: telefone é normalizado para só dígitos (padrão BR com DDD).
+    let normalizedPhone: string | undefined
+    if (body.phone !== undefined) {
+      const digits = normalizePhoneBR(body.phone)
+      if (!digits) {
+        return reply.status(400).send({ error: 'Telefone inválido. Informe o número com DDD, por exemplo: (11) 99999-8888.' })
+      }
+      normalizedPhone = digits
+    }
+
     // Dynamic SET with only the keys present in the body (like the staff PATCH):
     // sending last_name/email as '' clears the field instead of keeping it.
     const sets: string[] = []
     const values: unknown[] = []
     let i = 1
-    if (body.name !== undefined)      { sets.push(`name = $${i++}`);      values.push(body.name) }
-    if (body.last_name !== undefined) { sets.push(`last_name = $${i++}`); values.push(body.last_name || null) }
-    if (body.email !== undefined)     { sets.push(`email = $${i++}`);     values.push(body.email || null) }
+    if (body.name !== undefined)          { sets.push(`name = $${i++}`);      values.push(body.name) }
+    if (body.last_name !== undefined)     { sets.push(`last_name = $${i++}`); values.push(body.last_name || null) }
+    if (body.email !== undefined)         { sets.push(`email = $${i++}`);     values.push(body.email || null) }
+    if (normalizedPhone !== undefined)    { sets.push(`phone = $${i++}`);     values.push(normalizedPhone) }
     if (sets.length === 0) return reply.status(400).send({ error: 'Nenhum campo para atualizar' })
 
     values.push(request.params.id, tenant_id)
-    const { rows: [customer] } = await db.query(
-      `UPDATE customers SET ${sets.join(', ')}
-       WHERE id = $${i} AND tenant_id = $${i + 1}
-       RETURNING *`,
-      values
-    )
-    if (!customer) return reply.status(404).send({ error: 'Cliente não encontrado' })
-    return reply.send(customer)
+    try {
+      const { rows: [customer] } = await db.query(
+        `UPDATE customers SET ${sets.join(', ')}
+         WHERE id = $${i} AND tenant_id = $${i + 1} AND deleted_at IS NULL
+         RETURNING *`,
+        values
+      )
+      if (!customer) return reply.status(404).send({ error: 'Cliente não encontrado' })
+      return reply.send(customer)
+    } catch (err: any) {
+      // UNIQUE (tenant_id, phone) — mesmo tratamento do POST /customers
+      if (err?.code === '23505') {
+        return reply.status(409).send({ error: 'Já existe outro cliente com esse telefone' })
+      }
+      throw err
+    }
   })
 
-  // Delete a customer (Admin/Owner only) — cascades their conversations, messages
-  // and appointments (commissions cascade from appointments) in one transaction.
+  // Delete a customer (Admin/Owner only). Comissão paga e venda concluída são
+  // HISTÓRICO: se o cliente tiver qualquer appointment 'completed' ou comissão
+  // 'paid', o cadastro é anonimizado (soft-delete via deleted_at, migration 034)
+  // preservando esses registros. Hard-delete só quando não há histórico
+  // financeiro. Conversas/mensagens (dados pessoais) são removidas nos dois casos.
   app.delete<{ Params: { id: string } }>('/customers/:id', async (request, reply) => {
     const { tenant_id, role } = request.user
     if (!['owner', 'admin', 'root'].includes(role)) return reply.status(403).send({ error: 'Sem permissão' })
@@ -754,17 +890,77 @@ export const tenantRoutes: FastifyPluginAsync = async (app) => {
     const client = await db.connect()
     try {
       await client.query('BEGIN')
-      const { rows: [exists] } = await client.query('SELECT id FROM customers WHERE id = $1 AND tenant_id = $2', [request.params.id, tenant_id])
+      const { rows: [exists] } = await client.query(
+        'SELECT id FROM customers WHERE id = $1 AND tenant_id = $2 AND deleted_at IS NULL',
+        [request.params.id, tenant_id]
+      )
       if (!exists) { await client.query('ROLLBACK'); return reply.status(404).send({ error: 'Cliente não encontrado' }) }
+
+      const { rows: [{ has_history }] } = await client.query(
+        `SELECT
+           EXISTS (
+             SELECT 1 FROM appointments a
+             WHERE a.customer_id = $1 AND a.tenant_id = $2 AND a.status = 'completed'
+           ) OR EXISTS (
+             SELECT 1 FROM commissions co
+             JOIN appointments a ON a.id = co.appointment_id
+             WHERE a.customer_id = $1 AND a.tenant_id = $2 AND co.status = 'paid'
+           ) AS has_history`,
+        [request.params.id, tenant_id]
+      )
+
       await client.query(
         `DELETE FROM messages WHERE conversation_id IN (SELECT id FROM conversations WHERE customer_id = $1 AND tenant_id = $2)`,
         [request.params.id, tenant_id]
       )
       await client.query('DELETE FROM conversations WHERE customer_id = $1 AND tenant_id = $2', [request.params.id, tenant_id])
+
+      if (has_history) {
+        // Remove só o que NÃO tem valor financeiro: comissões pendentes de
+        // agendamentos não concluídos e os próprios agendamentos não concluídos
+        // (sem comissão paga). Appointments 'completed' e comissões 'paid' ficam.
+        await client.query(
+          `DELETE FROM commissions co
+           USING appointments a
+           WHERE co.appointment_id = a.id AND co.status = 'pending'
+             AND a.customer_id = $1 AND a.tenant_id = $2 AND a.status <> 'completed'`,
+          [request.params.id, tenant_id]
+        )
+        await client.query(
+          `DELETE FROM appointments a
+           WHERE a.customer_id = $1 AND a.tenant_id = $2 AND a.status <> 'completed'
+             AND NOT EXISTS (SELECT 1 FROM commissions co WHERE co.appointment_id = a.id AND co.status = 'paid')`,
+          [request.params.id, tenant_id]
+        )
+        // Anonimiza o cadastro (o placeholder de phone mantém o UNIQUE tenant+phone).
+        await client.query(
+          `UPDATE customers SET
+             name = 'Cliente removido',
+             last_name = NULL,
+             email = NULL,
+             phone = 'removido-' || id::text,
+             deleted_at = NOW()
+           WHERE id = $1 AND tenant_id = $2`,
+          [request.params.id, tenant_id]
+        )
+        await client.query('COMMIT')
+        return reply.send({
+          deleted: true,
+          anonymized: true,
+          message: 'Cliente removido. As vendas concluídas e comissões pagas foram preservadas no histórico de forma anônima.',
+        })
+      }
+
+      // Sem histórico financeiro — exclusão definitiva (comissões pendentes
+      // são apagadas explicitamente: a FK agora é ON DELETE SET NULL).
+      await client.query(
+        `DELETE FROM commissions WHERE appointment_id IN (SELECT id FROM appointments WHERE customer_id = $1 AND tenant_id = $2)`,
+        [request.params.id, tenant_id]
+      )
       await client.query('DELETE FROM appointments WHERE customer_id = $1 AND tenant_id = $2', [request.params.id, tenant_id])
       await client.query('DELETE FROM customers WHERE id = $1 AND tenant_id = $2', [request.params.id, tenant_id])
       await client.query('COMMIT')
-      return reply.send({ deleted: true })
+      return reply.send({ deleted: true, message: 'Cliente excluído com sucesso.' })
     } catch (err) {
       await client.query('ROLLBACK')
       throw err

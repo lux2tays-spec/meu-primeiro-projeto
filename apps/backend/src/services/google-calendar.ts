@@ -165,6 +165,18 @@ export async function verifyGoogleIdToken(idToken: string) {
     throw new Error('Invalid Google token issuer')
   }
 
+  // AUTH-15: uma conta Google com e-mail NÃO verificado não pode virar usuário
+  // verificado na plataforma (o cadastro via Google grava email_verified=TRUE
+  // em users). O endpoint tokeninfo devolve email_verified como STRING
+  // ("true"/"false"); tokens antigos podem trazer boolean — String() cobre os
+  // dois. statusCode 403 → o error handler global devolve esta mensagem
+  // amigável em vez de um 500 genérico.
+  if (String(data.email_verified) !== 'true') {
+    const err: any = new Error('O e-mail da sua conta Google ainda não foi verificado. Confirme seu e-mail no Google e tente novamente.')
+    err.statusCode = 403
+    throw err
+  }
+
   return data
 }
 

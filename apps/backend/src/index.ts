@@ -1,5 +1,5 @@
 import Fastify from 'fastify'
-import { ZodError } from 'zod'
+import { ZodError, type ZodIssue } from 'zod'
 import cors from '@fastify/cors'
 import jwt from '@fastify/jwt'
 import rateLimit from '@fastify/rate-limit'
@@ -24,10 +24,12 @@ import { financeiroRoutes } from './routes/financeiro'
 import { commissionRoutes } from './routes/commissions'
 import { subscriptionRoutes } from './routes/subscription'
 import { brandingRoutes } from './routes/branding'
+import { resumePendingBotFlushes } from './services/botDispatcher'
 import { startReminderJob } from './jobs/reminders'
 import { startAppointmentReminders } from './jobs/appointmentReminders'
 import { startSubscriptionEnforcer } from './jobs/subscriptionEnforcer'
 import { startWhatsappReconciler } from './jobs/whatsappReconciler'
+import { startTrialEndingNotifier } from './jobs/trialEndingNotifier'
 
 // Validate required environment variables at boot — fail fast before binding to port
 const REQUIRED_ENVS = ['JWT_SECRET', 'DATABASE_URL', 'REDIS_URL', 'ANTHROPIC_API_KEY'] as const
@@ -39,6 +41,61 @@ if (process.env.JWT_SECRET!.length < 32) {
 }
 
 const isProd = process.env.NODE_ENV === 'production'
+
+// CFG-13: erro de validação com mensagem amigável em pt-BR por CAMPO, em vez do
+// "Dados inválidos" genérico — o usuário precisa saber O QUE corrigir. Mapeia o
+// primeiro issue do Zod (campo + motivo); os issues completos seguem em
+// `details` para depuração/uso programático.
+const FIELD_LABELS: Record<string, string> = {
+  name: 'nome', last_name: 'sobrenome', email: 'e-mail', password: 'senha',
+  phone: 'telefone', business_name: 'nome do estabelecimento', title: 'título',
+  description: 'descrição', amount: 'valor', price: 'preço',
+  duration_minutes: 'duração (minutos)', date: 'data', starts_at: 'data/hora',
+  from: 'data inicial', to: 'data final', time: 'hora', status: 'status',
+  role: 'função', message: 'mensagem', reason: 'motivo',
+  customer_id: 'cliente', professional_id: 'profissional', service_id: 'serviço',
+  start_time: 'horário de abertura', end_time: 'horário de fechamento',
+  contact_email: 'e-mail de contato', contact_phone: 'telefone de contato',
+  responsible_name: 'nome do responsável', notes: 'observações',
+}
+
+function friendlyValidationMessage(issue: ZodIssue | undefined): string {
+  if (!issue) return 'Dados inválidos. Confira as informações e tente novamente.'
+  const rawField = issue.path.length ? String(issue.path[issue.path.length - 1]) : ''
+  const field = FIELD_LABELS[rawField] ?? rawField
+  const label = field ? `O campo "${field}"` : 'Um dos campos'
+
+  switch (issue.code) {
+    case 'invalid_type':
+      if (issue.received === 'undefined' || issue.received === 'null') return `${label} é obrigatório.`
+      return `${label} está com um formato inválido.`
+    case 'too_small':
+      if (issue.type === 'string') {
+        return Number(issue.minimum) <= 1
+          ? `${label} é obrigatório.`
+          : `${label} é muito curto (mínimo de ${issue.minimum} caracteres).`
+      }
+      if (issue.type === 'number') return `${label} deve ser no mínimo ${issue.minimum}.`
+      if (issue.type === 'array') return `${label} precisa de pelo menos ${issue.minimum} item(ns).`
+      return `${label} é muito pequeno.`
+    case 'too_big':
+      if (issue.type === 'string') return `${label} é muito longo (máximo de ${issue.maximum} caracteres).`
+      if (issue.type === 'number') return `${label} deve ser no máximo ${issue.maximum}.`
+      return `${label} é muito grande.`
+    case 'invalid_string':
+      if (issue.validation === 'email') return `${label} não é um e-mail válido.`
+      if (issue.validation === 'uuid') return `${label} é inválido.`
+      if (issue.validation === 'datetime') return `${label} não é uma data/hora válida.`
+      return `${label} está com um formato inválido.`
+    case 'invalid_enum_value':
+      return `${label} tem um valor não permitido.`
+    default:
+      // Zod .refine() custom messages are already written in pt-BR in the
+      // schemas (e.g. "O horário de abertura deve ser antes do fechamento").
+      if (issue.code === 'custom' && issue.message) return issue.message
+      return `${label} é inválido. Confira e tente novamente.`
+  }
+}
 
 // In production the API should sit behind a TLS reverse proxy with a known
 // origin allowlist. If ALLOWED_ORIGINS isn't set we warn loudly but keep
@@ -95,7 +152,8 @@ async function start() {
   // Global error handler — validation → 400, never expose stack traces in prod
   app.setErrorHandler((error, _request, reply) => {
     if (error instanceof ZodError) {
-      return reply.status(400).send({ error: 'Dados inválidos', details: error.issues })
+      // CFG-13: primeira falha traduzida para o usuário; issues completos em details.
+      return reply.status(400).send({ error: friendlyValidationMessage(error.issues[0]), details: error.issues })
     }
     app.log.error(error)
     if (error.statusCode && error.statusCode < 500) {
@@ -148,10 +206,15 @@ async function start() {
 
   await app.listen({ port: Number(process.env.PORT ?? 3000), host: '0.0.0.0' })
 
+  // Um deploy/restart no meio da janela de debounce não pode descartar mensagens:
+  // reagenda o flush de todo buffer bot:buf:* que sobreviveu no Redis.
+  resumePendingBotFlushes().catch((err) => app.log.error({ err }, 'resumePendingBotFlushes falhou'))
+
   startReminderJob()
   startAppointmentReminders()
   startSubscriptionEnforcer()
   startWhatsappReconciler()
+  startTrialEndingNotifier()
 }
 
 // Graceful shutdown — drain in-flight requests before exiting

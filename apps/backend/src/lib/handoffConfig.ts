@@ -13,7 +13,7 @@ export type HandoffConfig = {
   offer_message: string
   button_label: string
   ack_message: string
-  resume_message: string        // '' = bot resumes silently
+  resume_message: string        // sent when the bot takes over again after a pause (empty in DB → default below, so the customer is never left guessing who is answering)
   owner_resume_keyword: string  // '' = disabled
 }
 
@@ -24,7 +24,10 @@ export const HANDOFF_DEFAULTS: HandoffConfig = {
   offer_message: 'Quer que eu encaminhe para um especialista?',
   button_label: 'Quero ajuda de um especialista',
   ack_message: 'Perfeito! Já avisei a equipe 🙌 Em breve um especialista continua seu atendimento por aqui.',
-  resume_message: '',
+  // Honesto e não-vazio: quando o bot reassume após a pausa, o cliente fica
+  // sabendo que o atendimento continua por aqui — sem fingir que um humano
+  // respondeu nem prometer prazo.
+  resume_message: 'Voltei por aqui para continuar seu atendimento 😊 Se ainda precisar de algo, é só me falar!',
   owner_resume_keyword: '',
 }
 
@@ -58,7 +61,7 @@ export async function getHandoffConfig(tenantId: string): Promise<HandoffConfig>
     offer_message: trim(r.handoff_offer_message) || HANDOFF_DEFAULTS.offer_message,
     button_label: trim(r.handoff_button_label) || HANDOFF_DEFAULTS.button_label,
     ack_message: trim(r.handoff_ack_message) || HANDOFF_DEFAULTS.ack_message,
-    resume_message: trim(r.handoff_resume_message),
+    resume_message: trim(r.handoff_resume_message) || HANDOFF_DEFAULTS.resume_message,
     owner_resume_keyword: trim(r.handoff_owner_resume_keyword),
   }
   redis.setex(cacheKey(tenantId), CACHE_TTL, JSON.stringify(cfg)).catch(() => {})

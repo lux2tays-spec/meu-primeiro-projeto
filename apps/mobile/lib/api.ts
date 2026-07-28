@@ -31,10 +31,30 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
 
   if (!res.ok) {
     const err = await res.json().catch(() => ({ error: 'Erro desconhecido' }))
-    throw new Error(err.error ?? `Erro ${res.status}`)
+    const e = new Error(err.error ?? `Erro ${res.status}`) as Error & { status?: number }
+    // Preserva o HTTP status para as telas decidirem a mensagem/CTA (ex.: 402 = limite de plano).
+    e.status = res.status
+    throw e
   }
 
   return res.json()
+}
+
+/**
+ * True quando o backend recusou a ação por limite do plano (HTTP 402 ou
+ * mensagem de limite). As telas usam isso para mostrar o CTA "Ver planos".
+ */
+export function isPlanLimitError(err: unknown): boolean {
+  if ((err as any)?.status === 402) return true
+  return /limite/i.test(String((err as any)?.message ?? ''))
+}
+
+/** Envelope de paginação padrão do backend. */
+export interface Paginated<T> {
+  data: T[]
+  total: number
+  page: number
+  limit: number
 }
 
 export const api = {
@@ -82,11 +102,17 @@ export const authApi = {
     name: string
     email: string
     password: string
+    phone: string
     business_name: string
     referral_code?: string
-  }) => api.post<{ token: string; tenant_id: string }>('/auth/register', data),
+  }) =>
+    // Backend returns 201 { needs_verification: true } WITHOUT token when the
+    // e-mail still needs confirmation; `token` only comes on auto-login flows.
+    api.post<{ needs_verification?: boolean; token?: string; tenant_id?: string }>('/auth/register', data),
   forgotPassword: (email: string) =>
     api.post<{ ok: boolean }>('/auth/forgot-password', { email }),
+  resendVerification: (email: string) =>
+    api.post<{ message: string }>('/auth/resend-verification', { email }),
   deleteAccount: () => api.delete<{ deleted: boolean }>('/auth/account'),
   me: () =>
     api.get<{
@@ -115,7 +141,9 @@ export const tenantApi = {
     contact_phone?: string | null
     responsible_name?: string | null
   }) => api.put<any>('/tenant/business', data),
-  services: () => api.get<any[]>('/tenant/services'),
+  /** Lista serviços ativos; `includeInactive` traz também os desativados (telas de gestão). */
+  services: (includeInactive = false) =>
+    api.get<any[]>(`/tenant/services${includeInactive ? '?include_inactive=1' : ''}`),
   createService: (data: any) => api.post<any>('/tenant/services', data),
   updateService: (id: string, data: any) => api.put<any>(`/tenant/services/${id}`, data),
   deleteService: (id: string) => api.delete<any>(`/tenant/services/${id}`),
@@ -136,7 +164,7 @@ export const tenantApi = {
   customer: (id: string) => api.get<any>(`/tenant/customers/${id}`),
   addCustomer: (data: { name: string; last_name?: string; phone: string; email?: string }) =>
     api.post<any>('/tenant/customers', data),
-  updateCustomer: (id: string, data: { name?: string; last_name?: string; email?: string }) =>
+  updateCustomer: (id: string, data: { name?: string; last_name?: string; email?: string; phone?: string }) =>
     api.put<any>(`/tenant/customers/${id}`, data),
   onboarding: () =>
     api.get<{
@@ -177,8 +205,8 @@ export const appointmentsApi = {
   create: (data: any) => api.post<any>('/appointments', data),
   updateStatus: (id: string, status: string) =>
     api.patch<any>(`/appointments/${id}/status`, { status }),
-  bulkReschedule: (data: { from: string; to: string; professional_id?: string; message?: string }) =>
-    api.post<{ affected: number; notified: number }>('/appointments/bulk-reschedule', data),
+  bulkReschedule: (data: { from: string; to: string; professional_id?: string; message?: string; dry_run?: boolean }) =>
+    api.post<{ affected: number; notified: number; dry_run?: boolean }>('/appointments/bulk-reschedule', data),
 }
 
 // Agent
@@ -252,7 +280,6 @@ export const slotsApi = {
 export const appointmentsApiExt = {
   ...appointmentsApi,
   getById: (id: string) => api.get<any>(`/appointments/${id}`),
-  update: (id: string, data: any) => api.patch<any>(`/appointments/${id}`, data),
   put: (id: string, data: any) => request<any>(`/appointments/${id}`, {
     method: 'PUT',
     body: JSON.stringify(data),
@@ -280,9 +307,18 @@ export const customersApi = {
   get: (id: string) => api.get<any>(`/tenant/customers/${id}`),
   create: (data: { name: string; last_name?: string; phone: string; email?: string }) =>
     api.post<any>('/tenant/customers', data),
-  update: (id: string, data: { name?: string; last_name?: string; email?: string }) =>
+  update: (id: string, data: { name?: string; last_name?: string; email?: string; phone?: string }) =>
     api.put<any>(`/tenant/customers/${id}`, data),
   remove: (id: string) => api.delete<any>(`/tenant/customers/${id}`),
+}
+
+// Profissionais (edição direta + criação sem acesso ao app)
+export const professionalsApi = {
+  /** Cria um profissional; sem `user_id` ele não tem acesso ao app (apenas agenda/comissões). */
+  create: (data: { name: string; phone?: string; bio?: string; user_id?: string }) =>
+    api.post<any>('/professionals', data),
+  update: (id: string, data: { name: string; phone?: string | null; bio?: string | null }) =>
+    api.patch<any>(`/professionals/${id}`, data),
 }
 
 /** Full display name for a customer: `name` + optional `last_name`. */
@@ -297,6 +333,9 @@ export const financeiroApi = {
     api.get<any>(`/financeiro/resumo?month=${month}&year=${year}`),
   vendas: (month: number, year: number) =>
     api.get<any[]>(`/financeiro/vendas?month=${month}&year=${year}`),
+  /** Lista paginada de vendas — com page/limit o backend responde { data, total, page, limit }. */
+  vendasPaged: (month: number, year: number, page: number, limit = 20) =>
+    api.get<Paginated<any>>(`/financeiro/vendas?month=${month}&year=${year}&page=${page}&limit=${limit}`),
   paymentLinks: () => api.get<any[]>('/financeiro/payment-links'),
   createPaymentLink: (data: { title: string; description?: string; amount: number }) =>
     api.post<any>('/financeiro/payment-links', data),
@@ -330,6 +369,9 @@ export const commissionsApi = {
   },
   pay: (body: { ids?: string[]; professional_id?: string; from?: string; to?: string }) =>
     api.post<{ paid_count: number }>('/commissions/pay', body),
+  /** Estorno: reverte comissões pagas para pendente (owner/admin). */
+  refund: (body: { ids?: string[]; professional_id?: string; from?: string; to?: string }) =>
+    api.post<{ refunded_count?: number }>('/commissions/refund', body),
 }
 
 // Subscription (platform plans + transparent checkout)

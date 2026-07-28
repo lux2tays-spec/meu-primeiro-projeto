@@ -26,7 +26,7 @@ const TITLES: Record<ToastVariant, string> = {
 }
 
 export function Toast() {
-  const { visible, message, variant, hide } = useToast()
+  const { visible, message, variant, action, hide } = useToast()
   const translateY = useRef(new Animated.Value(-120)).current
   const opacity = useRef(new Animated.Value(0)).current
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -39,7 +39,8 @@ export function Toast() {
         Animated.spring(translateY, { toValue: 0, useNativeDriver: true, tension: 80, friction: 10 }),
         Animated.timing(opacity, { toValue: 1, duration: 150, useNativeDriver: true }),
       ]).start()
-      timer.current = setTimeout(hide, 4500)
+      // Com CTA o toast fica mais tempo na tela para dar chance de tocar.
+      timer.current = setTimeout(hide, action ? 8000 : 4500)
     } else {
       Animated.parallel([
         Animated.timing(translateY, { toValue: -120, duration: 280, useNativeDriver: true }),
@@ -48,7 +49,7 @@ export function Toast() {
     }
 
     return () => { if (timer.current) clearTimeout(timer.current) }
-  }, [visible])
+  }, [visible, message, variant, action])
 
   const c = PALETTE[variant]
 
@@ -61,8 +62,24 @@ export function Toast() {
       <View style={{ flex: 1, gap: 2 }}>
         <Text style={[styles.title, { color: c.text }]}>{TITLES[variant]}</Text>
         <Text style={[styles.message, { color: c.text }]}>{message}</Text>
+        {action && (
+          <TouchableOpacity
+            onPress={() => { hide(); action.onPress() }}
+            accessibilityRole="button"
+            accessibilityLabel={action.label}
+            style={[styles.actionBtn, { borderColor: c.border }]}
+            hitSlop={{ top: 6, right: 6, bottom: 6, left: 6 }}
+          >
+            <Text style={[styles.actionText, { color: c.text }]}>{action.label}</Text>
+          </TouchableOpacity>
+        )}
       </View>
-      <TouchableOpacity onPress={hide} hitSlop={{ top: 10, right: 10, bottom: 10, left: 10 }}>
+      <TouchableOpacity
+        onPress={hide}
+        accessibilityRole="button"
+        accessibilityLabel="Fechar aviso"
+        hitSlop={{ top: 10, right: 10, bottom: 10, left: 10 }}
+      >
         <Ionicons name="close" size={18} color={c.text} />
       </TouchableOpacity>
     </Animated.View>
@@ -90,4 +107,13 @@ const styles = StyleSheet.create({
   },
   title: { fontSize: font.sm, fontWeight: '700', lineHeight: 18 },
   message: { fontSize: font.sm, lineHeight: 18 },
+  actionBtn: {
+    alignSelf: 'flex-start',
+    marginTop: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 5,
+    borderRadius: radius.full,
+    borderWidth: 1.5,
+  },
+  actionText: { fontSize: font.sm, fontWeight: '800' },
 })

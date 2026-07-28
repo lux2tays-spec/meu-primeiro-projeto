@@ -7,7 +7,8 @@ import { db } from './db'
 //   link → upsert a commission row, snapshotting price/config at completion.
 //   amount = percent → round(price * value / 100, 2) | fixed → value.
 //   On conflict (appointment already has a commission) the snapshot is
-//   refreshed but status/paid_at are PRESERVED — a 'paid' row is never reset.
+//   refreshed ONLY while status = 'pending' (SAL-13): a 'paid' row is history —
+//   editing the appointment must never rewrite its amount or beneficiary.
 // - status = 'cancelled' → delete the commission ONLY while still 'pending'
 //   (a paid commission is history and must never disappear).
 // - completed but commission not enabled → remove any lingering 'pending' row.
@@ -71,7 +72,8 @@ export async function syncCommissionForAppointment(appointmentId: string): Promi
          service_price    = EXCLUDED.service_price,
          commission_type  = EXCLUDED.commission_type,
          commission_value = EXCLUDED.commission_value,
-         amount           = EXCLUDED.amount`,
+         amount           = EXCLUDED.amount
+       WHERE commissions.status = 'pending'`,
       [appt.tenant_id, appointmentId, appt.professional_id, appt.service_id,
        price, type, value, amount]
     )

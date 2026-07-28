@@ -13,9 +13,10 @@ import {
   Linking,
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
+import { router } from 'expo-router'
 import { Ionicons } from '@expo/vector-icons'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { api, tenantApi, customersApi, customerFullName } from '@/lib/api'
+import { tenantApi, customersApi, customerFullName } from '@/lib/api'
 import { colors, font, spacing, radius } from '@/lib/theme'
 import { useAuthStore } from '@/lib/store'
 import { Card } from '@/components/ui/Card'
@@ -57,28 +58,39 @@ export default function CustomersScreen() {
   const queryClient = useQueryClient()
 
   const [search, setSearch] = useState('')
+  const [debouncedSearch, setDebouncedSearch] = useState('')
   const [addOpen, setAddOpen] = useState(false)
   const [detailId, setDetailId] = useState<string | null>(null)
 
-  const { data: customers, isLoading } = useQuery({
-    queryKey: ['customers'],
-    queryFn: () => api.get<any[]>('/tenant/customers'),
+  // Busca no SERVIDOR com debounce — não filtra uma lista limitada localmente.
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedSearch(search.trim()), 350)
+    return () => clearTimeout(t)
+  }, [search])
+
+  const { data: customers, isLoading, isError, refetch } = useQuery({
+    queryKey: ['customers', debouncedSearch],
+    queryFn: () => customersApi.list(debouncedSearch || undefined),
   })
 
-  const filtered = customers?.filter((c) =>
-    customerFullName(c).toLowerCase().includes(search.toLowerCase()) ||
-    (c.phone ?? '').includes(search)
-  ) ?? []
+  const filtered = customers ?? []
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
       <View style={styles.header}>
         <View style={{ flex: 1 }}>
           <Text style={styles.title}>Clientes</Text>
-          <Text style={styles.count}>{customers?.length ?? 0} cadastrados</Text>
+          <Text style={styles.count}>
+            {filtered.length} {debouncedSearch ? 'encontrados' : 'cadastrados'}
+          </Text>
         </View>
         {canManage && (
-          <TouchableOpacity style={styles.addBtn} onPress={() => setAddOpen(true)}>
+          <TouchableOpacity
+            style={styles.addBtn}
+            onPress={() => setAddOpen(true)}
+            accessibilityRole="button"
+            accessibilityLabel="Adicionar novo cliente"
+          >
             <Ionicons name="add" size={20} color="#fff" />
             <Text style={styles.addBtnText}>Novo</Text>
           </TouchableOpacity>
@@ -103,9 +115,24 @@ export default function CustomersScreen() {
         contentContainerStyle={styles.list}
         ItemSeparatorComponent={() => <View style={{ height: spacing.sm }} />}
         ListEmptyComponent={
-          <Text style={styles.empty}>
-            {isLoading ? 'Carregando...' : 'Nenhum cliente encontrado'}
-          </Text>
+          isError ? (
+            <View style={styles.errorBox}>
+              <Ionicons name="cloud-offline-outline" size={32} color={colors.textDisabled} />
+              <Text style={styles.empty}>Não foi possível carregar os clientes.</Text>
+              <TouchableOpacity
+                onPress={() => refetch()}
+                style={styles.retryBtn}
+                accessibilityRole="button"
+                accessibilityLabel="Tentar carregar os clientes novamente"
+              >
+                <Text style={styles.retryText}>Tentar novamente</Text>
+              </TouchableOpacity>
+            </View>
+          ) : isLoading ? (
+            <ActivityIndicator color={colors.primary} style={{ paddingVertical: spacing.xl }} />
+          ) : (
+            <Text style={styles.empty}>Nenhum cliente encontrado</Text>
+          )
         }
         renderItem={({ item }) => (
           <TouchableOpacity activeOpacity={0.7} onPress={() => setDetailId(item.id)}>
@@ -204,7 +231,7 @@ function AddCustomerModal({
           <View style={styles.modalHandle} />
           <View style={styles.modalHeader}>
             <Text style={styles.modalTitle}>Novo cliente</Text>
-            <TouchableOpacity onPress={onClose}>
+            <TouchableOpacity onPress={onClose} accessibilityRole="button" accessibilityLabel="Fechar">
               <Ionicons name="close" size={24} color={colors.textSecondary} />
             </TouchableOpacity>
           </View>
@@ -281,6 +308,7 @@ function CustomerDetailModal({
   const [editing, setEditing] = useState(false)
   const [editName, setEditName] = useState('')
   const [editLastName, setEditLastName] = useState('')
+  const [editPhone, setEditPhone] = useState('')
   const [editEmail, setEditEmail] = useState('')
 
   const { data, isLoading } = useQuery({
@@ -299,6 +327,7 @@ function CustomerDetailModal({
       customersApi.update(customerId!, {
         name: editName.trim(),
         last_name: editLastName.trim() || undefined,
+        phone: editPhone.replace(/\D/g, '') || undefined,
         email: editEmail.trim() || undefined,
       }),
     onSuccess: () => {
@@ -342,9 +371,13 @@ function CustomerDetailModal({
   function startEditing() {
     setEditName(data?.name ?? '')
     setEditLastName(data?.last_name ?? '')
+    setEditPhone(data?.phone ?? '')
     setEditEmail(data?.email ?? '')
     setEditing(true)
   }
+
+  // Telefone: vazio = mantém o atual; preenchido precisa ter ao menos 8 dígitos.
+  const editPhoneOk = !editPhone.trim() || editPhone.replace(/\D/g, '').length >= 8
 
   const interests: string[] = data?.interested_services
     ? String(data.interested_services)
@@ -353,6 +386,25 @@ function CustomerDetailModal({
         .filter(Boolean)
     : []
   const appointments: any[] = data?.appointments ?? []
+
+  // SAL-22: total gasto pelo cliente (soma dos atendimentos concluídos).
+  const totalSpent = appointments
+    .filter((a) => a.status === 'completed')
+    .reduce((sum, a) => sum + (Number(a.price) || 0), 0)
+
+  // SAL-22: novo agendamento já com este cliente pré-selecionado.
+  function startNewAppointment() {
+    if (!data) return
+    onClose()
+    router.push({
+      pathname: '/(app)/appointments/new',
+      params: {
+        prefillCustomerId: data.id,
+        prefillCustomerName: customerFullName(data) || data.name || '',
+        prefillCustomerPhone: data.phone ?? '',
+      },
+    })
+  }
 
   return (
     <Modal visible={!!customerId} animationType="slide" transparent onRequestClose={onClose}>
@@ -363,7 +415,7 @@ function CustomerDetailModal({
             <Text style={styles.modalTitle} numberOfLines={1}>
               {customerFullName(data) || 'Cliente'}
             </Text>
-            <TouchableOpacity onPress={onClose}>
+            <TouchableOpacity onPress={onClose} accessibilityRole="button" accessibilityLabel="Fechar">
               <Ionicons name="close" size={24} color={colors.textSecondary} />
             </TouchableOpacity>
           </View>
@@ -378,13 +430,22 @@ function CustomerDetailModal({
               <Text style={styles.fieldLabel}>Sobrenome</Text>
               <TextInput style={styles.fieldInput} value={editLastName} onChangeText={setEditLastName}
                 placeholder="Sobrenome" placeholderTextColor={colors.textDisabled} />
+              <Text style={styles.fieldLabel}>WhatsApp / Telefone</Text>
+              <TextInput style={styles.fieldInput} value={editPhone} onChangeText={setEditPhone}
+                placeholder="Ex: 5511999998888" placeholderTextColor={colors.textDisabled}
+                keyboardType="phone-pad" />
               <Text style={styles.fieldLabel}>E-mail</Text>
               <TextInput style={styles.fieldInput} value={editEmail} onChangeText={setEditEmail}
                 placeholder="email@exemplo.com" placeholderTextColor={colors.textDisabled}
                 autoCapitalize="none" keyboardType="email-address" />
               <TouchableOpacity
-                style={[styles.primaryBtn, (!editName.trim() || updateMutation.isPending) && styles.primaryBtnDisabled]}
-                disabled={!editName.trim() || updateMutation.isPending}
+                style={[
+                  styles.primaryBtn,
+                  (!editName.trim() || !editPhoneOk || updateMutation.isPending) && styles.primaryBtnDisabled,
+                ]}
+                disabled={!editName.trim() || !editPhoneOk || updateMutation.isPending}
+                accessibilityRole="button"
+                accessibilityLabel="Salvar alterações do cliente"
                 onPress={() => updateMutation.mutate()}>
                 <Text style={styles.primaryBtnText}>{updateMutation.isPending ? 'Salvando...' : 'Salvar'}</Text>
               </TouchableOpacity>
@@ -429,7 +490,12 @@ function CustomerDetailModal({
               ) : null}
 
               {/* Services history */}
-              <Text style={styles.sectionTitle}>Serviços realizados</Text>
+              <View style={styles.sectionTitleRow}>
+                <Text style={styles.sectionTitle}>Serviços realizados</Text>
+                {totalSpent > 0 && (
+                  <Text style={styles.totalSpent}>Total gasto: {formatPrice(totalSpent)}</Text>
+                )}
+              </View>
               {appointments.length > 0 ? (
                 appointments.map((a) => (
                   <View key={a.id} style={styles.apptRow}>
@@ -460,6 +526,17 @@ function CustomerDetailModal({
               ) : (
                 <Text style={styles.sectionEmpty}>Nenhum atendimento registrado.</Text>
               )}
+
+              {/* SAL-22: agendar direto do perfil do cliente */}
+              <TouchableOpacity
+                style={styles.newApptBtn}
+                onPress={startNewAppointment}
+                accessibilityRole="button"
+                accessibilityLabel="Novo agendamento para este cliente"
+              >
+                <Ionicons name="calendar-outline" size={18} color="#fff" />
+                <Text style={styles.newApptBtnText}>Novo agendamento</Text>
+              </TouchableOpacity>
 
               {/* Admin actions (#8) — only owner/admin/root */}
               {canManage && (
@@ -536,6 +613,12 @@ const styles = StyleSheet.create({
   phoneLink: { color: colors.whatsapp, textDecorationLine: 'underline' },
   email: { fontSize: font.sm, color: colors.textSecondary, marginTop: 1 },
   empty: { textAlign: 'center', color: colors.textSecondary, paddingVertical: spacing.xl, fontSize: font.md },
+  errorBox: { alignItems: 'center', gap: spacing.xs, paddingVertical: spacing.lg },
+  retryBtn: {
+    paddingHorizontal: spacing.lg, paddingVertical: spacing.sm,
+    borderRadius: radius.full, backgroundColor: colors.primaryLight,
+  },
+  retryText: { color: colors.primary, fontWeight: '700', fontSize: font.sm },
 
   // Modal
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', justifyContent: 'flex-end' },
@@ -597,6 +680,16 @@ const styles = StyleSheet.create({
   detailContactRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, marginBottom: spacing.xs },
   detailContactText: { fontSize: font.md, color: colors.text },
   sectionTitle: { fontSize: font.md, fontWeight: '800', color: colors.text, marginTop: spacing.lg, marginBottom: spacing.sm },
+  sectionTitleRow: {
+    flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between',
+    gap: spacing.sm, flexWrap: 'wrap',
+  },
+  totalSpent: { fontSize: font.sm, fontWeight: '700', color: colors.success },
+  newApptBtn: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6,
+    height: 48, borderRadius: radius.md, backgroundColor: colors.primary, marginTop: spacing.lg,
+  },
+  newApptBtnText: { color: '#fff', fontWeight: '700', fontSize: font.md },
   sectionEmpty: { fontSize: font.sm, color: colors.textSecondary },
   metaText: { fontSize: font.sm, color: colors.textDisabled, marginTop: 4 },
   chipWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.xs },

@@ -1411,4 +1411,218 @@ export const rootRoutes: FastifyPluginAsync = async (app) => {
     await logAdminAction(auditFromRequest(request, 'export.subscriptions', 'csv', `${rows.length} tenants`))
     return sendCsv(reply, 'assinaturas', csv)
   })
+
+  const COMMISSION_STATUS_PT: Record<string, string> = { pending: 'Pendente', paid: 'Pago' }
+  const COMMISSION_TYPE_PT: Record<string, string> = { percent: 'Percentual (%)', fixed: 'Fixo (R$)' }
+
+  // All generated commissions (one per completed appointment) across tenants.
+  app.get('/export/commissions', async (request, reply) => {
+    const { rows } = await db.query(`
+      SELECT t.name AS tenant_name,
+             p.name AS professional_name,
+             s.name AS service_name,
+             TRIM(CONCAT(c.name, ' ', COALESCE(c.last_name, ''))) AS customer_name,
+             co.service_price, co.commission_type, co.commission_value, co.amount, co.status,
+             to_char(a.starts_at AT TIME ZONE 'America/Sao_Paulo', 'DD/MM/YYYY HH24:MI') AS service_at,
+             to_char(co.paid_at AT TIME ZONE 'America/Sao_Paulo', 'DD/MM/YYYY HH24:MI')  AS paid_at
+      FROM commissions co
+      JOIN tenants t ON t.id = co.tenant_id
+      JOIN professionals p ON p.id = co.professional_id
+      LEFT JOIN services s ON s.id = co.service_id
+      JOIN appointments a ON a.id = co.appointment_id
+      LEFT JOIN customers c ON c.id = a.customer_id
+      ORDER BY a.starts_at DESC
+    `)
+    const csv = toCsv(
+      ['Estabelecimento', 'Profissional', 'Serviço', 'Cliente', 'Preço do serviço',
+       'Tipo de comissão', 'Valor configurado', 'Comissão (R$)', 'Status',
+       'Data do atendimento', 'Pago em'],
+      (rows as any[]).map((r) => [
+        r.tenant_name, r.professional_name, r.service_name, r.customer_name,
+        brNumber(r.service_price),
+        COMMISSION_TYPE_PT[r.commission_type] ?? r.commission_type,
+        brNumber(r.commission_value), brNumber(r.amount),
+        COMMISSION_STATUS_PT[r.status] ?? r.status,
+        r.service_at, r.paid_at,
+      ])
+    )
+    await logAdminAction(auditFromRequest(request, 'export.commissions', 'csv', `${rows.length} comissões`))
+    return sendCsv(reply, 'comissoes', csv)
+  })
+
+  // Service catalog across tenants: price, duration, commission setup, usage.
+  app.get('/export/services', async (request, reply) => {
+    const { rows } = await db.query(`
+      SELECT t.name AS tenant_name,
+             s.name, s.price, s.duration_minutes, s.reminder_days, s.active,
+             (SELECT COUNT(*) FROM service_professionals sp WHERE sp.service_id = s.id)::int AS professional_count,
+             (SELECT STRING_AGG(
+                       p.name || ': ' ||
+                       CASE WHEN sp.commission_type = 'percent'
+                            THEN REPLACE(sp.commission_value::text, '.', ',') || '%'
+                            ELSE 'R$ ' || REPLACE(sp.commission_value::text, '.', ',') END,
+                       '; ' ORDER BY p.name)
+              FROM service_professionals sp
+              JOIN professionals p ON p.id = sp.professional_id
+              WHERE sp.service_id = s.id AND sp.commission_enabled) AS commissions_configured,
+             (SELECT COUNT(*) FROM appointments a
+              WHERE a.service_id = s.id AND a.status != 'cancelled')::int AS appointment_count,
+             to_char(s.created_at AT TIME ZONE 'America/Sao_Paulo', 'DD/MM/YYYY') AS created_at
+      FROM services s
+      JOIN tenants t ON t.id = s.tenant_id
+      ORDER BY t.name, s.name
+    `)
+    const csv = toCsv(
+      ['Estabelecimento', 'Serviço', 'Preço', 'Duração (min)', 'Lembrete (dias)',
+       'Ativo', 'Nº de profissionais', 'Comissões configuradas', 'Nº de atendimentos', 'Criado em'],
+      (rows as any[]).map((r) => [
+        r.tenant_name, r.name, brNumber(r.price), r.duration_minutes, r.reminder_days,
+        r.active ? 'Sim' : 'Não', r.professional_count, r.commissions_configured,
+        r.appointment_count, r.created_at,
+      ])
+    )
+    await logAdminAction(auditFromRequest(request, 'export.services', 'csv', `${rows.length} serviços`))
+    return sendCsv(reply, 'servicos', csv)
+  })
+
+  // Professionals across tenants: linked user, services attended, workload.
+  app.get('/export/professionals', async (request, reply) => {
+    const { rows } = await db.query(`
+      SELECT t.name AS tenant_name,
+             p.name, p.phone, p.active,
+             u.name AS user_name, u.email AS user_email,
+             (SELECT STRING_AGG(s.name, '; ' ORDER BY s.name)
+              FROM service_professionals sp
+              JOIN services s ON s.id = sp.service_id
+              WHERE sp.professional_id = p.id) AS services,
+             (SELECT COUNT(*) FROM appointments a
+              WHERE a.professional_id = p.id AND a.status != 'cancelled')::int AS appointment_count,
+             (SELECT COALESCE(SUM(co.amount), 0) FROM commissions co
+              WHERE co.professional_id = p.id AND co.status = 'pending') AS pending_commissions,
+             to_char(p.created_at AT TIME ZONE 'America/Sao_Paulo', 'DD/MM/YYYY') AS created_at
+      FROM professionals p
+      JOIN tenants t ON t.id = p.tenant_id
+      LEFT JOIN users u ON u.id = p.user_id
+      ORDER BY t.name, p.name
+    `)
+    const csv = toCsv(
+      ['Estabelecimento', 'Profissional', 'Telefone', 'Ativo',
+       'Usuário vinculado', 'E-mail do usuário', 'Serviços que atende',
+       'Nº de agendamentos', 'Comissões pendentes (R$)', 'Criado em'],
+      (rows as any[]).map((r) => [
+        r.tenant_name, r.name, r.phone, r.active ? 'Sim' : 'Não',
+        r.user_name, r.user_email, r.services,
+        r.appointment_count, brNumber(r.pending_commissions), r.created_at,
+      ])
+    )
+    await logAdminAction(auditFromRequest(request, 'export.professionals', 'csv', `${rows.length} profissionais`))
+    return sendCsv(reply, 'profissionais', csv)
+  })
+
+  // Affiliates + their referrals (one row per referral; affiliates with no
+  // referral still appear with empty referral columns). Earnings are BRL cents.
+  app.get('/export/affiliates', async (request, reply) => {
+    const { rows } = await db.query(`
+      SELECT u.name AS affiliate_name, u.email AS affiliate_email,
+             a.referral_code, a.pending_earnings, a.paid_earnings,
+             t.name AS referred_tenant, t.plan AS referred_plan, t.status AS referred_status,
+             ar.commission_brl,
+             to_char(ar.created_at AT TIME ZONE 'America/Sao_Paulo', 'DD/MM/YYYY') AS referred_at,
+             to_char(ar.paid_at AT TIME ZONE 'America/Sao_Paulo', 'DD/MM/YYYY')    AS commission_paid_at,
+             CASE WHEN ar.id IS NULL THEN NULL
+                  WHEN ar.paid_at IS NULL THEN 'Pendente' ELSE 'Pago' END AS commission_status
+      FROM affiliates a
+      JOIN users u ON u.id = a.user_id
+      LEFT JOIN affiliate_referrals ar ON ar.affiliate_id = a.id
+      LEFT JOIN tenants t ON t.id = ar.tenant_id
+      ORDER BY u.name, ar.created_at DESC NULLS LAST
+    `)
+    const csv = toCsv(
+      ['Afiliado', 'E-mail', 'Código de indicação',
+       'Estabelecimento indicado', 'Plano do indicado', 'Status do indicado',
+       'Comissão da indicação (R$)', 'Status da comissão', 'Indicado em', 'Comissão paga em',
+       'Ganhos pendentes (R$)', 'Ganhos pagos (R$)'],
+      (rows as any[]).map((r) => [
+        r.affiliate_name, r.affiliate_email, r.referral_code,
+        r.referred_tenant, r.referred_plan,
+        r.referred_status ? (TENANT_STATUS_PT[r.referred_status] ?? r.referred_status) : null,
+        r.commission_brl !== null && r.commission_brl !== undefined ? brNumber(Number(r.commission_brl) / 100) : null,
+        r.commission_status, r.referred_at, r.commission_paid_at,
+        brNumber(Number(r.pending_earnings) / 100), brNumber(Number(r.paid_earnings) / 100),
+      ])
+    )
+    await logAdminAction(auditFromRequest(request, 'export.affiliates', 'csv', `${rows.length} linhas`))
+    return sendCsv(reply, 'afiliados', csv)
+  })
+
+  // All platform users with their roles per tenant.
+  app.get('/export/users', async (request, reply) => {
+    const { rows } = await db.query(`
+      SELECT u.name, u.email, u.phone, u.email_verified,
+             u.google_sub IS NOT NULL AS has_google,
+             (SELECT STRING_AGG(DISTINCT ur.role, ', ')
+              FROM user_roles ur WHERE ur.user_id = u.id) AS roles,
+             (SELECT STRING_AGG(t.name || ' (' || ur.role || ')', '; ' ORDER BY t.name || ' (' || ur.role || ')')
+              FROM user_roles ur JOIN tenants t ON t.id = ur.tenant_id
+              WHERE ur.user_id = u.id) AS tenants,
+             to_char(u.created_at AT TIME ZONE 'America/Sao_Paulo', 'DD/MM/YYYY HH24:MI') AS created_at
+      FROM users u
+      ORDER BY u.created_at DESC
+    `)
+    const csv = toCsv(
+      ['Nome', 'E-mail', 'Telefone', 'Papéis', 'Estabelecimentos',
+       'E-mail verificado', 'Login Google', 'Criado em'],
+      (rows as any[]).map((r) => [
+        r.name, r.email, r.phone, r.roles, r.tenants,
+        r.email_verified ? 'Sim' : 'Não', r.has_google ? 'Sim' : 'Não', r.created_at,
+      ])
+    )
+    await logAdminAction(auditFromRequest(request, 'export.users', 'csv', `${rows.length} usuários`))
+    return sendCsv(reply, 'usuarios', csv)
+  })
+
+  // AI cost x revenue per tenant (current month, America/Sao_Paulo) — lets the
+  // platform owner spot tenants whose AI cost eats the plan margin.
+  app.get('/export/ai-usage', async (request, reply) => {
+    const { rows: [cfg] } = await db.query("SELECT value FROM platform_settings WHERE key = 'ai_config'")
+    const usdBrl = Number(cfg?.value?.usd_brl_rate ?? 6)
+
+    let rows: any[] = []
+    try {
+      const res = await db.query(`
+        SELECT COALESCE(t.name, '(desconhecido)') AS tenant_name,
+               t.plan, t.status,
+               SUM(u.cost_usd)::float AS cost_usd,
+               SUM(u.input_tokens + u.output_tokens + u.cache_read_tokens + u.cache_write_tokens)::bigint AS tokens,
+               COUNT(*)::int AS calls
+        FROM ai_usage u
+        LEFT JOIN tenants t ON t.id = u.tenant_id
+        WHERE date_trunc('month', u.created_at AT TIME ZONE 'America/Sao_Paulo')
+            = date_trunc('month', now() AT TIME ZONE 'America/Sao_Paulo')
+        GROUP BY u.tenant_id, t.name, t.plan, t.status
+        ORDER BY cost_usd DESC
+      `)
+      rows = res.rows
+    } catch { /* ai_usage table not created yet (migration 014 pending) — empty CSV */ }
+
+    const csv = toCsv(
+      ['Estabelecimento', 'Plano', 'Status', 'Receita do plano (R$/mês)',
+       'Custo IA (US$)', 'Custo IA (R$)', 'Margem estimada (R$)',
+       'Tokens', 'Nº de chamadas IA', 'Câmbio US$→R$'],
+      rows.map((r) => {
+        const costUsd = Number(r.cost_usd ?? 0)
+        const costBrl = costUsd * usdBrl
+        const planPrice = PLAN_PRICE[r.plan] ?? 0
+        return [
+          r.tenant_name, r.plan,
+          r.status ? (TENANT_STATUS_PT[r.status] ?? r.status) : null,
+          brNumber(planPrice),
+          costUsd.toFixed(4).replace('.', ','), brNumber(costBrl), brNumber(planPrice - costBrl),
+          Number(r.tokens), r.calls, brNumber(usdBrl),
+        ]
+      })
+    )
+    await logAdminAction(auditFromRequest(request, 'export.ai_usage', 'csv', `${rows.length} tenants (mês atual)`))
+    return sendCsv(reply, 'uso-ia', csv)
+  })
 }

@@ -9,10 +9,11 @@ import { router } from 'expo-router'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { Button } from '@/components/ui/Button'
-import { appointmentsApi, appointmentsApiExt, tenantApi } from '@/lib/api'
+import { appointmentsApi, appointmentsApiExt, tenantApi, slotsApi } from '@/lib/api'
 import { useAuthStore } from '@/lib/store'
 import { useToast } from '@/lib/toast'
 import { colors, font, spacing, radius } from '@/lib/theme'
+import { useTheme } from '@/lib/theme-context'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types + helpers
@@ -81,6 +82,18 @@ function timeHM(iso: string) {
   return new Date(iso).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
 }
 
+/** HH:MM no fuso de São Paulo — mesmo fuso usado ao salvar o agendamento. */
+function timeHMSaoPaulo(iso: string) {
+  return new Date(iso).toLocaleTimeString('pt-BR', {
+    hour: '2-digit', minute: '2-digit', timeZone: 'America/Sao_Paulo',
+  })
+}
+
+/** YYYY-MM-DD no fuso de São Paulo. */
+function dateSaoPaulo(iso: string) {
+  return new Date(iso).toLocaleDateString('en-CA', { timeZone: 'America/Sao_Paulo' })
+}
+
 function fullName(a: Appt) {
   return [a.customer_name, a.customer_last_name].filter(Boolean).join(' ')
 }
@@ -99,6 +112,7 @@ const TIME_RE = /^([01]\d|2[0-3]):[0-5]\d$/
 
 export default function CalendarScreen() {
   const toast = useToast()
+  const theme = useTheme()
   const queryClient = useQueryClient()
   const { role, userId } = useAuthStore()
   const canManage = role === 'owner' || role === 'admin' || role === 'root'
@@ -137,7 +151,28 @@ export default function CalendarScreen() {
   })
 
   const { data: professionals } = useQuery({ queryKey: ['professionals'], queryFn: tenantApi.professionals })
-  const { data: services } = useQuery({ queryKey: ['services'], queryFn: tenantApi.services })
+  const { data: services } = useQuery({ queryKey: ['services'], queryFn: () => tenantApi.services() })
+
+  // Ocupação por dia na faixa de dias (SAL-9): busca os agendamentos do período
+  // visível e conta por dia (cancelados fora).
+  const stripFrom = toISO(stripDates[0])
+  const stripTo = toISO(stripDates[stripDates.length - 1])
+  const { data: rangeAppointments } = useQuery({
+    queryKey: ['appointments-range', stripFrom, stripTo],
+    queryFn: () => appointmentsApi.search({
+      from: new Date(`${stripFrom}T00:00:00-03:00`).toISOString(),
+      to: new Date(`${stripTo}T23:59:59-03:00`).toISOString(),
+    }) as Promise<Appt[]>,
+  })
+  const dayCounts = useMemo(() => {
+    const m: Record<string, number> = {}
+    for (const a of rangeAppointments ?? []) {
+      if (a.status === 'cancelled') continue
+      const key = dateSaoPaulo(a.starts_at)
+      m[key] = (m[key] ?? 0) + 1
+    }
+    return m
+  }, [rangeAppointments])
 
   const sorted = useMemo(
     () => (appointments ?? []).slice().sort(
@@ -156,6 +191,23 @@ export default function CalendarScreen() {
   const [editCustomerName, setEditCustomerName] = useState<string>('')
   const [editCustomerLastName, setEditCustomerLastName] = useState<string>('')
   const [editNotes, setEditNotes] = useState<string>('')
+  // Data/horário originais do agendamento — o horário atual continua selecionável
+  // mesmo que o backend não o liste como "livre" (está ocupado por ele próprio).
+  const [editOriginalDate, setEditOriginalDate] = useState<string>('')
+  const [editOriginalTime, setEditOriginalTime] = useState<string>('')
+
+  // Disponibilidade (slots) para a remarcação — em vez de digitar horário livre.
+  const { data: editSlots, isLoading: loadingEditSlots } = useQuery({
+    queryKey: ['slots', editProfessionalId, editServiceId, editDate],
+    queryFn: () => slotsApi.getSlots(editProfessionalId, editServiceId, editDate),
+    enabled: !!editing && !!editProfessionalId && !!editServiceId && !!editDate,
+  })
+  const editSlotTimes = useMemo(
+    () => (editSlots ?? []).map((iso) => timeHMSaoPaulo(iso)),
+    [editSlots]
+  )
+  const showOriginalSlot =
+    !!editing && editDate === editOriginalDate && !editSlotTimes.includes(editOriginalTime)
 
   // Quem pode editar: owner/admin/root editam tudo; staff edita os agendamentos
   // que criou OU em que é o profissional designado (mesma regra do backend em
@@ -173,14 +225,17 @@ export default function CalendarScreen() {
   }
 
   function openEdit(a: Appt) {
-    const d = new Date(a.starts_at)
     setEditing(a)
     setEditServiceId(a.service_id)
     setEditProfessionalId(a.professional_id)
     // Data/hora sempre exibidas no fuso de São Paulo — o mesmo usado ao salvar,
     // para que abrir e salvar sem mexer não desloque o horário.
-    setEditDate(d.toLocaleDateString('en-CA', { timeZone: 'America/Sao_Paulo' }))
-    setEditTime(d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', timeZone: 'America/Sao_Paulo' }))
+    const date = dateSaoPaulo(a.starts_at)
+    const time = timeHMSaoPaulo(a.starts_at)
+    setEditDate(date)
+    setEditTime(time)
+    setEditOriginalDate(date)
+    setEditOriginalTime(time)
     setEditStatus(a.status)
     setEditCustomerName(a.customer_name ?? '')
     setEditCustomerLastName(a.customer_last_name ?? '')
@@ -215,6 +270,7 @@ export default function CalendarScreen() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['appointments'] })
+      queryClient.invalidateQueries({ queryKey: ['appointments-range'] })
       queryClient.invalidateQueries({ queryKey: ['customers'] })
       if (editing) {
         queryClient.invalidateQueries({ queryKey: ['appointment', editing.id] })
@@ -232,7 +288,14 @@ export default function CalendarScreen() {
       return
     }
     if (!TIME_RE.test(editTime)) {
-      toast.show('Horário inválido. Use o formato HH:MM (ex.: 14:30).', 'warning')
+      toast.show('Escolha um horário disponível.', 'warning')
+      return
+    }
+    // Só aceita horário que esteja entre os disponíveis (ou o horário atual do
+    // próprio agendamento, quando data não mudou).
+    const isOriginal = editDate === editOriginalDate && editTime === editOriginalTime
+    if (editSlots !== undefined && !editSlotTimes.includes(editTime) && !isOriginal) {
+      toast.show('Esse horário não está mais disponível. Escolha um dos horários livres.', 'warning')
       return
     }
     editMutation.mutate()
@@ -258,6 +321,8 @@ export default function CalendarScreen() {
   const [bulkProfessionalId, setBulkProfessionalId] = useState<string | null>(null)
   const [bulkMessage, setBulkMessage] = useState('')
   const [bulkConfirm, setBulkConfirm] = useState(false)
+  // SAL-16: quantos agendamentos serão cancelados (prévia via dry-run) antes de confirmar.
+  const [bulkPreviewCount, setBulkPreviewCount] = useState<number | null>(null)
 
   function openBulk() {
     const t = toISO(new Date())
@@ -270,19 +335,38 @@ export default function CalendarScreen() {
     setBulkOpen(true)
   }
 
-  const bulkMutation = useMutation({
-    mutationFn: () => appointmentsApi.bulkReschedule({
-      // Horários digitados são horário de São Paulo (UTC−03) → converter para UTC "Z"
+  // Payload compartilhado pela prévia (dry-run) e pela execução real.
+  // Horários digitados são horário de São Paulo (UTC−03) → converter para UTC "Z".
+  function bulkPayload(dryRun: boolean) {
+    return {
       from: new Date(`${bulkFrom}T${bulkFromTime}:00-03:00`).toISOString(),
       to: new Date(`${bulkTo}T${bulkToTime}:59-03:00`).toISOString(), // inclusivo até o fim do minuto final
-
       professional_id: bulkProfessionalId ?? undefined,
       message: bulkMessage.trim() || undefined,
-    }),
+      ...(dryRun ? { dry_run: true } : {}),
+    }
+  }
+
+  // SAL-16: prévia — pergunta ao backend quantos serão cancelados, sem cancelar
+  // nem notificar ninguém, e só então abre a confirmação com o número real.
+  const previewMutation = useMutation({
+    mutationFn: () => appointmentsApi.bulkReschedule(bulkPayload(true)),
+    onSuccess: (res) => {
+      setBulkPreviewCount(res.affected)
+      setBulkConfirm(true)
+    },
+    onError: (err: any) => {
+      toast.show(err.message ?? 'Não foi possível calcular a prévia. Tente novamente.', 'error')
+    },
+  })
+
+  const bulkMutation = useMutation({
+    mutationFn: () => appointmentsApi.bulkReschedule(bulkPayload(false)),
     onSuccess: (res) => {
       setBulkConfirm(false)
       setBulkOpen(false)
       queryClient.invalidateQueries({ queryKey: ['appointments'] })
+      queryClient.invalidateQueries({ queryKey: ['appointments-range'] })
       toast.show(`${res.notified} clientes avisados`, 'success')
     },
     onError: (err: any) => {
@@ -300,7 +384,9 @@ export default function CalendarScreen() {
       toast.show('O horário final deve ser depois do horário inicial.', 'warning')
       return
     }
-    setBulkConfirm(true)
+    // Busca a prévia antes de confirmar (SAL-16).
+    setBulkPreviewCount(null)
+    previewMutation.mutate()
   }
 
   // ── Render ────────────────────────────────────────────────────────────────
@@ -344,18 +430,31 @@ export default function CalendarScreen() {
           const iso = toISO(d)
           const isSelected = iso === dateStr
           const isToday = iso === todayStr
+          const count = dayCounts[iso] ?? 0
           return (
             <TouchableOpacity
               key={iso}
-              style={[styles.dayBtn, isSelected && styles.dayBtnSelected]}
+              style={[styles.dayBtn, isSelected && { backgroundColor: theme.primary }]}
               onPress={() => setSelected(d)}
+              accessibilityRole="button"
+              accessibilityLabel={`${d.toLocaleDateString('pt-BR', { weekday: 'long', day: 'numeric', month: 'long' })}, ${count} ${count === 1 ? 'agendamento' : 'agendamentos'}`}
             >
               <Text style={[styles.dayName, isSelected && styles.dayTextSelected]}>
                 {DAYS[d.getDay()]}
               </Text>
-              <Text style={[styles.dayNum, isSelected && styles.dayTextSelected, isToday && !isSelected && styles.todayNum]}>
+              <Text style={[styles.dayNum, isSelected && styles.dayTextSelected, isToday && !isSelected && { color: theme.primary }]}>
                 {d.getDate()}
               </Text>
+              {/* Indicador de ocupação do dia */}
+              {count > 0 ? (
+                <View style={[styles.dayCountBadge, isSelected && styles.dayCountBadgeSelected]}>
+                  <Text style={[styles.dayCountText, { color: theme.primary }, isSelected && styles.dayCountTextSelected]}>
+                    {count > 9 ? '9+' : count}
+                  </Text>
+                </View>
+              ) : (
+                <View style={styles.dayCountPlaceholder} />
+              )}
             </TouchableOpacity>
           )
         })}
@@ -442,6 +541,8 @@ export default function CalendarScreen() {
           style={styles.fab}
           onPress={() => router.push({ pathname: '/(app)/appointments/new', params: { prefillDate: dateStr } })}
           activeOpacity={0.85}
+          accessibilityRole="button"
+          accessibilityLabel="Novo agendamento"
         >
           <Ionicons name="add" size={28} color="#fff" />
         </TouchableOpacity>
@@ -490,7 +591,7 @@ export default function CalendarScreen() {
               <>
                 <View style={styles.editHeader}>
                   <Text style={styles.sheetTitle}>Editar agendamento</Text>
-                  <TouchableOpacity onPress={() => setEditing(null)} hitSlop={8}>
+                  <TouchableOpacity onPress={() => setEditing(null)} hitSlop={8} accessibilityRole="button" accessibilityLabel="Fechar">
                     <Ionicons name="close" size={22} color={colors.textSecondary} />
                   </TouchableOpacity>
                 </View>
@@ -548,20 +649,47 @@ export default function CalendarScreen() {
                     ))}
                   </View>
 
-                  {/* Data / hora */}
-                  <Text style={styles.fieldLabel}>Data e hora</Text>
+                  {/* Data */}
+                  <Text style={styles.fieldLabel}>Data</Text>
                   <View style={styles.dateTimeRow}>
-                    <DateStepper value={editDate} onChange={setEditDate} />
-                    <TextInput
-                      style={styles.timeInput}
-                      value={editTime}
-                      onChangeText={setEditTime}
-                      placeholder="HH:MM"
-                      placeholderTextColor={colors.textDisabled}
-                      keyboardType="numbers-and-punctuation"
-                      maxLength={5}
+                    <DateStepper
+                      value={editDate}
+                      onChange={(v) => {
+                        setEditDate(v)
+                        // Mudou de dia → o horário anterior deixa de valer; volta ao
+                        // horário atual do agendamento se retornar à data original.
+                        setEditTime(v === editOriginalDate ? editOriginalTime : '')
+                      }}
                     />
                   </View>
+
+                  {/* Horários disponíveis (slots) — em vez de digitar horário livre */}
+                  <Text style={styles.fieldLabel}>Horário</Text>
+                  {loadingEditSlots ? (
+                    <ActivityIndicator color={theme.primary} style={{ paddingVertical: spacing.sm }} />
+                  ) : editSlotTimes.length === 0 && !showOriginalSlot ? (
+                    <Text style={styles.noSlotsText}>
+                      Sem horários disponíveis neste dia para este profissional e serviço.
+                    </Text>
+                  ) : (
+                    <View style={styles.chipWrap}>
+                      {showOriginalSlot && (
+                        <SelectChip
+                          label={`${editOriginalTime} (atual)`}
+                          selected={editTime === editOriginalTime}
+                          onPress={() => setEditTime(editOriginalTime)}
+                        />
+                      )}
+                      {editSlotTimes.map((time) => (
+                        <SelectChip
+                          key={time}
+                          label={time}
+                          selected={editTime === time}
+                          onPress={() => setEditTime(time)}
+                        />
+                      ))}
+                    </View>
+                  )}
 
                   {/* Status */}
                   <Text style={styles.fieldLabel}>Status</Text>
@@ -623,7 +751,7 @@ export default function CalendarScreen() {
           <View style={styles.editSheet}>
             <View style={styles.editHeader}>
               <Text style={styles.sheetTitle}>Remarcação em massa</Text>
-              <TouchableOpacity onPress={() => setBulkOpen(false)} hitSlop={8}>
+              <TouchableOpacity onPress={() => setBulkOpen(false)} hitSlop={8} accessibilityRole="button" accessibilityLabel="Fechar">
                 <Ionicons name="close" size={22} color={colors.textSecondary} />
               </TouchableOpacity>
             </View>
@@ -693,7 +821,7 @@ export default function CalendarScreen() {
                 label="Cancelar horários e avisar clientes"
                 variant="danger"
                 onPress={confirmBulk}
-                loading={bulkMutation.isPending}
+                loading={previewMutation.isPending || bulkMutation.isPending}
               />
             </ScrollView>
           </View>
@@ -703,12 +831,20 @@ export default function CalendarScreen() {
       <ConfirmDialog
         visible={bulkConfirm}
         title="Remarcação em massa"
-        message={`Cancelar todos os agendamentos de ${dateLabelPt(bulkFrom)} às ${bulkFromTime} até ${dateLabelPt(bulkTo)} às ${bulkToTime}${bulkProfessionalId ? ' do profissional selecionado' : ''} e avisar os clientes por WhatsApp?`}
-        confirmLabel="Cancelar e avisar"
+        message={
+          // SAL-16: mostra o número real de agendamentos que serão cancelados.
+          bulkPreviewCount === 0
+            ? `Nenhum agendamento encontrado de ${dateLabelPt(bulkFrom)} às ${bulkFromTime} até ${dateLabelPt(bulkTo)} às ${bulkToTime}${bulkProfessionalId ? ' para o profissional selecionado' : ''}. Nada será cancelado.`
+            : `${bulkPreviewCount} ${bulkPreviewCount === 1 ? 'agendamento será cancelado' : 'agendamentos serão cancelados'} de ${dateLabelPt(bulkFrom)} às ${bulkFromTime} até ${dateLabelPt(bulkTo)} às ${bulkToTime}${bulkProfessionalId ? ' do profissional selecionado' : ''}. Os clientes serão avisados por WhatsApp. Deseja continuar?`
+        }
+        confirmLabel={bulkPreviewCount === 0 ? 'Entendi' : 'Cancelar e avisar'}
         cancelLabel="Voltar"
         variant="danger"
         loading={bulkMutation.isPending}
-        onConfirm={() => bulkMutation.mutate()}
+        onConfirm={() => {
+          if (bulkPreviewCount === 0) { setBulkConfirm(false); return }
+          bulkMutation.mutate()
+        }}
         onCancel={() => setBulkConfirm(false)}
       />
     </SafeAreaView>
@@ -926,6 +1062,21 @@ const styles = StyleSheet.create({
   dayNum: { fontSize: font.md, fontWeight: '700', color: colors.text },
   dayTextSelected: { color: '#fff' },
   todayNum: { color: colors.primary },
+  // Indicador de ocupação do dia (SAL-9)
+  dayCountBadge: {
+    minWidth: 16,
+    height: 16,
+    borderRadius: 8,
+    paddingHorizontal: 4,
+    backgroundColor: colors.primaryLight,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  dayCountBadgeSelected: { backgroundColor: 'rgba(255,255,255,0.9)' },
+  dayCountText: { fontSize: 10, fontWeight: '800' },
+  dayCountTextSelected: { color: colors.primary },
+  dayCountPlaceholder: { height: 16 },
+  noSlotsText: { fontSize: font.sm, color: colors.textSecondary, paddingVertical: spacing.sm },
   filtersBlock: { paddingHorizontal: spacing.lg, gap: spacing.sm, paddingBottom: spacing.sm },
   searchBox: {
     flexDirection: 'row',

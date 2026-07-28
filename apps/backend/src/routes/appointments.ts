@@ -2,7 +2,7 @@ import { FastifyPluginAsync } from 'fastify'
 import { z } from 'zod'
 import { db } from '../lib/db'
 import { syncAppointmentToCalendar, deleteCalendarEvent } from '../services/google-calendar'
-import { findAvailableSlots } from '../services/scheduling'
+import { findAvailableSlots, isOverlapViolation } from '../services/scheduling'
 import { syncCommissionForAppointment } from '../lib/commissions'
 import { evolutionSend } from '../services/evolution'
 
@@ -121,11 +121,11 @@ export const appointmentRoutes: FastifyPluginAsync = async (app) => {
        WHERE a.id = $1 AND a.tenant_id = $2`,
       [request.params.id, tenant_id]
     )
-    if (!appt) return reply.status(404).send({ error: 'Not found' })
+    if (!appt) return reply.status(404).send({ error: 'Agendamento não encontrado' })
     // Staff only see their own appointments (creator or assigned professional) —
     // same rule as the list handler. 404 (not 403) to avoid confirming existence.
     if (role === 'staff' && appt.created_by !== user_id && appt.professional_user_id !== user_id) {
-      return reply.status(404).send({ error: 'Not found' })
+      return reply.status(404).send({ error: 'Agendamento não encontrado' })
     }
     return reply.send(appt)
   })
@@ -139,20 +139,20 @@ export const appointmentRoutes: FastifyPluginAsync = async (app) => {
       'SELECT duration_minutes FROM services WHERE id = $1 AND tenant_id = $2',
       [body.service_id, tenant_id]
     )
-    if (!service) return reply.status(404).send({ error: 'Service not found' })
+    if (!service) return reply.status(404).send({ error: 'Serviço não encontrado' })
 
     // Ensure customer and professional belong to this tenant
     const { rows: [customer] } = await db.query(
       'SELECT id FROM customers WHERE id = $1 AND tenant_id = $2',
       [body.customer_id, tenant_id]
     )
-    if (!customer) return reply.status(404).send({ error: 'Customer not found' })
+    if (!customer) return reply.status(404).send({ error: 'Cliente não encontrado' })
 
     const { rows: [professional] } = await db.query(
       'SELECT id FROM professionals WHERE id = $1 AND tenant_id = $2',
       [body.professional_id, tenant_id]
     )
-    if (!professional) return reply.status(404).send({ error: 'Professional not found' })
+    if (!professional) return reply.status(404).send({ error: 'Profissional não encontrado' })
 
     const startsAt = new Date(body.starts_at)
     const endsAt = new Date(startsAt.getTime() + service.duration_minutes * 60000)
@@ -164,15 +164,26 @@ export const appointmentRoutes: FastifyPluginAsync = async (app) => {
       [body.professional_id, tenant_id, startsAt.toISOString(), endsAt.toISOString()]
     )
     if (conflicts.length > 0) {
-      return reply.status(409).send({ error: 'Time slot not available' })
+      return reply.status(409).send({ error: 'Este horário não está disponível — já existe outro agendamento nesse período. Escolha outro horário.' })
     }
 
-    const { rows: [appt] } = await db.query(
-      `INSERT INTO appointments (tenant_id, customer_id, professional_id, service_id, starts_at, ends_at, notes, created_by)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
-      [tenant_id, body.customer_id, body.professional_id, body.service_id,
-       startsAt.toISOString(), endsAt.toISOString(), body.notes ?? null, user_id]
-    )
+    let appt: any
+    try {
+      const { rows } = await db.query(
+        `INSERT INTO appointments (tenant_id, customer_id, professional_id, service_id, starts_at, ends_at, notes, created_by)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
+        [tenant_id, body.customer_id, body.professional_id, body.service_id,
+         startsAt.toISOString(), endsAt.toISOString(), body.notes ?? null, user_id]
+      )
+      appt = rows[0]
+    } catch (err) {
+      // Corrida: outro agendamento pegou o horário entre a checagem acima e o
+      // INSERT — a constraint appointments_no_overlap (036) barrou. 409, não 500.
+      if (isOverlapViolation(err)) {
+        return reply.status(409).send({ error: 'Este horário acabou de ser ocupado. Escolha outro horário.' })
+      }
+      throw err
+    }
 
     // Sync to Google Calendar in background
     syncAppointmentToCalendar(appt.id).catch(console.error)
@@ -196,14 +207,14 @@ export const appointmentRoutes: FastifyPluginAsync = async (app) => {
         'SELECT id FROM professionals WHERE id = $1 AND tenant_id = $2',
         [body.professional_id, tenant_id]
       )
-      if (!prof) return reply.status(404).send({ error: 'Professional not found' })
+      if (!prof) return reply.status(404).send({ error: 'Profissional não encontrado' })
     }
     if (body.service_id) {
       const { rows: [svc] } = await db.query(
         'SELECT id FROM services WHERE id = $1 AND tenant_id = $2',
         [body.service_id, tenant_id]
       )
-      if (!svc) return reply.status(404).send({ error: 'Service not found' })
+      if (!svc) return reply.status(404).send({ error: 'Serviço não encontrado' })
     }
 
     // If changing time/service, recompute ends_at and check conflicts
@@ -232,7 +243,7 @@ export const appointmentRoutes: FastifyPluginAsync = async (app) => {
           [professionalId, tenant_id, appointmentId, body.starts_at, endsAt]
         )
         if (conflicts.length > 0) {
-          return reply.status(409).send({ error: 'Time slot not available' })
+          return reply.status(409).send({ error: 'Este horário não está disponível — já existe outro agendamento nesse período. Escolha outro horário.' })
         }
       }
     }
@@ -240,23 +251,44 @@ export const appointmentRoutes: FastifyPluginAsync = async (app) => {
     const sets: string[] = []
     const values: unknown[] = []
     let i = 1
+    let serviceIdParamIdx: number | null = null
 
     if (body.professional_id !== undefined) { sets.push(`professional_id = $${i++}`); values.push(body.professional_id) }
-    if (body.service_id !== undefined)      { sets.push(`service_id = $${i++}`); values.push(body.service_id) }
+    if (body.service_id !== undefined)      { serviceIdParamIdx = i; sets.push(`service_id = $${i++}`); values.push(body.service_id) }
     if (body.starts_at !== undefined)       { sets.push(`starts_at = $${i++}`); values.push(body.starts_at) }
     if (endsAt !== undefined)               { sets.push(`ends_at = $${i++}`); values.push(endsAt) }
     if (body.notes !== undefined)           { sets.push(`notes = $${i++}`); values.push(body.notes) }
     if (body.status !== undefined)          { sets.push(`status = $${i++}`); values.push(body.status) }
+    // SAL-14: ao CONCLUIR, congela o preço vigente do serviço em price_snapshot
+    // (migration 037) — o financeiro usa COALESCE(price_snapshot, s.price), então
+    // reajustar o preço depois não muda a receita de vendas já concluídas. O
+    // COALESCE interno preserva um snapshot já gravado (re-concluir não regrava).
+    // Se o serviço estiver sendo trocado NA MESMA chamada, usa o novo serviço.
+    if (body.status === 'completed') {
+      const svcRef = serviceIdParamIdx !== null ? `$${serviceIdParamIdx}::uuid` : 'appointments.service_id'
+      sets.push(`price_snapshot = COALESCE(price_snapshot, (SELECT s.price FROM services s WHERE s.id = ${svcRef}))`)
+    }
 
-    if (sets.length === 0) return reply.status(400).send({ error: 'No fields to update' })
+    if (sets.length === 0) return reply.status(400).send({ error: 'Nenhum campo para atualizar' })
 
     values.push(appointmentId, tenant_id)
-    const { rows: [updated] } = await db.query(
-      `UPDATE appointments SET ${sets.join(', ')} WHERE id = $${i++} AND tenant_id = $${i} RETURNING *`,
-      values
-    )
+    let updated: any
+    try {
+      const { rows } = await db.query(
+        `UPDATE appointments SET ${sets.join(', ')} WHERE id = $${i++} AND tenant_id = $${i} RETURNING *`,
+        values
+      )
+      updated = rows[0]
+    } catch (err) {
+      // Corrida: o novo horário/status colidiu com outro agendamento e a
+      // constraint appointments_no_overlap (036) barrou. 409, não 500.
+      if (isOverlapViolation(err)) {
+        return reply.status(409).send({ error: 'Este horário acabou de ser ocupado. Escolha outro horário.' })
+      }
+      throw err
+    }
 
-    if (!updated) return reply.status(404).send({ error: 'Not found' })
+    if (!updated) return reply.status(404).send({ error: 'Agendamento não encontrado' })
 
     // If cancelled, remove from calendars; otherwise sync
     if (body.status === 'cancelled') {
@@ -283,11 +315,31 @@ export const appointmentRoutes: FastifyPluginAsync = async (app) => {
     const allowed = await canEditAppointment(user_id, tenant_id!, role, request.params.id)
     if (!allowed) return reply.status(403).send({ error: 'Sem permissão' })
 
-    const { rows: [appt] } = await db.query(
-      `UPDATE appointments SET status = $1 WHERE id = $2 AND tenant_id = $3 RETURNING *`,
-      [status, request.params.id, tenant_id]
-    )
-    if (!appt) return reply.status(404).send({ error: 'Not found' })
+    let appt: any
+    try {
+      // SAL-14: ao concluir, congela o preço vigente em price_snapshot (migration
+      // 037) para a receita do financeiro não mudar com reajustes futuros. O
+      // COALESCE preserva um snapshot já existente (idempotente).
+      const { rows } = await db.query(
+        `UPDATE appointments SET status = $1,
+           price_snapshot = CASE
+             WHEN $1 = 'completed'
+               THEN COALESCE(price_snapshot, (SELECT s.price FROM services s WHERE s.id = appointments.service_id))
+             ELSE price_snapshot
+           END
+         WHERE id = $2 AND tenant_id = $3 RETURNING *`,
+        [status, request.params.id, tenant_id]
+      )
+      appt = rows[0]
+    } catch (err) {
+      // Reativar (ex.: cancelled → confirmed) pode colidir com outro agendamento
+      // que ocupou o horário — constraint appointments_no_overlap (036). 409, não 500.
+      if (isOverlapViolation(err)) {
+        return reply.status(409).send({ error: 'Este horário já está ocupado por outro agendamento. Escolha outro horário.' })
+      }
+      throw err
+    }
+    if (!appt) return reply.status(404).send({ error: 'Agendamento não encontrado' })
 
     if (status === 'cancelled') deleteCalendarEvent(request.params.id).catch(console.error)
     else syncAppointmentToCalendar(request.params.id).catch(console.error)
@@ -331,6 +383,9 @@ export const appointmentRoutes: FastifyPluginAsync = async (app) => {
     to: z.string().datetime(),
     professional_id: z.string().uuid().optional(),
     message: z.string().max(1000).optional(), // may contain {quando} placeholder
+    // SAL-16: true = só conta quantos agendamentos SERIAM afetados (dry-run),
+    // sem cancelar nem notificar nada — o app confirma com o usuário antes.
+    dry_run: z.boolean().optional(),
   })
 
   const BULK_MAX_WINDOW_DAYS = 31
@@ -351,6 +406,24 @@ export const appointmentRoutes: FastifyPluginAsync = async (app) => {
       return reply.status(400).send({ error: `Período muito longo: escolha um intervalo de até ${BULK_MAX_WINDOW_DAYS} dias.` })
     }
 
+    const scopeWhere = `
+      a.tenant_id = $1 AND a.status IN ('pending','confirmed')
+        AND a.starts_at >= $2 AND a.starts_at < $3` +
+      (body.professional_id ? ` AND a.professional_id = $4` : '')
+    const params: unknown[] = [tenant_id, body.from, body.to]
+    if (body.professional_id) params.push(body.professional_id)
+
+    // Contagem prévia do impacto — atende o dry-run (SAL-16) e o teto abaixo.
+    const { rows: [{ total }] } = await db.query(
+      `SELECT COUNT(*)::int AS total FROM appointments a WHERE ${scopeWhere}`, params
+    )
+
+    // SAL-16: dry-run — responde só a contagem, sem cancelar nem notificar
+    // ninguém (nem exigir WhatsApp conectado, já que nada será enviado).
+    if (body.dry_run) {
+      return reply.send({ dry_run: true, affected: total, notified: 0 })
+    }
+
     // WhatsApp must be connected to notify anyone.
     const { rows: [inst] } = await db.query(
       `SELECT instance_name, status FROM whatsapp_instances WHERE tenant_id = $1`, [tenant_id]
@@ -359,17 +432,7 @@ export const appointmentRoutes: FastifyPluginAsync = async (app) => {
       return reply.status(400).send({ error: 'WhatsApp não está conectado — conecte antes de avisar os clientes.' })
     }
 
-    const scopeWhere = `
-      a.tenant_id = $1 AND a.status IN ('pending','confirmed')
-        AND a.starts_at >= $2 AND a.starts_at < $3` +
-      (body.professional_id ? ` AND a.professional_id = $4` : '')
-    const params: unknown[] = [tenant_id, body.from, body.to]
-    if (body.professional_id) params.push(body.professional_id)
-
     // Hard ceiling on scope — refuse instead of silently truncating.
-    const { rows: [{ total }] } = await db.query(
-      `SELECT COUNT(*)::int AS total FROM appointments a WHERE ${scopeWhere}`, params
-    )
     if (total > BULK_MAX_APPOINTMENTS) {
       return reply.status(400).send({
         error: `São ${total} agendamentos no período (máximo ${BULK_MAX_APPOINTMENTS}). Reduza o período ou filtre por profissional.`,

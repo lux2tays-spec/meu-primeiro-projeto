@@ -2,7 +2,9 @@
 import { useState } from 'react'
 import { rootApi } from '@/lib/api'
 
-type ExportKey = 'customers' | 'tenants' | 'appointments' | 'subscriptions'
+type ExportKey =
+  | 'customers' | 'tenants' | 'appointments' | 'subscriptions'
+  | 'commissions' | 'services' | 'professionals' | 'affiliates' | 'users' | 'ai-usage'
 
 const EXPORTS: {
   key: ExportKey
@@ -42,6 +44,54 @@ const EXPORTS: {
     description:
       'Assinaturas por estabelecimento: status no Mercado Pago, próxima cobrança e valor do plano (inclui tenants sem assinatura).',
     run: rootApi.exportSubscriptions,
+  },
+  {
+    key: 'commissions',
+    icon: '💰',
+    title: 'Comissões',
+    description:
+      'Comissões geradas por atendimento: profissional, estabelecimento, serviço, cliente, valor, tipo (% ou fixo), status e data do atendimento.',
+    run: rootApi.exportCommissions,
+  },
+  {
+    key: 'services',
+    icon: '✂️',
+    title: 'Serviços',
+    description:
+      'Catálogo de serviços de todos os estabelecimentos: preço, duração, comissões configuradas, dias de lembrete, nº de atendimentos e status.',
+    run: rootApi.exportServices,
+  },
+  {
+    key: 'professionals',
+    icon: '🧑‍💼',
+    title: 'Profissionais',
+    description:
+      'Profissionais de todos os estabelecimentos: usuário vinculado, serviços que atendem, nº de agendamentos e comissões pendentes.',
+    run: rootApi.exportProfessionals,
+  },
+  {
+    key: 'affiliates',
+    icon: '🤝',
+    title: 'Afiliados / Indicações',
+    description:
+      'Programa de afiliados: código de indicação, estabelecimentos indicados, comissão por indicação, status e ganhos pendentes/pagos.',
+    run: rootApi.exportAffiliates,
+  },
+  {
+    key: 'users',
+    icon: '🔑',
+    title: 'Usuários da Plataforma',
+    description:
+      'Todos os usuários (donos e equipe): contato, papéis por estabelecimento, e-mail verificado, login Google e data de cadastro.',
+    run: rootApi.exportUsers,
+  },
+  {
+    key: 'ai-usage',
+    icon: '🤖',
+    title: 'Uso de IA / Custos',
+    description:
+      'Custo de IA do mês por estabelecimento: custo em US$ e R$, tokens, nº de chamadas e margem estimada vs. o valor do plano.',
+    run: rootApi.exportAiUsage,
   },
 ]
 

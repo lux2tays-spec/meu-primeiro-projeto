@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity } from 'react-native'
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, Linking, Alert } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { router, useLocalSearchParams } from 'expo-router'
 import { Ionicons } from '@expo/vector-icons'
@@ -37,6 +37,17 @@ const statusMap: Record<string, { label: string; variant: any }> = {
   cancelled: { label: 'Cancelado',  variant: 'danger' },
 }
 
+// SAL-22: abre a conversa do WhatsApp com o cliente (wa.me só com dígitos).
+async function openWhatsApp(phone?: string | null) {
+  const digits = (phone ?? '').replace(/\D/g, '')
+  if (!digits) return
+  try {
+    await Linking.openURL(`https://wa.me/${digits}`)
+  } catch {
+    Alert.alert('WhatsApp', 'Não foi possível abrir o WhatsApp neste dispositivo.')
+  }
+}
+
 const statusActions: Record<string, { label: string; next: string }[]> = {
   pending:   [{ label: 'Confirmar', next: 'confirmed' }, { label: 'Cancelar', next: 'cancelled' }],
   confirmed: [{ label: 'Concluir',  next: 'completed' }, { label: 'Cancelar', next: 'cancelled' }],
@@ -65,7 +76,8 @@ export default function AppointmentDetailScreen() {
   })()
 
   const updateMutation = useMutation({
-    mutationFn: (data: any) => api.patch<any>(`/appointments/${id}`, data),
+    // A rota real do backend é PUT /appointments/:id (PATCH não existe → 404).
+    mutationFn: (data: any) => api.put<any>(`/appointments/${id}`, data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['appointment', id] })
       queryClient.invalidateQueries({ queryKey: ['appointments'] })
@@ -97,7 +109,7 @@ export default function AppointmentDetailScreen() {
   if (isLoading || !appt) {
     return (
       <SafeAreaView style={styles.container} edges={[]}>
-        <Text style={{ textAlign: 'center', padding: spacing.xl, color: colors.textSecondary }}>Carregando...</Text>
+        <ActivityIndicator color={colors.primary} style={{ marginTop: spacing.xxl }} />
       </SafeAreaView>
     )
   }
@@ -110,17 +122,21 @@ export default function AppointmentDetailScreen() {
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()}>
+        <TouchableOpacity onPress={() => router.back()} accessibilityRole="button" accessibilityLabel="Voltar">
           <Ionicons name="arrow-back" size={22} color={colors.text} />
         </TouchableOpacity>
         <Text style={styles.title}>Agendamento</Text>
         {canEdit && !isEditing && (
-          <TouchableOpacity onPress={() => { setNotes(appt.notes ?? ''); setIsEditing(true) }}>
+          <TouchableOpacity
+            onPress={() => { setNotes(appt.notes ?? ''); setIsEditing(true) }}
+            accessibilityRole="button"
+            accessibilityLabel="Editar observações"
+          >
             <Ionicons name="create-outline" size={22} color={colors.primary} />
           </TouchableOpacity>
         )}
         {isEditing && (
-          <TouchableOpacity onPress={() => setIsEditing(false)}>
+          <TouchableOpacity onPress={() => setIsEditing(false)} accessibilityRole="button" accessibilityLabel="Cancelar edição">
             <Ionicons name="close" size={22} color={colors.textSecondary} />
           </TouchableOpacity>
         )}
@@ -133,6 +149,17 @@ export default function AppointmentDetailScreen() {
 
         <Card style={styles.infoCard}>
           <InfoRow icon="person-outline" label="Cliente" value={appt.customer_name} sub={appt.customer_phone} />
+          {!!appt.customer_phone && (
+            <TouchableOpacity
+              style={styles.whatsappBtn}
+              onPress={() => openWhatsApp(appt.customer_phone)}
+              accessibilityRole="button"
+              accessibilityLabel={`Chamar ${appt.customer_name} no WhatsApp`}
+            >
+              <Ionicons name="logo-whatsapp" size={16} color={colors.whatsapp} />
+              <Text style={styles.whatsappBtnText}>Chamar no WhatsApp</Text>
+            </TouchableOpacity>
+          )}
           <View style={styles.divider} />
           <InfoRow icon="cut-outline" label="Serviço" value={appt.service_name} sub={`${appt.duration_minutes} min · R$ ${Number(appt.price).toFixed(2).replace('.', ',')}`} />
           <View style={styles.divider} />
@@ -233,6 +260,12 @@ const styles = StyleSheet.create({
   statusRow: { alignItems: 'flex-start' },
   infoCard: { gap: spacing.md },
   divider: { height: 1, backgroundColor: colors.border },
+  whatsappBtn: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6,
+    paddingVertical: spacing.sm, borderRadius: radius.md,
+    borderWidth: 1, borderColor: colors.whatsapp + '55', backgroundColor: colors.whatsapp + '11',
+  },
+  whatsappBtnText: { fontSize: font.sm, fontWeight: '700', color: colors.whatsapp },
   notesCard: { gap: spacing.sm },
   notesLabel: { fontSize: font.md, fontWeight: '600', color: colors.text },
   notesText: { fontSize: font.md, color: colors.textSecondary, lineHeight: 22 },

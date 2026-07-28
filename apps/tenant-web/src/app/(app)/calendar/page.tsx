@@ -2,8 +2,9 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import Link from 'next/link'
-import { appointmentsApi, tenantApi, getToken, type AppointmentListParams } from '@/lib/api'
+import { appointmentsApi, tenantApi, getToken, friendlyMessage, type AppointmentListParams } from '@/lib/api'
 import { getTokenPayload } from '@/lib/auth'
+import { useModalA11y } from '@/lib/useModalA11y'
 import {
   ChevronLeft, ChevronRight, Search, X, AlertTriangle, MessageCircle, CheckCircle2, Loader2,
 } from 'lucide-react'
@@ -34,8 +35,10 @@ type ViewMode = 'day' | 'week' | 'month'
 const DAYS = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb']
 const MONTHS = ['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro']
 
-const START_HOUR = 7
-const END_HOUR = 21
+// SAL-4: 07–21h é apenas o intervalo PADRÃO — a grade expande para o min/max
+// dos agendamentos do período, para nunca esconder horários fora dessa janela.
+const DEFAULT_START_HOUR = 7
+const DEFAULT_END_HOUR = 21
 const HOUR_PX = 56
 
 // Block styles (week/day time-grid) — color by status
@@ -134,7 +137,7 @@ export default function CalendarPage() {
   const [bulkOpen, setBulkOpen] = useState(false)
 
   const { data: professionals = [] } = useQuery({ queryKey: ['professionals'], queryFn: tenantApi.professionals })
-  const { data: services = [] } = useQuery({ queryKey: ['services'], queryFn: tenantApi.services })
+  const { data: services = [] } = useQuery({ queryKey: ['services'], queryFn: () => tenantApi.services() })
 
   // Fetch window per view: day → ?date=YYYY-MM-DD; week → from/to = week bounds;
   // month → from/to = visible grid bounds (so leading/trailing cells fill too)
@@ -170,6 +173,19 @@ export default function CalendarPage() {
     }
     for (const k of Object.keys(map)) map[k].sort((x, y) => +new Date(x.starts_at) - +new Date(y.starts_at))
     return map
+  }, [appointments])
+
+  // SAL-4: janela da grade derivada dos agendamentos do período (nunca esconde nada)
+  const [startHour, endHour] = useMemo(() => {
+    let s = DEFAULT_START_HOUR
+    let e = DEFAULT_END_HOUR
+    for (const a of appointments) {
+      const st = new Date(a.starts_at)
+      const en = endsAt(a)
+      s = Math.min(s, st.getHours())
+      e = Math.max(e, en.getMinutes() > 0 || en.getSeconds() > 0 ? en.getHours() + 1 : en.getHours())
+    }
+    return [Math.max(0, s), Math.min(24, e)]
   }, [appointments])
 
   function navigate(dir: -1 | 1) {
@@ -294,8 +310,8 @@ export default function CalendarPage() {
             <p className="text-gray-400 text-sm text-center">Nenhum agendamento neste período.</p>
           )}
           {view === 'month' && <MonthView anchor={anchor} byDay={byDay} onOpen={setEditing} onOpenDay={openDay} />}
-          {view === 'week' && <WeekView anchor={anchor} byDay={byDay} onOpen={setEditing} onOpenDay={openDay} />}
-          {view === 'day' && <DayView anchor={anchor} byDay={byDay} onOpen={setEditing} />}
+          {view === 'week' && <WeekView anchor={anchor} byDay={byDay} onOpen={setEditing} onOpenDay={openDay} startHour={startHour} endHour={endHour} />}
+          {view === 'day' && <DayView anchor={anchor} byDay={byDay} onOpen={setEditing} startHour={startHour} endHour={endHour} />}
         </>
       )}
 
@@ -304,6 +320,8 @@ export default function CalendarPage() {
           appointment={editing}
           services={services as any[]}
           professionals={professionals as any[]}
+          // SAL-12: papel "staff" abre o agendamento apenas para leitura.
+          readOnly={!isManager}
           onClose={() => setEditing(null)}
           onSaved={() => {
             setEditing(null)
@@ -418,15 +436,15 @@ function MonthView({ anchor, byDay, onOpen, onOpenDay }: {
 // Time-grid views (week / day)
 // ---------------------------------------------------------------------------
 
-function TimeAxis() {
-  const hours = Array.from({ length: END_HOUR - START_HOUR + 1 }, (_, i) => START_HOUR + i)
+function TimeAxis({ startHour, endHour }: { startHour: number; endHour: number }) {
+  const hours = Array.from({ length: endHour - startHour + 1 }, (_, i) => startHour + i)
   return (
-    <div className="relative w-12 shrink-0 select-none" style={{ height: (END_HOUR - START_HOUR) * HOUR_PX }}>
+    <div className="relative w-12 shrink-0 select-none" style={{ height: (endHour - startHour) * HOUR_PX }}>
       {hours.map((h) => (
         <span
           key={h}
           className="absolute right-2 -translate-y-1/2 text-[11px] text-gray-400 font-medium"
-          style={{ top: (h - START_HOUR) * HOUR_PX }}
+          style={{ top: (h - startHour) * HOUR_PX }}
         >
           {String(h).padStart(2, '0')}:00
         </span>
@@ -435,18 +453,23 @@ function TimeAxis() {
   )
 }
 
-function DayColumn({ appts, onOpen }: { appts: Appointment[]; onOpen: (a: Appointment) => void }) {
+function DayColumn({ appts, onOpen, startHour, endHour }: {
+  appts: Appointment[]
+  onOpen: (a: Appointment) => void
+  startHour: number
+  endHour: number
+}) {
   const { placed, lanes } = layoutLanes(appts)
-  const totalH = (END_HOUR - START_HOUR) * HOUR_PX
+  const totalH = (endHour - startHour) * HOUR_PX
   return (
     <div className="relative flex-1 border-l border-gray-100" style={{ height: totalH }}>
       {/* hour lines */}
-      {Array.from({ length: END_HOUR - START_HOUR }, (_, i) => (
+      {Array.from({ length: endHour - startHour }, (_, i) => (
         <div key={i} className="absolute inset-x-0 border-t border-gray-50" style={{ top: i * HOUR_PX }} />
       ))}
       {placed.map(({ a, lane }) => {
         const start = new Date(a.starts_at)
-        const minutes = (start.getHours() - START_HOUR) * 60 + start.getMinutes()
+        const minutes = (start.getHours() - startHour) * 60 + start.getMinutes()
         const top = Math.max((minutes / 60) * HOUR_PX, 0)
         const rawH = (Math.max(a.duration_minutes || 30, 15) / 60) * HOUR_PX
         const height = Math.min(Math.max(rawH, 26), totalH - top)
@@ -470,11 +493,13 @@ function DayColumn({ appts, onOpen }: { appts: Appointment[]; onOpen: (a: Appoin
   )
 }
 
-function WeekView({ anchor, byDay, onOpen, onOpenDay }: {
+function WeekView({ anchor, byDay, onOpen, onOpenDay, startHour, endHour }: {
   anchor: Date
   byDay: Record<string, Appointment[]>
   onOpen: (a: Appointment) => void
   onOpenDay: (d: Date) => void
+  startHour: number
+  endHour: number
 }) {
   const ws = startOfWeek(anchor)
   const days = Array.from({ length: 7 }, (_, i) => addDays(ws, i))
@@ -500,9 +525,9 @@ function WeekView({ anchor, byDay, onOpen, onOpenDay }: {
         </div>
         {/* grid */}
         <div className="flex py-2">
-          <TimeAxis />
+          <TimeAxis startHour={startHour} endHour={endHour} />
           {days.map((d) => (
-            <DayColumn key={toISODate(d)} appts={byDay[toISODate(d)] ?? []} onOpen={onOpen} />
+            <DayColumn key={toISODate(d)} appts={byDay[toISODate(d)] ?? []} onOpen={onOpen} startHour={startHour} endHour={endHour} />
           ))}
         </div>
       </div>
@@ -510,17 +535,19 @@ function WeekView({ anchor, byDay, onOpen, onOpenDay }: {
   )
 }
 
-function DayView({ anchor, byDay, onOpen }: {
+function DayView({ anchor, byDay, onOpen, startHour, endHour }: {
   anchor: Date
   byDay: Record<string, Appointment[]>
   onOpen: (a: Appointment) => void
+  startHour: number
+  endHour: number
 }) {
   const iso = toISODate(anchor)
   return (
     <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-x-auto">
       <div className="min-w-[420px] flex py-2 pr-3">
-        <TimeAxis />
-        <DayColumn appts={byDay[iso] ?? []} onOpen={onOpen} />
+        <TimeAxis startHour={startHour} endHour={endHour} />
+        <DayColumn appts={byDay[iso] ?? []} onOpen={onOpen} startHour={startHour} endHour={endHour} />
       </div>
     </div>
   )
@@ -531,9 +558,19 @@ function DayView({ anchor, byDay, onOpen }: {
 // ---------------------------------------------------------------------------
 
 function ModalShell({ title, onClose, children }: { title: string; onClose: () => void; children: React.ReactNode }) {
+  // UI-8: ESC fecha + focus trap básico + devolve o foco ao fechar.
+  const dialogRef = useModalA11y<HTMLDivElement>(onClose)
   return (
     <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4" onClick={onClose}>
-      <div className="bg-white rounded-2xl w-full max-w-md max-h-[90vh] overflow-y-auto shadow-xl" onClick={(e) => e.stopPropagation()}>
+      <div
+        ref={dialogRef}
+        tabIndex={-1}
+        role="dialog"
+        aria-modal="true"
+        aria-label={title}
+        className="bg-white rounded-2xl w-full max-w-md max-h-[90vh] overflow-y-auto shadow-xl focus:outline-none"
+        onClick={(e) => e.stopPropagation()}
+      >
         <div className="flex items-center justify-between px-5 pt-5 pb-3">
           <h2 className="text-lg font-bold text-gray-900">{title}</h2>
           <button onClick={onClose} aria-label="Fechar" className="p-1.5 rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-600">
@@ -546,27 +583,62 @@ function ModalShell({ title, onClose, children }: { title: string; onClose: () =
   )
 }
 
-function EditModal({ appointment: a, services, professionals, onClose, onSaved }: {
+function EditModal({ appointment: a, services, professionals, readOnly = false, onClose, onSaved }: {
   appointment: Appointment
   services: any[]
   professionals: any[]
+  readOnly?: boolean
   onClose: () => void
   onSaved: () => void
 }) {
   const start = new Date(a.starts_at)
+  // Data/hora sempre exibidas no fuso de São Paulo — o mesmo usado ao salvar,
+  // para que abrir e salvar sem mexer não desloque o horário.
+  const originalDate = start.toLocaleDateString('en-CA', { timeZone: 'America/Sao_Paulo' })
+  const originalTime = start.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', timeZone: 'America/Sao_Paulo' })
   const [form, setForm] = useState({
     service_id: a.service_id,
     professional_id: a.professional_id,
-    // Data/hora sempre exibidas no fuso de São Paulo — o mesmo usado ao salvar,
-    // para que abrir e salvar sem mexer não desloque o horário.
-    date: start.toLocaleDateString('en-CA', { timeZone: 'America/Sao_Paulo' }),
-    time: start.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', timeZone: 'America/Sao_Paulo' }),
+    date: originalDate,
+    time: originalTime,
     status: a.status as string,
     notes: a.notes ?? '',
     customer_name: a.customer_name ?? '',
     customer_last_name: a.customer_last_name ?? '',
   })
   const [error, setError] = useState('')
+
+  // SAL-12: horários DISPONÍVEIS do profissional/serviço/data (em vez de campo livre)
+  const { data: slots = [], isLoading: slotsLoading } = useQuery({
+    queryKey: ['slots', form.professional_id, form.service_id, form.date],
+    queryFn: () => appointmentsApi.slots(form.professional_id, form.service_id, form.date),
+    enabled: !readOnly && !!(form.professional_id && form.service_id && form.date),
+  })
+
+  const timeOptions = useMemo(() => {
+    const times = (slots as string[]).map((iso) =>
+      new Date(iso).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', timeZone: 'America/Sao_Paulo' })
+    )
+    // O horário atual do agendamento ocupa o próprio slot — mantém como opção
+    // quando o contexto (data/profissional/serviço) não mudou.
+    const keepOriginal =
+      form.date === originalDate &&
+      form.professional_id === a.professional_id &&
+      form.service_id === a.service_id &&
+      !times.includes(originalTime)
+    const all = keepOriginal ? [originalTime, ...times] : times
+    return all.sort()
+  }, [slots, form.date, form.professional_id, form.service_id, originalDate, originalTime, a.professional_id, a.service_id])
+
+  // Se o horário escolhido deixou de existir (mudou data/profissional/serviço),
+  // força a escolha de um novo slot.
+  useEffect(() => {
+    if (readOnly || slotsLoading) return
+    if (form.time && !timeOptions.includes(form.time)) {
+      setForm((f) => ({ ...f, time: '' }))
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [timeOptions, slotsLoading, readOnly])
 
   const selectedService = services.find((s) => s.id === form.service_id)
   const price = form.service_id === a.service_id ? Number(a.price) : Number(selectedService?.price ?? a.price)
@@ -588,12 +660,12 @@ function EditModal({ appointment: a, services, professionals, onClose, onSaved }
       return appointmentsApi.update(a.id, appointment)
     },
     onSuccess: onSaved,
-    onError: (e: any) => setError(e?.message ?? 'Não foi possível salvar. Tente novamente.'),
+    onError: (e: any) => setError(friendlyMessage(e, 'Não foi possível salvar. Tente novamente.')),
   })
 
   function save() {
     setError('')
-    if (!form.date || !form.time) { setError('Informe data e horário.'); return }
+    if (!form.date || !form.time) { setError('Selecione a data e um horário disponível.'); return }
     const name = form.customer_name.trim()
     if (!name) { setError('Informe o nome do cliente.'); return }
     const lastName = form.customer_last_name.trim()
@@ -617,8 +689,13 @@ function EditModal({ appointment: a, services, professionals, onClose, onSaved }
   }
 
   return (
-    <ModalShell title="Editar agendamento" onClose={onClose}>
+    <ModalShell title={readOnly ? 'Agendamento' : 'Editar agendamento'} onClose={onClose}>
       <div className="space-y-3.5">
+        {readOnly && (
+          <p className="text-xs text-gray-500 bg-gray-50 border border-gray-100 rounded-xl px-3.5 py-2.5">
+            Você tem acesso somente de visualização. Fale com um administrador para alterar este agendamento.
+          </p>
+        )}
         {/* Cliente (nome editável) */}
         <div className="bg-gray-50 rounded-xl p-3.5 space-y-2.5">
           <div className="grid grid-cols-2 gap-3">
@@ -629,6 +706,7 @@ function EditModal({ appointment: a, services, professionals, onClose, onSaved }
                 onChange={(e) => setForm({ ...form, customer_name: e.target.value })}
                 className={inputCls}
                 placeholder="Nome"
+                disabled={readOnly}
               />
             </div>
             <div>
@@ -638,6 +716,7 @@ function EditModal({ appointment: a, services, professionals, onClose, onSaved }
                 onChange={(e) => setForm({ ...form, customer_last_name: e.target.value })}
                 className={inputCls}
                 placeholder="Sobrenome (opcional)"
+                disabled={readOnly}
               />
             </div>
           </div>
@@ -660,14 +739,14 @@ function EditModal({ appointment: a, services, professionals, onClose, onSaved }
 
         <div>
           <label className={labelCls}>Serviço</label>
-          <select value={form.service_id} onChange={(e) => setForm({ ...form, service_id: e.target.value })} className={inputCls}>
+          <select value={form.service_id} onChange={(e) => setForm({ ...form, service_id: e.target.value })} className={inputCls} disabled={readOnly}>
             {services.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
           </select>
         </div>
 
         <div>
           <label className={labelCls}>Profissional</label>
-          <select value={form.professional_id} onChange={(e) => setForm({ ...form, professional_id: e.target.value })} className={inputCls}>
+          <select value={form.professional_id} onChange={(e) => setForm({ ...form, professional_id: e.target.value })} className={inputCls} disabled={readOnly}>
             {professionals.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
           </select>
         </div>
@@ -675,18 +754,38 @@ function EditModal({ appointment: a, services, professionals, onClose, onSaved }
         <div className="grid grid-cols-2 gap-3">
           <div>
             <label className={labelCls}>Data</label>
-            <input type="date" value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} className={inputCls} />
+            <input type="date" value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} className={inputCls} disabled={readOnly} />
           </div>
           <div>
             <label className={labelCls}>Horário</label>
-            <input type="time" value={form.time} onChange={(e) => setForm({ ...form, time: e.target.value })} className={inputCls} />
+            {readOnly ? (
+              <div className="h-10 px-3 rounded-xl border border-gray-100 bg-gray-50 text-sm flex items-center font-semibold text-gray-700">
+                {form.time}
+              </div>
+            ) : slotsLoading ? (
+              <div className="h-10 px-3 rounded-xl border border-gray-200 bg-gray-50 text-sm flex items-center text-gray-400">
+                Carregando horários...
+              </div>
+            ) : timeOptions.length === 0 ? (
+              <div className="h-10 px-3 rounded-xl border border-gray-200 bg-gray-50 text-xs flex items-center text-gray-400">
+                Nenhum horário disponível nesta data
+              </div>
+            ) : (
+              // SAL-12: seleção entre horários DISPONÍVEIS (endpoint de slots)
+              <select value={form.time} onChange={(e) => setForm({ ...form, time: e.target.value })} className={inputCls}>
+                <option value="">Selecione...</option>
+                {timeOptions.map((t) => (
+                  <option key={t} value={t}>{t}{t === originalTime && form.date === originalDate ? ' (atual)' : ''}</option>
+                ))}
+              </select>
+            )}
           </div>
         </div>
 
         <div className="grid grid-cols-2 gap-3">
           <div>
             <label className={labelCls}>Status</label>
-            <select value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value })} className={inputCls}>
+            <select value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value })} className={inputCls} disabled={readOnly}>
               <option value="pending">Pendente</option>
               <option value="confirmed">Confirmado</option>
               <option value="completed">Realizado</option>
@@ -707,8 +806,9 @@ function EditModal({ appointment: a, services, professionals, onClose, onSaved }
             value={form.notes}
             onChange={(e) => setForm({ ...form, notes: e.target.value })}
             rows={2}
-            className="w-full px-3 py-2 rounded-xl border border-gray-200 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-primary resize-none"
+            className="w-full px-3 py-2 rounded-xl border border-gray-200 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-primary resize-none disabled:bg-gray-50"
             placeholder="Observações internas (opcional)"
+            disabled={readOnly}
           />
         </div>
 
@@ -716,26 +816,29 @@ function EditModal({ appointment: a, services, professionals, onClose, onSaved }
           <div className="bg-red-50 border border-red-200 rounded-xl px-3.5 py-2.5 text-red-600 text-sm">{error}</div>
         )}
 
-        <div className="flex items-center gap-2 pt-1">
-          {a.status !== 'completed' && a.status !== 'cancelled' && (
+        {/* SAL-12: staff não vê ações de edição */}
+        {!readOnly && (
+          <div className="flex items-center gap-2 pt-1">
+            {a.status !== 'completed' && a.status !== 'cancelled' && (
+              <button
+                onClick={markCompleted}
+                disabled={saveMutation.isPending}
+                className="flex items-center gap-1.5 border border-primary/30 text-primary hover:bg-primary/5 text-sm font-semibold px-3.5 py-2.5 rounded-xl transition-colors disabled:opacity-50"
+                title="Marca como realizado e gera a comissão"
+              >
+                <CheckCircle2 size={15} strokeWidth={2} />
+                Marcar como realizado
+              </button>
+            )}
             <button
-              onClick={markCompleted}
+              onClick={save}
               disabled={saveMutation.isPending}
-              className="flex items-center gap-1.5 border border-blue-200 text-blue-600 hover:bg-blue-50 text-sm font-semibold px-3.5 py-2.5 rounded-xl transition-colors disabled:opacity-50"
-              title="Marca como realizado e gera a comissão"
+              className="flex-1 bg-primary hover:bg-primary-dark text-white text-sm font-semibold px-4 py-2.5 rounded-xl transition-colors disabled:opacity-50"
             >
-              <CheckCircle2 size={15} strokeWidth={2} />
-              Marcar como realizado
+              {saveMutation.isPending ? 'Salvando...' : 'Salvar'}
             </button>
-          )}
-          <button
-            onClick={save}
-            disabled={saveMutation.isPending}
-            className="flex-1 bg-primary hover:bg-primary-dark text-white text-sm font-semibold px-4 py-2.5 rounded-xl transition-colors disabled:opacity-50"
-          >
-            {saveMutation.isPending ? 'Salvando...' : 'Salvar'}
-          </button>
-        </div>
+          </div>
+        )}
       </div>
     </ModalShell>
   )
@@ -760,20 +863,41 @@ function BulkRescheduleModal({ professionals, onClose, onDone }: {
   const [error, setError] = useState('')
   const [result, setResult] = useState<{ affected: number; notified: number } | null>(null)
 
+  // Horários digitados são horário de São Paulo (UTC−03) → converter para UTC "Z".
+  // (` :59` no fim = inclusivo até o fim do minuto final)
+  const windowValid =
+    !!(fromDate && toDate && fromTime && toTime) &&
+    fromDate <= toDate &&
+    `${toDate}T${toTime}` > `${fromDate}T${fromTime}`
+  const windowRange = useMemo(() => {
+    if (!windowValid) return null
+    return {
+      from: new Date(`${fromDate}T${fromTime}:00-03:00`).toISOString(),
+      to: new Date(`${toDate}T${toTime}:59-03:00`).toISOString(),
+    }
+  }, [windowValid, fromDate, toDate, fromTime, toTime])
+
+  // SAL-16: prévia — quantos agendamentos ativos serão cancelados antes de confirmar.
+  const { data: previewAppts = [], isLoading: previewLoading } = useQuery({
+    queryKey: ['bulk-reschedule-preview', windowRange?.from, windowRange?.to, professionalId],
+    queryFn: () => appointmentsApi.list({
+      from: windowRange!.from,
+      to: windowRange!.to,
+      ...(professionalId ? { professional_id: professionalId } : {}),
+    }) as Promise<Appointment[]>,
+    enabled: !!windowRange,
+  })
+  const affectedCount = previewAppts.filter((a) => a.status === 'pending' || a.status === 'confirmed').length
+
   const mutation = useMutation({
-    mutationFn: () => {
-      // Horários digitados são horário de São Paulo (UTC−03) → converter para UTC "Z"
-      const from = new Date(`${fromDate}T${fromTime}:00-03:00`)
-      const to = new Date(`${toDate}T${toTime}:59-03:00`) // inclusivo até o fim do minuto final
-      return appointmentsApi.bulkReschedule({
-        from: from.toISOString(),
-        to: to.toISOString(),
-        ...(professionalId ? { professional_id: professionalId } : {}),
-        ...(message.trim() ? { message: message.trim() } : {}),
-      })
-    },
+    mutationFn: () => appointmentsApi.bulkReschedule({
+      from: windowRange!.from,
+      to: windowRange!.to,
+      ...(professionalId ? { professional_id: professionalId } : {}),
+      ...(message.trim() ? { message: message.trim() } : {}),
+    }),
     onSuccess: (res) => { setResult(res); onDone() },
-    onError: (e: any) => setError(e?.message ?? 'Não foi possível remarcar. Tente novamente.'),
+    onError: (e: any) => setError(friendlyMessage(e, 'Não foi possível remarcar. Tente novamente.')),
   })
 
   function confirm() {
@@ -782,7 +906,7 @@ function BulkRescheduleModal({ professionals, onClose, onDone }: {
     if (!fromTime || !toTime) { setError('Informe os horários de início e fim.'); return }
     if (fromDate > toDate) { setError('A data inicial deve ser anterior à final.'); return }
     if (`${toDate}T${toTime}` <= `${fromDate}T${fromTime}`) { setError('O horário final deve ser depois do horário inicial.'); return }
-    if (!window.confirm('Tem certeza? Os agendamentos do período serão CANCELADOS e os clientes receberão um WhatsApp para remarcar.')) return
+    if (!window.confirm(`Tem certeza? ${affectedCount} agendamento(s) do período serão CANCELADOS e os clientes receberão um WhatsApp para remarcar.`)) return
     mutation.mutate()
   }
 
@@ -838,6 +962,26 @@ function BulkRescheduleModal({ professionals, onClose, onDone }: {
           </select>
         </div>
 
+        {/* SAL-16: prévia do impacto antes de confirmar */}
+        {windowRange && (
+          <div
+            aria-live="polite"
+            className={`rounded-xl px-3.5 py-2.5 text-sm border ${
+              previewLoading
+                ? 'bg-gray-50 border-gray-100 text-gray-500'
+                : affectedCount > 0
+                  ? 'bg-amber-50 border-amber-200 text-amber-800'
+                  : 'bg-gray-50 border-gray-100 text-gray-500'
+            }`}
+          >
+            {previewLoading
+              ? 'Calculando agendamentos no período...'
+              : affectedCount > 0
+                ? <><strong>{affectedCount}</strong> agendamento(s) ativo(s) serão cancelados neste período.</>
+                : 'Nenhum agendamento ativo neste período — nada será cancelado.'}
+          </div>
+        )}
+
         <div>
           <label className={labelCls}>Mensagem personalizada (opcional)</label>
           <textarea
@@ -858,10 +1002,14 @@ function BulkRescheduleModal({ professionals, onClose, onDone }: {
 
         <button
           onClick={confirm}
-          disabled={mutation.isPending}
+          disabled={mutation.isPending || previewLoading || (!!windowRange && affectedCount === 0)}
           className="w-full bg-red-600 hover:bg-red-700 text-white text-sm font-semibold px-4 py-2.5 rounded-xl transition-colors disabled:opacity-50"
         >
-          {mutation.isPending ? 'Enviando...' : 'Cancelar horários e avisar clientes'}
+          {mutation.isPending
+            ? 'Enviando...'
+            : affectedCount > 0
+              ? `Cancelar ${affectedCount} horário(s) e avisar clientes`
+              : 'Cancelar horários e avisar clientes'}
         </button>
       </div>
     </ModalShell>

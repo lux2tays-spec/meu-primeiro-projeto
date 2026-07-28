@@ -2,10 +2,24 @@
 import { useQuery } from '@tanstack/react-query'
 import Link from 'next/link'
 import { tenantApi, appointmentsApi } from '@/lib/api'
+import Loading from '@/components/ui/Loading'
 import { Rocket, ArrowRight } from 'lucide-react'
 
-const _now = new Date()
-const today = `${_now.getFullYear()}-${String(_now.getMonth() + 1).padStart(2, '0')}-${String(_now.getDate()).padStart(2, '0')}`
+// SAL-19: data calculada a cada render (no componente), não no load do módulo —
+// o painel aberto de um dia para o outro não fica preso na data antiga.
+function localToday() {
+  const d = new Date()
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
+// UI-10: saudação dinâmica pelo horário local.
+function greeting() {
+  const h = new Date().getHours()
+  if (h < 5) return 'Boa noite'
+  if (h < 12) return 'Bom dia'
+  if (h < 18) return 'Boa tarde'
+  return 'Boa noite'
+}
 
 const STATUS_LABEL: Record<string, string> = { pending: 'Pendente', confirmed: 'Confirmado', completed: 'Concluído', cancelled: 'Cancelado' }
 const STATUS_COLOR: Record<string, string> = {
@@ -49,6 +63,7 @@ function OnboardingProgressCard() {
 }
 
 export default function DashboardPage() {
+  const today = localToday()
   const { data: tenant } = useQuery({ queryKey: ['tenant'], queryFn: tenantApi.me })
   const { data: appointments = [], isLoading, refetch } = useQuery({
     queryKey: ['appointments', today],
@@ -63,7 +78,7 @@ export default function DashboardPage() {
       {/* Header */}
       <div className="flex items-start justify-between">
         <div>
-          <p className="text-gray-500 text-sm">Bom dia! 👋</p>
+          <p className="text-gray-500 text-sm">{greeting()}! 👋</p>
           <h1 className="text-2xl font-bold text-gray-900">{tenant?.name ?? '...'}</h1>
         </div>
         <Link
@@ -89,7 +104,8 @@ export default function DashboardPage() {
       {/* Stats */}
       <div>
         <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">Hoje</h2>
-        <div className="grid grid-cols-3 gap-4">
+        {/* UI-9: 1 coluna no mobile, 3 em telas maiores */}
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
           {[
             { label: 'Agendamentos', value: appointments.length, color: 'text-primary', bg: 'bg-primary-light' },
             { label: 'Confirmados',  value: confirmed,           color: 'text-green-600', bg: 'bg-green-50' },
@@ -111,7 +127,7 @@ export default function DashboardPage() {
         </div>
 
         {isLoading ? (
-          <p className="text-gray-400 text-sm text-center py-8">Carregando...</p>
+          <Loading card />
         ) : appointments.length === 0 ? (
           <div className="bg-white rounded-2xl p-8 text-center border border-gray-100">
             <p className="text-gray-400 text-sm">Nenhum agendamento para hoje</p>

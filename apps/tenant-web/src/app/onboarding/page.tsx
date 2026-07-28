@@ -77,7 +77,13 @@ function StepHeader({ step }: { step: typeof STEPS[number] }) {
 
 function ErrorBox({ msg }: { msg: string }) {
   if (!msg) return null
-  return <p className="text-sm text-red-600 bg-red-50 rounded-xl px-4 py-2 mt-4">{msg}</p>
+  // AUTH-17: role="alert" — leitores de tela anunciam o erro assim que ele aparece.
+  return <p role="alert" className="text-sm text-red-600 bg-red-50 rounded-xl px-4 py-2 mt-4">{msg}</p>
+}
+
+// AUTH-14: aviso inline quando o passo vai ser pulado sem nada cadastrado.
+function PendingBox({ msg }: { msg: string }) {
+  return <p className="text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-xl px-4 py-2.5 mt-4">{msg}</p>
 }
 
 /* ── Passo 1: Negócio ──────────────────────────────────────────── */
@@ -135,6 +141,7 @@ function StepNegocio({ onNext, onBack }: { onNext: () => void; onBack?: () => vo
               <button
                 key={t.business_type}
                 type="button"
+                aria-pressed={businessType === t.business_type}
                 onClick={() => setBusinessType((cur) => cur === t.business_type ? '' : t.business_type)}
                 className={`px-3 py-2.5 rounded-xl border text-sm font-medium text-left transition-colors ${
                   businessType === t.business_type
@@ -151,25 +158,25 @@ function StepNegocio({ onNext, onBack }: { onNext: () => void; onBack?: () => vo
 
       <div className="space-y-4">
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">Nome do negócio *</label>
-          <input value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
+          <label htmlFor="ob-business-name" className="block text-sm font-medium text-gray-700 mb-1">Nome do negócio *</label>
+          <input id="ob-business-name" value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
             className={inputCls} placeholder="Minha Empresa" />
         </div>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">E-mail de contato</label>
-            <input type="email" value={form.contact_email} onChange={(e) => setForm((f) => ({ ...f, contact_email: e.target.value }))}
+            <label htmlFor="ob-contact-email" className="block text-sm font-medium text-gray-700 mb-1">E-mail de contato</label>
+            <input id="ob-contact-email" type="email" value={form.contact_email} onChange={(e) => setForm((f) => ({ ...f, contact_email: e.target.value }))}
               className={inputCls} placeholder="contato@empresa.com" />
           </div>
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Telefone</label>
-            <input value={form.contact_phone} onChange={(e) => setForm((f) => ({ ...f, contact_phone: e.target.value }))}
+            <label htmlFor="ob-contact-phone" className="block text-sm font-medium text-gray-700 mb-1">Telefone</label>
+            <input id="ob-contact-phone" value={form.contact_phone} onChange={(e) => setForm((f) => ({ ...f, contact_phone: e.target.value }))}
               className={inputCls} placeholder="(11) 99999-9999" />
           </div>
         </div>
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">Nome do responsável</label>
-          <input value={form.responsible_name} onChange={(e) => setForm((f) => ({ ...f, responsible_name: e.target.value }))}
+          <label htmlFor="ob-responsible" className="block text-sm font-medium text-gray-700 mb-1">Nome do responsável</label>
+          <input id="ob-responsible" value={form.responsible_name} onChange={(e) => setForm((f) => ({ ...f, responsible_name: e.target.value }))}
             className={inputCls} placeholder="Maria Silva" />
         </div>
       </div>
@@ -240,12 +247,12 @@ function StepEquipe({ onNext, onBack }: { onNext: () => void; onBack: () => void
         <p className="text-sm font-semibold text-gray-900">Adicionar profissional</p>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <input value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
-            className={inputCls} placeholder="Nome *" />
+            className={inputCls} placeholder="Nome *" aria-label="Nome do profissional" />
           <input value={form.phone} onChange={(e) => setForm((f) => ({ ...f, phone: e.target.value }))}
-            className={inputCls} placeholder="Telefone (opcional)" />
+            className={inputCls} placeholder="Telefone (opcional)" aria-label="Telefone do profissional (opcional)" />
         </div>
         <input value={form.bio} onChange={(e) => setForm((f) => ({ ...f, bio: e.target.value }))}
-          className={inputCls} placeholder="Especialidade / bio (opcional)" />
+          className={inputCls} placeholder="Especialidade / bio (opcional)" aria-label="Especialidade ou bio (opcional)" />
         <button
           onClick={() => form.name.trim() && add.mutate()}
           disabled={!form.name.trim() || add.isPending}
@@ -256,7 +263,15 @@ function StepEquipe({ onNext, onBack }: { onNext: () => void; onBack: () => void
       </div>
 
       <ErrorBox msg={error} />
-      <Footer onBack={onBack} onContinue={onNext} />
+      {/* AUTH-14: sem profissional cadastrado o avanço vira um "Pular" explícito, com aviso. */}
+      {!isLoading && (professionals as any[]).length === 0 && (
+        <PendingBox msg="Você ainda não cadastrou nenhum profissional. Sem equipe, o bot não consegue oferecer horários nem agendar atendimentos." />
+      )}
+      <Footer
+        onBack={onBack}
+        onContinue={onNext}
+        continueLabel={!isLoading && (professionals as any[]).length === 0 ? 'Pular esta etapa' : 'Continuar'}
+      />
     </div>
   )
 }
@@ -264,7 +279,7 @@ function StepEquipe({ onNext, onBack }: { onNext: () => void; onBack: () => void
 /* ── Passo 3: Serviços ─────────────────────────────────────────── */
 function StepServicos({ onNext, onBack }: { onNext: () => void; onBack: () => void }) {
   const qc = useQueryClient()
-  const { data: services = [], isLoading } = useQuery({ queryKey: ['services'], queryFn: tenantApi.services })
+  const { data: services = [], isLoading } = useQuery({ queryKey: ['services'], queryFn: () => tenantApi.services() })
   const { data: professionals = [] } = useQuery({ queryKey: ['professionals'], queryFn: tenantApi.professionals })
 
   const BLANK = { name: '', price: 0, duration_minutes: 60, reminder_days: null as number | null, professional_ids: [] as string[] }
@@ -334,22 +349,22 @@ function StepServicos({ onNext, onBack }: { onNext: () => void; onBack: () => vo
       <div className="bg-white border border-gray-200 rounded-2xl p-4 space-y-3">
         <p className="text-sm font-semibold text-gray-900">Adicionar serviço</p>
         <input value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
-          className={inputCls} placeholder="Nome do serviço * (ex.: Limpeza de pele)" />
+          className={inputCls} placeholder="Nome do serviço * (ex.: Limpeza de pele)" aria-label="Nome do serviço" />
         <div className="grid grid-cols-2 gap-3">
           <div>
-            <label className="block text-xs font-medium text-gray-600 mb-1">Preço (R$) *</label>
-            <input type="number" min={0} step={0.01} value={form.price}
+            <label htmlFor="ob-svc-price" className="block text-xs font-medium text-gray-600 mb-1">Preço (R$) *</label>
+            <input id="ob-svc-price" type="number" min={0} step={0.01} value={form.price}
               onChange={(e) => setForm((f) => ({ ...f, price: Number(e.target.value) }))} className={inputCls} />
           </div>
           <div>
-            <label className="block text-xs font-medium text-gray-600 mb-1">Duração (min) *</label>
-            <input type="number" min={15} step={15} value={form.duration_minutes}
+            <label htmlFor="ob-svc-duration" className="block text-xs font-medium text-gray-600 mb-1">Duração (min) *</label>
+            <input id="ob-svc-duration" type="number" min={15} step={15} value={form.duration_minutes}
               onChange={(e) => setForm((f) => ({ ...f, duration_minutes: Number(e.target.value) }))} className={inputCls} />
           </div>
         </div>
         <div>
-          <label className="block text-xs font-medium text-gray-600 mb-1">Lembrar o cliente após (dias, opcional)</label>
-          <input type="number" min={0} step={1} value={form.reminder_days ?? ''}
+          <label htmlFor="ob-svc-reminder" className="block text-xs font-medium text-gray-600 mb-1">Lembrar o cliente após (dias, opcional)</label>
+          <input id="ob-svc-reminder" type="number" min={0} step={1} value={form.reminder_days ?? ''}
             onChange={(e) => setForm((f) => ({
               ...f,
               reminder_days: e.target.value === '' ? null : Math.max(0, Math.floor(Number(e.target.value) || 0)),
@@ -365,7 +380,7 @@ function StepServicos({ onNext, onBack }: { onNext: () => void; onBack: () => vo
               {(professionals as any[]).map((p) => {
                 const sel = form.professional_ids.includes(p.id)
                 return (
-                  <button key={p.id} type="button" onClick={() => togglePro(p.id)}
+                  <button key={p.id} type="button" onClick={() => togglePro(p.id)} aria-pressed={sel}
                     className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors ${
                       sel ? 'bg-primary text-white border-primary' : 'bg-white text-gray-600 border-gray-200 hover:border-primary hover:text-primary'
                     }`}>
@@ -386,7 +401,15 @@ function StepServicos({ onNext, onBack }: { onNext: () => void; onBack: () => vo
       </div>
 
       <ErrorBox msg={error} />
-      <Footer onBack={onBack} onContinue={onNext} />
+      {/* AUTH-14: sem serviço cadastrado o avanço vira um "Pular" explícito, com aviso. */}
+      {!isLoading && (services as any[]).length === 0 && (
+        <PendingBox msg="Você ainda não cadastrou nenhum serviço. O bot só consegue agendar serviços cadastrados aqui." />
+      )}
+      <Footer
+        onBack={onBack}
+        onContinue={onNext}
+        continueLabel={!isLoading && (services as any[]).length === 0 ? 'Pular esta etapa' : 'Continuar'}
+      />
     </div>
   )
 }
@@ -516,7 +539,7 @@ function StepAgente({ onNext, onBack }: { onNext: () => void; onBack: () => void
           <label className="block text-sm font-medium text-gray-700 mb-2">Tom de voz do agente</label>
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             {TONES.map((t) => (
-              <button key={t.value} type="button" onClick={() => setTone(t.value)}
+              <button key={t.value} type="button" onClick={() => setTone(t.value)} aria-pressed={tone === t.value}
                 className={`p-4 rounded-xl border-2 text-left transition-colors ${
                   tone === t.value ? 'border-primary bg-primary-light' : 'border-gray-200 hover:border-gray-300'
                 }`}>
@@ -528,9 +551,10 @@ function StepAgente({ onNext, onBack }: { onNext: () => void; onBack: () => void
         </div>
 
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">Descrição do negócio *</label>
+          <label htmlFor="ob-business-info" className="block text-sm font-medium text-gray-700 mb-1">Descrição do negócio *</label>
           <p className="text-xs text-gray-400 mb-2">O bot usa esse texto para responder perguntas dos seus clientes. Quanto mais detalhes, melhor.</p>
           <textarea
+            id="ob-business-info"
             value={businessInfo}
             onChange={(e) => setBusinessInfo(e.target.value)}
             rows={5}
