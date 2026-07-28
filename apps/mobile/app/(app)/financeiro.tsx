@@ -265,7 +265,7 @@ export default function FinanceiroScreen() {
         {/* ── Vendas ─────────────────────────────── */}
         {tab === 'vendas' && (
           loadingVendas ? (
-            <Text style={s.empty}>Carregando...</Text>
+            <ActivityIndicator color={colors.primary} style={{ paddingVertical: spacing.xl }} />
           ) : vendasError ? (
             // Erro de rede NÃO pode parecer "mês sem vendas"
             <View style={s.errorBox}>
@@ -321,7 +321,7 @@ export default function FinanceiroScreen() {
             </TouchableOpacity>
 
             {loadingLinks ? (
-              <Text style={s.empty}>Carregando...</Text>
+              <ActivityIndicator color={colors.primary} style={{ paddingVertical: spacing.xl }} />
             ) : linksError ? (
               <View style={s.errorBox}>
                 <Ionicons name="cloud-offline-outline" size={32} color={colors.textDisabled} />

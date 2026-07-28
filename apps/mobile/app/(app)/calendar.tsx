@@ -321,6 +321,8 @@ export default function CalendarScreen() {
   const [bulkProfessionalId, setBulkProfessionalId] = useState<string | null>(null)
   const [bulkMessage, setBulkMessage] = useState('')
   const [bulkConfirm, setBulkConfirm] = useState(false)
+  // SAL-16: quantos agendamentos serão cancelados (prévia via dry-run) antes de confirmar.
+  const [bulkPreviewCount, setBulkPreviewCount] = useState<number | null>(null)
 
   function openBulk() {
     const t = toISO(new Date())
@@ -333,15 +335,33 @@ export default function CalendarScreen() {
     setBulkOpen(true)
   }
 
-  const bulkMutation = useMutation({
-    mutationFn: () => appointmentsApi.bulkReschedule({
-      // Horários digitados são horário de São Paulo (UTC−03) → converter para UTC "Z"
+  // Payload compartilhado pela prévia (dry-run) e pela execução real.
+  // Horários digitados são horário de São Paulo (UTC−03) → converter para UTC "Z".
+  function bulkPayload(dryRun: boolean) {
+    return {
       from: new Date(`${bulkFrom}T${bulkFromTime}:00-03:00`).toISOString(),
       to: new Date(`${bulkTo}T${bulkToTime}:59-03:00`).toISOString(), // inclusivo até o fim do minuto final
-
       professional_id: bulkProfessionalId ?? undefined,
       message: bulkMessage.trim() || undefined,
-    }),
+      ...(dryRun ? { dry_run: true } : {}),
+    }
+  }
+
+  // SAL-16: prévia — pergunta ao backend quantos serão cancelados, sem cancelar
+  // nem notificar ninguém, e só então abre a confirmação com o número real.
+  const previewMutation = useMutation({
+    mutationFn: () => appointmentsApi.bulkReschedule(bulkPayload(true)),
+    onSuccess: (res) => {
+      setBulkPreviewCount(res.affected)
+      setBulkConfirm(true)
+    },
+    onError: (err: any) => {
+      toast.show(err.message ?? 'Não foi possível calcular a prévia. Tente novamente.', 'error')
+    },
+  })
+
+  const bulkMutation = useMutation({
+    mutationFn: () => appointmentsApi.bulkReschedule(bulkPayload(false)),
     onSuccess: (res) => {
       setBulkConfirm(false)
       setBulkOpen(false)
@@ -364,7 +384,9 @@ export default function CalendarScreen() {
       toast.show('O horário final deve ser depois do horário inicial.', 'warning')
       return
     }
-    setBulkConfirm(true)
+    // Busca a prévia antes de confirmar (SAL-16).
+    setBulkPreviewCount(null)
+    previewMutation.mutate()
   }
 
   // ── Render ────────────────────────────────────────────────────────────────
@@ -799,7 +821,7 @@ export default function CalendarScreen() {
                 label="Cancelar horários e avisar clientes"
                 variant="danger"
                 onPress={confirmBulk}
-                loading={bulkMutation.isPending}
+                loading={previewMutation.isPending || bulkMutation.isPending}
               />
             </ScrollView>
           </View>
@@ -809,12 +831,20 @@ export default function CalendarScreen() {
       <ConfirmDialog
         visible={bulkConfirm}
         title="Remarcação em massa"
-        message={`Cancelar todos os agendamentos de ${dateLabelPt(bulkFrom)} às ${bulkFromTime} até ${dateLabelPt(bulkTo)} às ${bulkToTime}${bulkProfessionalId ? ' do profissional selecionado' : ''} e avisar os clientes por WhatsApp?`}
-        confirmLabel="Cancelar e avisar"
+        message={
+          // SAL-16: mostra o número real de agendamentos que serão cancelados.
+          bulkPreviewCount === 0
+            ? `Nenhum agendamento encontrado de ${dateLabelPt(bulkFrom)} às ${bulkFromTime} até ${dateLabelPt(bulkTo)} às ${bulkToTime}${bulkProfessionalId ? ' para o profissional selecionado' : ''}. Nada será cancelado.`
+            : `${bulkPreviewCount} ${bulkPreviewCount === 1 ? 'agendamento será cancelado' : 'agendamentos serão cancelados'} de ${dateLabelPt(bulkFrom)} às ${bulkFromTime} até ${dateLabelPt(bulkTo)} às ${bulkToTime}${bulkProfessionalId ? ' do profissional selecionado' : ''}. Os clientes serão avisados por WhatsApp. Deseja continuar?`
+        }
+        confirmLabel={bulkPreviewCount === 0 ? 'Entendi' : 'Cancelar e avisar'}
         cancelLabel="Voltar"
         variant="danger"
         loading={bulkMutation.isPending}
-        onConfirm={() => bulkMutation.mutate()}
+        onConfirm={() => {
+          if (bulkPreviewCount === 0) { setBulkConfirm(false); return }
+          bulkMutation.mutate()
+        }}
         onCancel={() => setBulkConfirm(false)}
       />
     </SafeAreaView>

@@ -205,8 +205,8 @@ export const appointmentsApi = {
   create: (data: any) => api.post<any>('/appointments', data),
   updateStatus: (id: string, status: string) =>
     api.patch<any>(`/appointments/${id}/status`, { status }),
-  bulkReschedule: (data: { from: string; to: string; professional_id?: string; message?: string }) =>
-    api.post<{ affected: number; notified: number }>('/appointments/bulk-reschedule', data),
+  bulkReschedule: (data: { from: string; to: string; professional_id?: string; message?: string; dry_run?: boolean }) =>
+    api.post<{ affected: number; notified: number; dry_run?: boolean }>('/appointments/bulk-reschedule', data),
 }
 
 // Agent
