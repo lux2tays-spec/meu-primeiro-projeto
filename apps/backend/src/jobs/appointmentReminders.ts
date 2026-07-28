@@ -13,6 +13,8 @@ const TZ = 'America/Sao_Paulo'
 const DUE_REMINDERS_QUERY = `
   SELECT
     a.id          AS appointment_id,
+    a.tenant_id,
+    a.customer_id,
     a.starts_at,
     c.name        AS customer_name,
     c.phone       AS customer_phone,
@@ -33,6 +35,11 @@ const DUE_REMINDERS_QUERY = `
   WHERE
     a.status IN ('pending', 'confirmed')
     AND k.minutes > 0
+    -- BOT-14: agendamento recém-criado não recebe lembrete de confirmação —
+    -- o cliente acabou de agendar (a janela do lembrete já estava "vencida" no
+    -- momento da criação) e ser cobrado de confirmação minutos depois soa
+    -- robótico. Espera ao menos 15 min desde a criação.
+    AND a.created_at < NOW() - interval '15 minutes'
     AND a.starts_at > NOW()
     AND NOW() >= a.starts_at - make_interval(mins => k.minutes)
     AND NOT EXISTS (
@@ -58,13 +65,45 @@ function buildMessage(row: any, startsAt: Date, globalTemplate: string): string 
     `no dia ${apptDay}`
 
   const template = (row.reminder_appointment_template?.trim()) || globalTemplate
-  return renderReminderTemplate(template, {
-    cliente: row.customer_name ?? '',
+  // Nunca chamar o cliente pelo número: quando o nome ainda é o próprio telefone
+  // (cadastro automático do webhook), {cliente} vira vazio — "Oi!" em vez de
+  // "Oi 5511999...". Mesma comparação que o bot usa (nameIsKnown).
+  const clienteName =
+    row.customer_name && row.customer_name !== row.customer_phone ? row.customer_name : ''
+  const message = renderReminderTemplate(template, {
+    cliente: clienteName,
     servico: row.service_name ?? '',
     negocio: row.business_name ?? '',
     quando: when,
     hora: time,
   })
+  // Sem nome, o template deixa sobras tipo "Oi !" — compacta espaços órfãos.
+  return clienteName ? message : message.replace(/[ \t]+([!,.?])/g, '$1').replace(/[ \t]{2,}/g, ' ')
+}
+
+/**
+ * Persist a sent reminder as an `assistant` message in the customer's
+ * conversation (find-or-create, same pattern as the webhook) — so the owner sees
+ * it in the chat history and the bot has context when the customer replies.
+ */
+async function persistReminderMessage(tenantId: string, customerId: string, content: string): Promise<void> {
+  const { rows: [created] } = await db.query(
+    `INSERT INTO conversations (tenant_id, customer_id) VALUES ($1, $2)
+     ON CONFLICT DO NOTHING
+     RETURNING id`,
+    [tenantId, customerId]
+  )
+  const conversationId = created?.id ?? (
+    await db.query(
+      'SELECT id FROM conversations WHERE tenant_id = $1 AND customer_id = $2',
+      [tenantId, customerId]
+    )
+  ).rows[0]?.id
+  if (!conversationId) return
+  await db.query(
+    'INSERT INTO messages (tenant_id, conversation_id, role, content) VALUES ($1,$2,$3,$4)',
+    [tenantId, conversationId, 'assistant', content]
+  )
 }
 
 export async function runAppointmentReminders() {
@@ -108,6 +147,13 @@ export async function runAppointmentReminders() {
     try {
       await evolutionSend(row.instance_name, row.customer_phone, message)
       sent++
+      // Keep the reminder in the conversation history (owner visibility + bot context).
+      // A persistence failure must not mark the (already sent) reminder as failed.
+      try {
+        await persistReminderMessage(row.tenant_id, row.customer_id, message)
+      } catch (persistErr: any) {
+        console.error(`[appointment-reminders] persist failed for appointment ${row.appointment_id}:`, persistErr?.message ?? persistErr)
+      }
     } catch (err: any) {
       failed++
       console.error(`[appointment-reminders] send failed for appointment ${row.appointment_id}:`, err?.message ?? err)

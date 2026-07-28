@@ -1,8 +1,11 @@
 'use client'
 import { useEffect, useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import Link from 'next/link'
 import { tenantApi, getToken } from '@/lib/api'
 import { getTokenPayload } from '@/lib/auth'
+import { useModalA11y } from '@/lib/useModalA11y'
+import Loading from '@/components/ui/Loading'
 
 // Full display name: "Nome Sobrenome" (last_name is optional).
 function fullName(c: { name?: string | null; last_name?: string | null }) {
@@ -33,6 +36,8 @@ function NewCustomerModal({ onClose, initialName = '' }: { onClose: () => void; 
   // Prefill Nome with whatever the user typed in the search box (#7).
   const [form, setForm] = useState({ name: initialName, last_name: '', phone: '', email: '' })
   const [error, setError] = useState('')
+  // UI-8: ESC fecha + focus trap básico
+  const dialogRef = useModalA11y<HTMLDivElement>(onClose)
 
   const createMutation = useMutation({
     mutationFn: () =>
@@ -59,7 +64,8 @@ function NewCustomerModal({ onClose, initialName = '' }: { onClose: () => void; 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       <div className="absolute inset-0 bg-black/30" onClick={onClose} />
-      <div className="relative w-full max-w-md bg-white rounded-2xl shadow-2xl p-6 space-y-4">
+      <div ref={dialogRef} tabIndex={-1} role="dialog" aria-modal="true" aria-label="Novo cliente"
+        className="relative w-full max-w-md bg-white rounded-2xl shadow-2xl p-6 space-y-4 focus:outline-none">
         <div className="flex items-center justify-between">
           <h2 className="text-lg font-bold text-gray-900">Novo cliente</h2>
           <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-xl leading-none">✕</button>
@@ -181,10 +187,19 @@ function CustomerDrawer({ customerId, canDelete, onClose }: { customerId: string
 
   const nameIsPhone = customer && customer.name === customer.phone
 
+  // SAL-22: total gasto pelo cliente (serviços concluídos).
+  const totalSpent = ((customer?.appointments ?? []) as any[])
+    .filter((a) => a.status === 'completed')
+    .reduce((sum, a) => sum + Number(a.price || 0), 0)
+
+  // UI-8: ESC fecha + focus trap básico
+  const dialogRef = useModalA11y<HTMLDivElement>(onClose)
+
   return (
     <div className="fixed inset-0 z-50 flex justify-end">
       <div className="absolute inset-0 bg-black/30" onClick={onClose} />
-      <div className="relative w-full max-w-lg bg-white shadow-2xl flex flex-col h-full overflow-y-auto">
+      <div ref={dialogRef} tabIndex={-1} role="dialog" aria-modal="true" aria-label="Detalhes do cliente"
+        className="relative w-full max-w-lg bg-white shadow-2xl flex flex-col h-full overflow-y-auto focus:outline-none">
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 sticky top-0 bg-white z-10">
           <h2 className="text-lg font-bold text-gray-900">Detalhes do cliente</h2>
@@ -192,7 +207,7 @@ function CustomerDrawer({ customerId, canDelete, onClose }: { customerId: string
         </div>
 
         {isLoading ? (
-          <div className="flex-1 flex items-center justify-center text-gray-400 text-sm">Carregando...</div>
+          <div className="flex-1 flex items-center justify-center"><Loading /></div>
         ) : !customer ? (
           <div className="flex-1 flex items-center justify-center text-gray-400 text-sm">Cliente não encontrado</div>
         ) : (
@@ -293,8 +308,24 @@ function CustomerDrawer({ customerId, canDelete, onClose }: { customerId: string
               )}
 
               {success && (
-                <p className="text-green-600 text-xs font-medium">✓ Cliente atualizado com sucesso</p>
+                <p role="status" className="text-green-600 text-xs font-medium">✓ Cliente atualizado com sucesso</p>
               )}
+
+              {/* SAL-22: agendar direto a partir do cliente (pré-selecionado) */}
+              <Link
+                href={`/appointments/new?customer_id=${customerId}`}
+                className="flex items-center justify-center w-full h-10 bg-primary hover:bg-primary-dark text-white text-sm font-semibold rounded-xl transition-colors"
+              >
+                + Novo agendamento
+              </Link>
+            </div>
+
+            {/* SAL-22: total gasto (serviços concluídos) */}
+            <div className="bg-green-50 border border-green-100 rounded-2xl px-4 py-3 flex items-center justify-between">
+              <p className="text-sm font-medium text-green-800">Total gasto pelo cliente</p>
+              <p className="text-lg font-bold text-green-700">
+                {totalSpent.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+              </p>
             </div>
 
             {/* Interest (from WhatsApp bot — migration 013, may be absent) */}
@@ -405,7 +436,7 @@ export default function CustomersPage() {
       />
 
       {isLoading ? (
-        <p className="text-gray-400 text-sm">Carregando...</p>
+        <Loading card />
       ) : (customers as any[]).length === 0 ? (
         <div className="bg-white rounded-2xl p-8 text-center border border-gray-100">
           <p className="text-gray-400 text-sm">Nenhum cliente encontrado</p>
@@ -414,8 +445,10 @@ export default function CustomersPage() {
           </p>
         </div>
       ) : (
+        // UI-9: tabela rola horizontalmente no mobile em vez de estourar a página
         <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
-          <table className="w-full text-sm">
+          <div className="overflow-x-auto">
+          <table className="w-full min-w-[640px] text-sm">
             <thead>
               <tr className="border-b border-gray-100 bg-gray-50">
                 <th className="text-left px-4 py-3 text-gray-500 font-medium">Nome</th>
@@ -482,6 +515,7 @@ export default function CustomersPage() {
               })}
             </tbody>
           </table>
+          </div>
         </div>
       )}
 

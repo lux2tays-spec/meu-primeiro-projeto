@@ -96,19 +96,19 @@ export default function PerfilPage() {
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div>
-            <label className="block text-xs font-medium text-gray-600 mb-1">Nome</label>
-            <input value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
+            <label htmlFor="pf-name" className="block text-xs font-medium text-gray-600 mb-1">Nome</label>
+            <input id="pf-name" value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
               className={inputCls} placeholder="Seu nome" />
           </div>
           <div>
-            <label className="block text-xs font-medium text-gray-600 mb-1">Telefone</label>
-            <input value={form.phone} onChange={(e) => setForm((f) => ({ ...f, phone: e.target.value }))}
+            <label htmlFor="pf-phone" className="block text-xs font-medium text-gray-600 mb-1">Telefone</label>
+            <input id="pf-phone" value={form.phone} onChange={(e) => setForm((f) => ({ ...f, phone: e.target.value }))}
               className={inputCls} placeholder="(11) 99999-9999" />
           </div>
         </div>
 
-        {profileError && <p className="text-red-500 text-xs">{profileError}</p>}
-        {profileSaved && <p className="text-green-600 text-xs">Dados salvos com sucesso.</p>}
+        {profileError && <p role="alert" className="text-red-500 text-xs">{profileError}</p>}
+        {profileSaved && <p role="status" className="text-green-600 text-xs">Dados salvos com sucesso.</p>}
 
         <button
           onClick={() => saveProfile.mutate(form)}
@@ -132,7 +132,7 @@ export default function PerfilPage() {
           )}
         </div>
 
-        {emailFeedback && <p className="text-green-600 text-xs">{emailFeedback}</p>}
+        {emailFeedback && <p role="status" className="text-green-600 text-xs">{emailFeedback}</p>}
 
         {!showEmailForm ? (
           <button
@@ -144,21 +144,21 @@ export default function PerfilPage() {
         ) : (
           <div className="space-y-3">
             <div>
-              <label className="block text-xs font-medium text-gray-600 mb-1">Novo e-mail</label>
-              <input type="email" value={emailForm.new_email}
+              <label htmlFor="pf-new-email" className="block text-xs font-medium text-gray-600 mb-1">Novo e-mail</label>
+              <input id="pf-new-email" type="email" value={emailForm.new_email}
                 onChange={(e) => setEmailForm((f) => ({ ...f, new_email: e.target.value }))}
                 className={inputCls} placeholder="novo@email.com" />
             </div>
             <div>
-              <label className="block text-xs font-medium text-gray-600 mb-1">Sua senha (para confirmar)</label>
-              <input type="password" value={emailForm.password}
+              <label htmlFor="pf-email-password" className="block text-xs font-medium text-gray-600 mb-1">Sua senha (para confirmar)</label>
+              <input id="pf-email-password" type="password" value={emailForm.password}
                 onChange={(e) => setEmailForm((f) => ({ ...f, password: e.target.value }))}
                 className={inputCls} placeholder="••••••••" />
             </div>
             <p className="text-gray-400 text-xs">
               Enviaremos um link de confirmação para o novo e-mail. A troca só acontece após a confirmação.
             </p>
-            {emailError && <p className="text-red-500 text-xs">{emailError}</p>}
+            {emailError && <p role="alert" className="text-red-500 text-xs">{emailError}</p>}
             <div className="flex gap-2">
               <button
                 onClick={() => changeEmail.mutate(emailForm)}
@@ -184,21 +184,21 @@ export default function PerfilPage() {
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div>
-            <label className="block text-xs font-medium text-gray-600 mb-1">Senha atual</label>
-            <input type="password" value={pwForm.current_password}
+            <label htmlFor="pf-current-password" className="block text-xs font-medium text-gray-600 mb-1">Senha atual</label>
+            <input id="pf-current-password" type="password" value={pwForm.current_password}
               onChange={(e) => setPwForm((f) => ({ ...f, current_password: e.target.value }))}
               className={inputCls} placeholder="••••••••" />
           </div>
           <div>
-            <label className="block text-xs font-medium text-gray-600 mb-1">Nova senha (mín. 8 caracteres)</label>
-            <input type="password" value={pwForm.new_password}
+            <label htmlFor="pf-new-password" className="block text-xs font-medium text-gray-600 mb-1">Nova senha (mín. 8 caracteres)</label>
+            <input id="pf-new-password" type="password" value={pwForm.new_password}
               onChange={(e) => setPwForm((f) => ({ ...f, new_password: e.target.value }))}
               className={inputCls} placeholder="••••••••" />
           </div>
         </div>
 
-        {pwError && <p className="text-red-500 text-xs">{pwError}</p>}
-        {pwSaved && <p className="text-green-600 text-xs">Senha alterada com sucesso.</p>}
+        {pwError && <p role="alert" className="text-red-500 text-xs">{pwError}</p>}
+        {pwSaved && <p role="status" className="text-green-600 text-xs">Senha alterada com sucesso.</p>}
 
         <button
           onClick={() => changePassword.mutate(pwForm)}

@@ -188,14 +188,24 @@ export async function findAvailableSlots(
   return { ok: true, slots }
 }
 
-/** Build a São Paulo timestamptz string from date + time. */
+/** Build a São Paulo timestamptz string from date + time.
+ *
+ * BOT-17 — PREMISSA DOCUMENTADA (não alterar sem revisar): o offset -03:00 é
+ * fixado no código porque o Brasil NÃO tem horário de verão desde 2019 —
+ * America/Sao_Paulo é -03:00 o ano inteiro, então o valor está sempre correto
+ * hoje. RISCO: se o horário de verão voltar (decreto federal), este offset fica
+ * ERRADO durante o DST (-02:00) e todo agendamento criado no período ficaria
+ * deslocado em 1h. Nesse caso, trocar a montagem da string por uma conversão
+ * real de wall-clock via IANA "America/Sao_Paulo" (ex.: Intl/date-fns-tz), e
+ * revisar os demais usos de "-03:00"/AT TIME ZONE no backend. O mesmo offset
+ * fixo é usado em routes/appointments.ts (GET /slots). */
 function saoPauloTimestamp(date: string, time: string): string {
   return `${date}T${time.length === 5 ? time : time.slice(0, 5)}:00-03:00`
 }
 
 export type BookResult =
   | { ok: true; appointmentId: string; startsAt: string }
-  | { ok: false; reason: 'unavailable' | 'invalid' | 'sem_horario_config' | 'dia_bloqueado' }
+  | { ok: false; reason: 'unavailable' | 'invalid' | 'sem_horario_config' | 'dia_bloqueado' | 'horario_no_passado' | 'fora_do_expediente' }
   | { ok: false; reason: 'dia_fechado'; openDays: string[] }
 
 /** Create an appointment for the bot (created_by = NULL). Rechecks conflicts. */
@@ -225,13 +235,22 @@ export async function bookAppointment(params: {
   }
   const endsAt = new Date(startsAt.getTime() + service.duration_minutes * 60000)
 
+  // Guard: never book in the past. startsAt is an absolute instant (built with the
+  // São Paulo offset), so comparing against the server clock is timezone-safe.
+  if (startsAt.getTime() <= Date.now()) {
+    console.error(`[scheduling] bookAppointment FALHOU: ${date} ${time} está no passado (tenant=${tenantId})`)
+    return { ok: false, reason: 'horario_no_passado' }
+  }
+
   // Guard: the tenant must have working hours configured for that weekday —
   // otherwise the "agenda" simply doesn't exist and the bot must not pretend it does.
+  // Same query shape findAvailableSlots uses, so the window check below can reuse the rows.
   const { rows: hours } = await db.query(
-    `SELECT 1 FROM working_hours
+    `SELECT to_char(start_time, 'HH24:MI') AS start_hm, to_char(end_time, 'HH24:MI') AS end_hm
+     FROM working_hours
      WHERE tenant_id = $1 AND (professional_id = $2 OR professional_id IS NULL)
        AND day_of_week = EXTRACT(DOW FROM $3::date)
-     LIMIT 1`,
+     ORDER BY start_time`,
     [tenantId, professionalId, date]
   )
   if (hours.length === 0) {
@@ -248,6 +267,23 @@ export async function bookAppointment(params: {
   if (await isDayOff(tenantId, professionalId, date)) {
     console.error(`[scheduling] bookAppointment FALHOU: ${date} está em days_off para professional=${professionalId} (tenant=${tenantId}) — dia bloqueado/folga`)
     return { ok: false, reason: 'dia_bloqueado' }
+  }
+
+  // Guard: the requested window [time, time + duration] must be fully contained in
+  // one of the day's working-hour windows — the same containment rule
+  // findAvailableSlots applies when generating slots (cur + duration <= end).
+  const toMin = (hm: string) => {
+    const [h, m] = hm.split(':').map(Number)
+    return h * 60 + m
+  }
+  const startMin = toMin(time.length === 5 ? time : time.slice(0, 5))
+  const endMin = startMin + service.duration_minutes
+  const insideWorkingHours = hours.some(
+    (w: any) => startMin >= toMin(w.start_hm) && endMin <= toMin(w.end_hm)
+  )
+  if (!insideWorkingHours) {
+    console.error(`[scheduling] bookAppointment FALHOU: ${date} ${time} (+${service.duration_minutes}min) está fora do expediente de professional=${professionalId} (tenant=${tenantId})`)
+    return { ok: false, reason: 'fora_do_expediente' }
   }
 
   try {
@@ -276,9 +312,26 @@ export async function bookAppointment(params: {
     syncAppointmentToCalendar(appt.id).catch(console.error)
     return { ok: true, appointmentId: appt.id, startsAt: startsAt.toISOString() }
   } catch (err) {
+    // Corrida de double-booking: duas reservas simultâneas passaram pela checagem
+    // de conflito acima, mas a EXCLUDE constraint appointments_no_overlap
+    // (migration 036) barrou a segunda no banco. Código Postgres 23P01
+    // (exclusion_violation) → tratar como "horário indisponível", não como 500.
+    if (isOverlapViolation(err)) {
+      console.warn(`[scheduling] bookAppointment: corrida de double-booking barrada pela constraint em ${date} ${time} para professional=${professionalId} (tenant=${tenantId})`)
+      return { ok: false, reason: 'unavailable' }
+    }
     console.error(`[scheduling] bookAppointment FALHOU (erro de banco) tenant=${tenantId} customer=${customerId} ${date} ${time}:`, err)
     throw err
   }
+}
+
+/**
+ * True when the error is a violation of the appointments_no_overlap EXCLUDE
+ * constraint (migration 036) — Postgres error 23P01 (exclusion_violation).
+ * Callers must map it to "horário indisponível"/409, never to a 500.
+ */
+export function isOverlapViolation(err: unknown): boolean {
+  return (err as any)?.code === '23P01'
 }
 
 /** Cancel the customer's next upcoming (non-cancelled) appointment. */
@@ -317,6 +370,47 @@ export async function getUpcomingAppointment(
   )
   if (!a) return null
   return { id: a.id, serviceId: a.service_id, serviceName: a.service_name, professionalId: a.professional_id, professionalName: a.professional_name, when: a.when_fmt }
+}
+
+export type UpcomingAppointment = {
+  id: string
+  serviceId: string
+  serviceName: string
+  professionalId: string
+  professionalName: string | null
+  date: string  // YYYY-MM-DD (São Paulo)
+  time: string  // HH:MM (São Paulo)
+  when: string  // DD/MM HH24:MI (São Paulo) — human-friendly
+}
+
+/**
+ * ALL upcoming (non-cancelled) appointments of a customer, soonest first.
+ * Used by the bot to (a) tell the customer when their appointments are and
+ * (b) disambiguate cancel/reschedule when the customer has more than one —
+ * never operate blindly on "the next one" (BOT-12).
+ */
+export async function listUpcomingAppointments(
+  tenantId: string,
+  customerId: string
+): Promise<UpcomingAppointment[]> {
+  const { rows } = await db.query(
+    `SELECT a.id, a.service_id, s.name AS service_name,
+            a.professional_id, p.name AS professional_name,
+            to_char(a.starts_at AT TIME ZONE $3, 'YYYY-MM-DD') AS date_fmt,
+            to_char(a.starts_at AT TIME ZONE $3, 'HH24:MI') AS time_fmt,
+            to_char(a.starts_at AT TIME ZONE $3, 'DD/MM HH24:MI') AS when_fmt
+     FROM appointments a
+     JOIN services s ON s.id = a.service_id
+     LEFT JOIN professionals p ON p.id = a.professional_id
+     WHERE a.tenant_id = $1 AND a.customer_id = $2 AND a.status <> 'cancelled' AND a.starts_at >= now()
+     ORDER BY a.starts_at ASC LIMIT 10`,
+    [tenantId, customerId, TZ]
+  )
+  return rows.map((a: any) => ({
+    id: a.id, serviceId: a.service_id, serviceName: a.service_name,
+    professionalId: a.professional_id, professionalName: a.professional_name,
+    date: a.date_fmt, time: a.time_fmt, when: a.when_fmt,
+  }))
 }
 
 /** Cancel one specific appointment by id (used by reschedule after the new slot is booked). */

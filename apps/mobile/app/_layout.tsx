@@ -5,6 +5,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import * as SplashScreen from 'expo-splash-screen'
 import { useAuthStore } from '@/lib/store'
 import { useBrandingStore } from '@/lib/branding'
+import { ThemeProvider } from '@/lib/theme-context'
 import { StatusBar } from 'expo-status-bar'
 import { Toast } from '@/components/ui/Toast'
 import { ErrorBoundary } from '@/components/ErrorBoundary'
@@ -37,15 +38,17 @@ export default function RootLayout() {
   return (
     <QueryClientProvider client={queryClient}>
       <ErrorBoundary>
-        <View style={{ flex: 1 }}>
-          <StatusBar style="dark" />
-          <Stack screenOptions={{ headerShown: false }}>
-            <Stack.Screen name="(auth)" />
-            <Stack.Screen name="(app)" />
-            <Stack.Screen name="onboarding" />
-          </Stack>
-          <Toast />
-        </View>
+        <ThemeProvider>
+          <View style={{ flex: 1 }}>
+            <StatusBar style="dark" />
+            <Stack screenOptions={{ headerShown: false }}>
+              <Stack.Screen name="(auth)" />
+              <Stack.Screen name="(app)" />
+              <Stack.Screen name="onboarding" />
+            </Stack>
+            <Toast />
+          </View>
+        </ThemeProvider>
       </ErrorBoundary>
     </QueryClientProvider>
   )

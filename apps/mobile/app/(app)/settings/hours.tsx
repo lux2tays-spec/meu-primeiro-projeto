@@ -43,7 +43,14 @@ function rowsToSchedule(rows: any[]): Schedule {
   return s
 }
 
-function isValidTime(v: string) { return /^\d{2}:\d{2}$/.test(v) }
+function isValidTime(v: string) { return /^([01]\d|2[0-3]):[0-5]\d$/.test(v) }
+
+/** Máscara HH:MM enquanto digita (aceita só dígitos e insere o ":"). */
+function maskTime(v: string) {
+  const digits = v.replace(/\D/g, '').slice(0, 4)
+  if (digits.length <= 2) return digits
+  return `${digits.slice(0, 2)}:${digits.slice(2)}`
+}
 
 /** Auto-mask DD/MM/AAAA while typing */
 function maskDate(v: string) {
@@ -72,12 +79,25 @@ function formatBRDate(iso: string) {
   return `${dd}/${mm}/${yyyy}`
 }
 
+/** Hoje em YYYY-MM-DD no fuso local (não UTC). */
+function todayISO() {
+  const n = new Date()
+  return `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, '0')}-${String(n.getDate()).padStart(2, '0')}`
+}
+
 export default function HoursScreen() {
   const queryClient = useQueryClient()
   const toast = useToast()
   const [schedule, setSchedule] = useState<Schedule>(buildDefault())
+  // null = horário geral do estabelecimento; id = horário específico do profissional
+  const [selectedProfId, setSelectedProfId] = useState<string | null>(null)
 
-  const { data: rows, isLoading } = useQuery({ queryKey: ['hours'], queryFn: () => hoursApi.get() })
+  const { data: professionals = [] } = useQuery({ queryKey: ['professionals'], queryFn: tenantApi.professionals })
+
+  const { data: rows, isLoading } = useQuery({
+    queryKey: ['hours', selectedProfId],
+    queryFn: () => hoursApi.get(selectedProfId ?? undefined),
+  })
 
   useEffect(() => { if (rows) setSchedule(rowsToSchedule(rows)) }, [rows])
 
@@ -99,11 +119,16 @@ export default function HoursScreen() {
         end_time: schedule[d.id].end,
         enabled: schedule[d.id].enabled,
       }))
-      return hoursApi.save(payload)
+      return hoursApi.save(payload, selectedProfId ?? undefined)
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['hours'] })
-      toast.show('Horários de funcionamento atualizados!', 'success')
+      toast.show(
+        selectedProfId
+          ? 'Horários do profissional atualizados!'
+          : 'Horários de funcionamento atualizados!',
+        'success'
+      )
     },
     onError: (err: any) => toast.show(err.message ?? 'Não foi possível salvar os horários.', 'error'),
   })
@@ -130,6 +155,43 @@ export default function HoursScreen() {
         <Text style={styles.hint}>
           Configure os dias e horários em que o bot pode realizar agendamentos.
         </Text>
+
+        {/* Seletor de profissional (horário geral ou específico) */}
+        {(professionals as any[]).length > 0 && (
+          <View style={styles.profSelector}>
+            <Text style={styles.profSelectorLabel}>Horários de:</Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.profChipRow}>
+              <TouchableOpacity
+                onPress={() => setSelectedProfId(null)}
+                style={[styles.profChip, selectedProfId === null && styles.profChipActive]}
+                accessibilityRole="button"
+                accessibilityLabel="Horários gerais do estabelecimento"
+              >
+                <Text style={[styles.profChipText, selectedProfId === null && styles.profChipTextActive]}>
+                  Estabelecimento
+                </Text>
+              </TouchableOpacity>
+              {(professionals as any[]).map((p) => (
+                <TouchableOpacity
+                  key={p.id}
+                  onPress={() => setSelectedProfId(p.id)}
+                  style={[styles.profChip, selectedProfId === p.id && styles.profChipActive]}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Horários de ${p.name}`}
+                >
+                  <Text style={[styles.profChipText, selectedProfId === p.id && styles.profChipTextActive]}>
+                    {p.name}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+            {selectedProfId !== null && (
+              <Text style={styles.profHint}>
+                Estes horários valem apenas para este profissional e substituem o horário geral.
+              </Text>
+            )}
+          </View>
+        )}
         {DAYS.map((day) => {
           const cfg = schedule[day.id]
           return (
@@ -151,8 +213,11 @@ export default function HoursScreen() {
                     <Text style={styles.timeLabel}>Abertura</Text>
                     <Input
                       value={cfg.start}
-                      onChangeText={(v) => setTime(day.id, 'start', v)}
+                      onChangeText={(v) => setTime(day.id, 'start', maskTime(v))}
                       placeholder="09:00"
+                      keyboardType="number-pad"
+                      maxLength={5}
+                      accessibilityLabel={`Horário de abertura de ${day.label}`}
                       style={styles.timeInput}
                     />
                   </View>
@@ -161,8 +226,11 @@ export default function HoursScreen() {
                     <Text style={styles.timeLabel}>Fechamento</Text>
                     <Input
                       value={cfg.end}
-                      onChangeText={(v) => setTime(day.id, 'end', v)}
+                      onChangeText={(v) => setTime(day.id, 'end', maskTime(v))}
                       placeholder="18:00"
+                      keyboardType="number-pad"
+                      maxLength={5}
+                      accessibilityLabel={`Horário de fechamento de ${day.label}`}
                       style={styles.timeInput}
                     />
                   </View>
@@ -189,16 +257,20 @@ function DaysOffSection() {
   const [date, setDate] = useState('')
   const [reason, setReason] = useState('')
   const [dateError, setDateError] = useState<string | undefined>(undefined)
+  // null = folga para todos os profissionais; id = folga individual
+  const [dayOffProfId, setDayOffProfId] = useState<string | null>(null)
 
   const { data: daysOff = [], isLoading } = useQuery({ queryKey: ['days-off'], queryFn: tenantApi.daysOff })
+  const { data: professionals = [] } = useQuery({ queryKey: ['professionals'], queryFn: tenantApi.professionals })
 
   const addMutation = useMutation({
     mutationFn: (isoDate: string) =>
-      tenantApi.addDayOff({ date: isoDate, professional_id: null, reason: reason.trim() || null }),
+      tenantApi.addDayOff({ date: isoDate, professional_id: dayOffProfId, reason: reason.trim() || null }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['days-off'] })
       setDate('')
       setReason('')
+      setDayOffProfId(null)
       setDateError(undefined)
       toast.show('Folga adicionada!', 'success')
     },
@@ -218,6 +290,23 @@ function DaysOffSection() {
     const iso = toISODate(date)
     if (!iso) {
       setDateError('Data inválida. Use o formato DD/MM/AAAA')
+      return
+    }
+    // Data passada: o backend filtra folgas antigas e o item "sumiria" da lista
+    // sem explicação — melhor avisar antes de salvar.
+    if (iso < todayISO()) {
+      setDateError('A data já passou. Escolha hoje ou uma data futura.')
+      return
+    }
+    // Evita duplicar: mesma data para o mesmo profissional (ou já coberta por
+    // uma folga geral de "Todos").
+    const duplicated = (daysOff as any[]).some(
+      (d) =>
+        d.date === iso &&
+        ((d.professional_id ?? null) === dayOffProfId || d.professional_id == null)
+    )
+    if (duplicated) {
+      setDateError('Já existe uma folga cadastrada para esta data.')
       return
     }
     addMutation.mutate(iso)
@@ -276,6 +365,37 @@ function DaysOffSection() {
           maxLength={10}
           error={dateError}
         />
+        {/* Folga geral ou de um profissional específico */}
+        {(professionals as any[]).length > 0 && (
+          <View style={{ gap: spacing.xs }}>
+            <Text style={styles.profSelectorLabel}>Folga para</Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.profChipRow}>
+              <TouchableOpacity
+                onPress={() => setDayOffProfId(null)}
+                style={[styles.profChip, dayOffProfId === null && styles.profChipActive]}
+                accessibilityRole="button"
+                accessibilityLabel="Folga para todos os profissionais"
+              >
+                <Text style={[styles.profChipText, dayOffProfId === null && styles.profChipTextActive]}>
+                  Todos
+                </Text>
+              </TouchableOpacity>
+              {(professionals as any[]).map((p) => (
+                <TouchableOpacity
+                  key={p.id}
+                  onPress={() => setDayOffProfId(p.id)}
+                  style={[styles.profChip, dayOffProfId === p.id && styles.profChipActive]}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Folga apenas para ${p.name}`}
+                >
+                  <Text style={[styles.profChipText, dayOffProfId === p.id && styles.profChipTextActive]}>
+                    {p.name}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          </View>
+        )}
         <Input
           label="Motivo (opcional)"
           value={reason}
@@ -315,4 +435,17 @@ const styles = StyleSheet.create({
   dayOffDate: { fontSize: font.md, fontWeight: '600', color: colors.text },
   dayOffMeta: { fontSize: font.sm, color: colors.textSecondary, marginTop: 1 },
   dayOffForm: { gap: spacing.md },
+  // Seletor de profissional
+  profSelector: { gap: spacing.xs },
+  profSelectorLabel: { fontSize: font.sm, fontWeight: '600', color: colors.textSecondary },
+  profChipRow: { gap: spacing.sm, paddingRight: spacing.lg },
+  profChip: {
+    paddingHorizontal: 14, paddingVertical: 7,
+    borderRadius: 9999, borderWidth: 1.5,
+    borderColor: colors.border, backgroundColor: colors.surface,
+  },
+  profChipActive: { backgroundColor: colors.primary, borderColor: colors.primary },
+  profChipText: { fontSize: font.sm, fontWeight: '600', color: colors.textSecondary },
+  profChipTextActive: { color: '#fff' },
+  profHint: { fontSize: font.sm, color: colors.textSecondary, marginTop: spacing.xs },
 })

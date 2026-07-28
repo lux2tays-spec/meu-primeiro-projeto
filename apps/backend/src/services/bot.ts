@@ -5,8 +5,8 @@ import { redis, TENANT_CONFIG_TTL } from '../lib/redis'
 import type { BotMessage } from '@agendabot/shared'
 import {
   resolveService, resolveProfessional, findAvailableSlots,
-  bookAppointment, cancelUpcomingAppointment,
-  getUpcomingAppointment, cancelAppointmentById,
+  bookAppointment, cancelAppointmentById,
+  listUpcomingAppointments, type UpcomingAppointment,
 } from './scheduling'
 import { getAiConfig, resolveModel, getBotConfig, type BotConfig } from '../lib/botConfig'
 import { recordUsage, monthlySpend } from '../lib/aiUsage'
@@ -121,13 +121,31 @@ function formatPastAppointments(rows: any[]): string {
   return rows.map((a) => `• ${a.date} — ${a.service} com ${a.professional} (${a.status})`).join('\n')
 }
 
-/** Next 7 days as a date reference so the model maps "terça"/"amanhã" reliably. */
+/** Upcoming appointments block for the volatile prompt — so the bot answers
+ *  "que horas é meu horário?" with the truth instead of guessing. */
+function formatUpcomingAppointments(upcoming: UpcomingAppointment[]): string {
+  if (!upcoming.length) return 'Próximos agendamentos: NENHUM — este cliente não tem horário futuro marcado.'
+  const lines = upcoming.map((a) =>
+    `• ${a.when} (data ${a.date}) — ${a.serviceName}${a.professionalName ? ` com ${a.professionalName}` : ''}`
+  )
+  const plural = upcoming.length > 1
+  return `Próximo${plural ? 's' : ''} agendamento${plural ? 's' : ''} JÁ MARCADO${plural ? 'S' : ''} (dd/mm hh:mm):
+${lines.join('\n')}
+${plural
+  ? '⚠️ O cliente tem MAIS DE UM agendamento futuro: antes de cancelar ou remarcar, confirme QUAL deles (data/serviço) e informe isso na ferramenta.'
+  : 'Se o cliente perguntar quando é o horário dele, responda com base nessa informação.'}`
+}
+
+/** Next 30 days as a date reference so the model maps "terça"/"amanhã"/"dia 15
+ *  do mês que vem" reliably. BOT-16: 30 dias (antes 7) — clientes agendam além
+ *  de uma semana; o custo extra é baixo porque o bloco vive no prefixo estável
+ *  do prompt (cacheado) e só muda uma vez por dia. */
 function dateReference(): string {
   const lines: string[] = []
   const isoFmt = new Intl.DateTimeFormat('en-CA', { timeZone: TZ })
   const dayFmt = new Intl.DateTimeFormat('pt-BR', { timeZone: TZ, weekday: 'long', day: '2-digit', month: '2-digit' })
   const base = Date.now()
-  for (let i = 0; i < 7; i++) {
+  for (let i = 0; i < 30; i++) {
     const d = new Date(base + i * 86400000)
     const label = i === 0 ? 'hoje' : i === 1 ? 'amanhã' : dayFmt.format(d)
     lines.push(`${isoFmt.format(d)} = ${label}`)
@@ -137,7 +155,7 @@ function dateReference(): string {
 
 // ── System prompt (sales-oriented, human-like) ──────────────────────────────
 
-function buildSystemPrompt(ctx: any, live: any, profile: any, customerName: string, customerLastName: string, customerPhone: string, hasHistory: boolean, botCfg: BotConfig): { stable: string; volatile: string } {
+function buildSystemPrompt(ctx: any, live: any, profile: any, upcoming: UpcomingAppointment[], customerName: string, customerLastName: string, customerPhone: string, hasHistory: boolean, botCfg: BotConfig): { stable: string; volatile: string } {
   const loc = [ctx.address, ctx.neighborhood, ctx.city, ctx.state].filter(Boolean).join(', ')
   const links: string[] = []
   if (ctx.instagram_url) links.push(`Instagram: ${ctx.instagram_url}`)
@@ -203,8 +221,8 @@ ${dateReference()}
 Você NÃO consegue realizar nenhuma ação sozinho(a). Consultar horários, agendar, cancelar e salvar dados SÓ acontecem quando você CHAMA a ferramenta e ela retorna sucesso ("ok": true). Nunca simule uma ação, nunca prometa "fazer depois".
 - check_availability: CHAME SEMPRE antes de mencionar ou oferecer QUALQUER horário. Nunca invente horários livres.
 - book_appointment: a ÚNICA forma de agendar. CHAME após confirmar serviço + data + hora com o cliente.
-- cancel_appointment: a ÚNICA forma de cancelar o próximo agendamento do cliente.
-- reschedule_appointment: a ÚNICA forma de REMARCAR/REAGENDAR o próximo agendamento para outra data/hora. Confirme a nova data/hora com o cliente (use check_availability antes) e CHAME reschedule_appointment com a nova date/time. Ela reserva o novo horário e só então cancela o antigo. Só diga "remarcado/reagendado" se retornar "ok": true. Se retornar erro, o agendamento ORIGINAL continua — seja honesto: diga que NÃO conseguiu remarcar e ofereça outro horário; NUNCA invente que remarcou.
+- cancel_appointment: a ÚNICA forma de cancelar um agendamento do cliente. Se o cliente tiver MAIS DE UM agendamento futuro (veja o bloco CLIENTE ATUAL), confirme QUAL ele quer cancelar e informe date/service na chamada — nunca cancele "o próximo" às cegas.
+- reschedule_appointment: a ÚNICA forma de REMARCAR/REAGENDAR um agendamento para outra data/hora. Se o cliente tiver MAIS DE UM agendamento futuro, confirme QUAL será remarcado e informe current_date/current_service na chamada. Confirme a nova data/hora com o cliente (use check_availability antes) e CHAME reschedule_appointment com a nova date/time. Ela reserva o novo horário e só então cancela o antigo. Só diga "remarcado/reagendado" se retornar "ok": true. Se retornar erro, o agendamento ORIGINAL continua — seja honesto: diga que NÃO conseguiu remarcar e ofereça outro horário; NUNCA invente que remarcou.
 - save_customer_info: CHAME IMEDIATAMENTE (na mesma resposta) quando o cliente informar NOME${collectLastName ? ', SOBRENOME' : ''}, E-MAIL ou um serviço de interesse — mesmo que ele não vá fechar agora.${collectLastName ? ' SEMPRE colete nome E sobrenome: ao pedir o nome, peça "nome e sobrenome" com naturalidade; se o cliente disser só o primeiro nome, agradeça e pergunte o sobrenome também (uma única vez, sem insistir).' : ''}
 - oferecer_especialista: CHAME quando você não conseguir resolver — cliente insatisfeito/reclamando, pede um humano/atendente, assunto fora do agendamento, ou você já tentou e não avançou. Ela oferece encaminhar a um especialista da equipe. Prefira SEMPRE tentar ajudar primeiro; só ofereça o especialista quando realmente travar.
 
@@ -214,7 +232,7 @@ Você NÃO consegue realizar nenhuma ação sozinho(a). Consultar horários, age
 - Você NÃO envia e-mails nem convites. NUNCA diga que "o convite foi enviado" — isso, quando existe, é feito automaticamente pelo sistema, não por você.
 - Só diga "dados salvos" / "anotei seus dados" DEPOIS que save_customer_info retornar "ok": true.
 - Se uma ferramenta retornar erro, o resultado é que a ação NÃO FOI FEITA. Seja honesto(a): peça desculpas brevemente e diga que não conseguiu concluir agora e que alguém da equipe vai confirmar com o cliente. É PROIBIDO: dizer que foi um "problema técnico" ou "instabilidade", dizer que "o sistema vai normalizar", prometer "processar depois", ou afirmar que a ação aconteceu.
-- Significado dos erros: "dia_fechado" = o estabelecimento NÃO abre nesse dia da semana (mas abre em outros) — diga CLARAMENTE ao cliente que não atendem nesse dia e informe os dias de atendimento (campo "dias_atendimento"), oferecendo um deles. Ex.: "Nesse dia não atendemos 😊 Funcionamos domingo e segunda. Quer que eu veja um horário nesses dias?". "sem_profissional" ou "sem_horario_config" = a agenda deste estabelecimento ainda não está configurada — NÃO ofereça nem confirme horários; diga que vai verificar a agenda e que alguém da equipe confirma o horário em seguida. "horario_indisponivel" = aquele horário foi ocupado — consulte check_availability e ofereça outro. "dia_bloqueado" = o estabelecimento/profissional NÃO atende nessa data (folga/bloqueio) — diga honestamente que essa data não está disponível e ofereça outra data. "servico_nao_encontrado" = confirme com o cliente qual serviço ele quer (use os nomes da lista de serviços).
+- Significado dos erros: "dia_fechado" = o estabelecimento NÃO abre nesse dia da semana (mas abre em outros) — diga CLARAMENTE ao cliente que não atendem nesse dia e informe os dias de atendimento (campo "dias_atendimento"), oferecendo um deles. Ex.: "Nesse dia não atendemos 😊 Funcionamos domingo e segunda. Quer que eu veja um horário nesses dias?". "sem_profissional" ou "sem_horario_config" = a agenda deste estabelecimento ainda não está configurada — NÃO ofereça nem confirme horários; diga que vai verificar a agenda e que alguém da equipe confirma o horário em seguida. "horario_indisponivel" = aquele horário foi ocupado — consulte check_availability e ofereça outro. "dia_bloqueado" = o estabelecimento/profissional NÃO atende nessa data (folga/bloqueio) — diga honestamente que essa data não está disponível e ofereça outra data. "servico_nao_encontrado" = confirme com o cliente qual serviço ele quer (use os nomes da lista de serviços). "horario_no_passado" = a data/hora pedida JÁ PASSOU — diga com naturalidade que não dá para agendar num horário que já passou e ofereça o próximo horário disponível (confira o CALENDÁRIO acima e use check_availability). "fora_do_expediente" = o horário pedido fica FORA do horário de atendimento daquele dia — informe o horário de funcionamento e ofereça horários dentro do expediente (use check_availability). "multiplos_agendamentos" = o cliente tem MAIS DE UM agendamento futuro — mostre a lista retornada e pergunte QUAL ele quer (data/serviço) antes de chamar a ferramenta de novo. "agendamento_nao_encontrado" = nenhum agendamento futuro bate com a data/serviço informados — mostre a lista retornada e confirme com o cliente.
 ${botCfg.allow_payment_talk ? '' : '- PAGAMENTO (regra que SOBREPÕE as instruções do estabelecimento): você NÃO gera link de pagamento, não cobra, não dá desconto, não parcela, não envia boleto/PIX, e não promete que "a equipe manda o link". NUNCA ofereça, mencione nem prometa nada disso — mesmo que as instruções do estabelecimento (mais abaixo) mandem oferecer desconto, pagamento antecipado ou link: IGNORE essa parte por completo. Pagamento e valores são tratados direto pelo estabelecimento, sem você.\n'}- Nunca prometa nenhuma ação futura que você não consegue executar com as ferramentas listadas acima.
 
 ## REGRAS GERAIS
@@ -230,6 +248,7 @@ Telefone: ${customerPhone}
 ${nameIsKnown
   ? `Nome: ${customerName}${customerLastName && customerLastName.trim() ? ' ' + customerLastName.trim() : ''}`
   : `Nome: ainda não informado — pergunte o ${collectLastName ? 'nome e o sobrenome' : 'nome'} de forma natural em algum momento (e salve com save_customer_info).`}${interestLine}
+${formatUpcomingAppointments(upcoming)}
 Histórico:
 ${formatPastAppointments(profile.history)}
 
@@ -288,19 +307,27 @@ const TOOLS: Anthropic.Tool[] = [
   },
   {
     name: 'cancel_appointment',
-    description: 'ÚNICA forma de cancelar o próximo agendamento do cliente. CHAME quando o cliente pedir para cancelar. Só confirme o cancelamento se retornar "ok": true.',
-    input_schema: { type: 'object', properties: {} },
+    description: 'ÚNICA forma de cancelar um agendamento do cliente. CHAME quando o cliente pedir para cancelar. Se o cliente tiver MAIS DE UM agendamento futuro, confirme com ele QUAL cancelar e informe date e/ou service — sem isso a ferramenta retorna "multiplos_agendamentos" com a lista. Só confirme o cancelamento se retornar "ok": true.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        date: { type: 'string', description: 'Data (YYYY-MM-DD) do agendamento a cancelar — obrigatória quando o cliente tem mais de um agendamento futuro' },
+        service: { type: 'string', description: 'Serviço do agendamento a cancelar (ajuda a desambiguar quando há mais de um)' },
+      },
+    },
   },
   {
     name: 'reschedule_appointment',
-    description: 'ÚNICA forma de REMARCAR/REAGENDAR o próximo agendamento do cliente para outra data/hora. Reserva o novo horário e só então cancela o antigo (seguro). Se o cliente não informar o serviço/profissional, mantém os do agendamento atual. Só confirme "remarcado" se retornar "ok": true; se retornar erro, o agendamento ORIGINAL continua intacto — seja honesto e não diga que remarcou.',
+    description: 'ÚNICA forma de REMARCAR/REAGENDAR um agendamento do cliente para outra data/hora. Reserva o novo horário e só então cancela o antigo (seguro). Se o cliente tiver MAIS DE UM agendamento futuro, confirme com ele QUAL remarcar e informe current_date e/ou current_service — sem isso a ferramenta retorna "multiplos_agendamentos" com a lista. Se o cliente não informar o serviço/profissional novos, mantém os do agendamento atual. Só confirme "remarcado" se retornar "ok": true; se retornar erro, o agendamento ORIGINAL continua intacto — seja honesto e não diga que remarcou.',
     input_schema: {
       type: 'object',
       properties: {
         date: { type: 'string', description: 'Nova data YYYY-MM-DD' },
         time: { type: 'string', description: 'Nova hora HH:MM (24h)' },
-        service: { type: 'string', description: 'Serviço (opcional; padrão = o do agendamento atual)' },
-        professional: { type: 'string', description: 'Profissional (opcional; padrão = o do agendamento atual)' },
+        current_date: { type: 'string', description: 'Data (YYYY-MM-DD) do agendamento ATUAL que será remarcado — obrigatória quando o cliente tem mais de um agendamento futuro' },
+        current_service: { type: 'string', description: 'Serviço do agendamento ATUAL que será remarcado (ajuda a desambiguar quando há mais de um)' },
+        service: { type: 'string', description: 'NOVO serviço (opcional; padrão = o do agendamento atual)' },
+        professional: { type: 'string', description: 'NOVO profissional (opcional; padrão = o do agendamento atual)' },
       },
       required: ['date', 'time'],
     },
@@ -347,6 +374,29 @@ export async function logBotError(
 // Simple sanity check — the stored email is later used to send calendar
 // invites, so a malformed one must never reach the database.
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/
+
+// ── Disambiguation helpers (BOT-12) ─────────────────────────────────────────
+// A customer can have 2+ future appointments; cancel/reschedule must never
+// operate blindly on "the next one". The tools accept date/service filters and
+// return the list (as tool errors) when the target is still ambiguous.
+
+/** Compact pt-BR view of upcoming appointments for tool results. */
+function describeUpcoming(list: UpcomingAppointment[]) {
+  return list.map((a) => ({
+    data: a.date, hora: a.time, servico: a.serviceName,
+    ...(a.professionalName ? { profissional: a.professionalName } : {}),
+  }))
+}
+
+/** Filter upcoming appointments by exact date (YYYY-MM-DD) and/or fuzzy service name. */
+function filterUpcoming(list: UpcomingAppointment[], date?: unknown, service?: unknown): UpcomingAppointment[] {
+  let out = list
+  const d = typeof date === 'string' ? date.trim() : ''
+  if (d) out = out.filter((a) => a.date === d)
+  const s = typeof service === 'string' ? service.trim().toLowerCase() : ''
+  if (s) out = out.filter((a) => a.serviceName.toLowerCase().includes(s) || s.includes(a.serviceName.toLowerCase()))
+  return out
+}
 
 /** Logging wrapper: EVERY tool call is logged (tenant, tool, input, outcome). */
 async function executeTool(name: string, input: any, ctx: ExecCtx): Promise<any> {
@@ -462,6 +512,8 @@ async function runTool(name: string, input: any, ctx: ExecCtx): Promise<any> {
         if (res.reason === 'dia_fechado') return { error: 'dia_fechado', dias_atendimento: res.openDays, detalhe: `O estabelecimento NÃO atende nesse dia da semana — o agendamento NÃO foi feito. Dias de atendimento: ${res.openDays.join(', ')}. Informe ao cliente e ofereça um desses dias.` }
         if (res.reason === 'sem_horario_config') return { error: 'sem_horario_config', detalhe: 'Agenda não configurada para essa data — o agendamento NÃO foi feito; diga que a equipe vai confirmar.' }
         if (res.reason === 'dia_bloqueado') return { error: 'dia_bloqueado', detalhe: 'Essa data está bloqueada (folga) — o agendamento NÃO foi feito; informe que essa data não está disponível e ofereça outra data.' }
+        if (res.reason === 'horario_no_passado') return { error: 'horario_no_passado', detalhe: `A data/hora pedida (${input.date} ${input.time}) JÁ PASSOU — o agendamento NÃO foi feito. Diga com naturalidade que esse horário já passou e ofereça o próximo horário disponível (confira o CALENDÁRIO do prompt e use check_availability numa data futura).` }
+        if (res.reason === 'fora_do_expediente') return { error: 'fora_do_expediente', detalhe: 'Esse horário fica FORA do horário de atendimento desse dia — o agendamento NÃO foi feito. Informe o horário de funcionamento e ofereça horários dentro do expediente (use check_availability).' }
         return { error: 'dados_invalidos' }
       }
       // Auto-send the calendar invite if we already have the customer's email.
@@ -480,14 +532,32 @@ async function runTool(name: string, input: any, ctx: ExecCtx): Promise<any> {
 
     if (name === 'cancel_appointment') {
       if (!customerId) return { error: 'sem_cliente' }
-      const res = await cancelUpcomingAppointment(tenantId, customerId)
-      return res.ok ? { ok: true, cancelado: res.when } : { error: 'sem_agendamento' }
+      const upcoming = await listUpcomingAppointments(tenantId, customerId)
+      if (upcoming.length === 0) return { error: 'sem_agendamento' }
+      const matches = filterUpcoming(upcoming, input.date, input.service)
+      if (matches.length === 0) {
+        return { error: 'agendamento_nao_encontrado', agendamentos: describeUpcoming(upcoming), detalhe: 'Nenhum agendamento futuro bate com essa data/serviço — NADA foi cancelado. Mostre a lista ao cliente e confirme QUAL ele quer cancelar antes de chamar de novo.' }
+      }
+      if (matches.length > 1) {
+        return { error: 'multiplos_agendamentos', agendamentos: describeUpcoming(matches), detalhe: 'O cliente tem mais de um agendamento futuro — NADA foi cancelado. Pergunte QUAL ele quer cancelar e chame de novo informando date/service. NUNCA cancele sem confirmar qual é.' }
+      }
+      const alvo = matches[0]
+      await cancelAppointmentById(tenantId, alvo.id)
+      return { ok: true, cancelado: { quando: alvo.when, servico: alvo.serviceName, ...(alvo.professionalName ? { profissional: alvo.professionalName } : {}) } }
     }
 
     if (name === 'reschedule_appointment') {
       if (!customerId) return { error: 'sem_cliente' }
-      const current = await getUpcomingAppointment(tenantId, customerId)
-      if (!current) return { error: 'sem_agendamento', detalhe: 'O cliente não tem agendamento futuro para remarcar. Ofereça agendar um novo.' }
+      const upcoming = await listUpcomingAppointments(tenantId, customerId)
+      if (upcoming.length === 0) return { error: 'sem_agendamento', detalhe: 'O cliente não tem agendamento futuro para remarcar. Ofereça agendar um novo.' }
+      const matches = filterUpcoming(upcoming, input.current_date, input.current_service)
+      if (matches.length === 0) {
+        return { error: 'agendamento_nao_encontrado', agendamentos: describeUpcoming(upcoming), detalhe: 'Nenhum agendamento futuro bate com current_date/current_service — NADA foi remarcado. Mostre a lista ao cliente e confirme QUAL ele quer remarcar.' }
+      }
+      if (matches.length > 1) {
+        return { error: 'multiplos_agendamentos', agendamentos: describeUpcoming(matches), detalhe: 'O cliente tem mais de um agendamento futuro — NADA foi remarcado. Pergunte QUAL ele quer remarcar e chame de novo informando current_date/current_service. NUNCA remarque sem confirmar qual é.' }
+      }
+      const current = matches[0]
 
       // Keep the current service/professional unless the client asked to change them.
       let serviceId = current.serviceId
@@ -513,6 +583,8 @@ async function runTool(name: string, input: any, ctx: ExecCtx): Promise<any> {
         if (res.reason === 'dia_fechado') return { error: 'dia_fechado', dias_atendimento: res.openDays, detalhe: `Não atende nesse dia — a remarcação NÃO foi feita; o agendamento atual continua. Dias: ${res.openDays.join(', ')}.` }
         if (res.reason === 'sem_horario_config') return { error: 'sem_horario_config', detalhe: 'Agenda não configurada nessa data — a remarcação NÃO foi feita; o agendamento atual continua.' }
         if (res.reason === 'dia_bloqueado') return { error: 'dia_bloqueado', detalhe: 'Data bloqueada (folga) — a remarcação NÃO foi feita; o agendamento atual continua. Ofereça outra data.' }
+        if (res.reason === 'horario_no_passado') return { error: 'horario_no_passado', detalhe: `A nova data/hora (${input.date} ${input.time}) JÁ PASSOU — a remarcação NÃO foi feita; o agendamento atual continua. Diga que esse horário já passou e ofereça um horário futuro (use check_availability).` }
+        if (res.reason === 'fora_do_expediente') return { error: 'fora_do_expediente', detalhe: 'O novo horário fica FORA do expediente desse dia — a remarcação NÃO foi feita; o agendamento atual continua. Informe o horário de funcionamento e ofereça horários dentro do expediente (use check_availability).' }
         return { error: 'dados_invalidos', detalhe: 'Não foi possível remarcar — o agendamento atual continua.' }
       }
       // New slot secured — cancel the old appointment and send the new invite.
@@ -558,11 +630,12 @@ export async function runBot(params: {
     console.warn(`[bot] AVISO tenant=${tenantId} conversa=${conversationId}: customerId AUSENTE — save_customer_info/book_appointment/cancel_appointment vão falhar`)
   }
 
-  const [context, live, history, profile] = await Promise.all([
+  const [context, live, history, profile, upcoming] = await Promise.all([
     getTenantContext(tenantId),
     getLiveBusinessContext(tenantId),
     getConversationHistory(conversationId),
     customerId ? getCustomerProfile(tenantId, customerId) : Promise.resolve({ history: [], interest: {} }),
+    customerId ? listUpcomingAppointments(tenantId, customerId) : Promise.resolve([] as UpcomingAppointment[]),
   ])
   if (!context) throw new Error('Tenant config not found')
 
@@ -582,19 +655,25 @@ export async function runBot(params: {
     const spend = await monthlySpend(tenantId)
     if (spend >= cap * 1.5) {
       console.warn(`[bot] HARD-STOP tenant=${tenantId} plano=${context.plan}: gasto mensal US$ ${spend.toFixed(4)} >= 1.5x o cap (US$ ${cap}) — modelo NÃO será chamado`)
+      // Alerta persistido para o Root Admin/tenant diagnosticar (bot_errors).
       await logBotError(
         tenantId, 'cost_cap_hard_stop',
         `plano=${context.plan} gasto_mensal_usd=${spend.toFixed(4)} cap_usd=${cap} (>= 1.5x) — modelo não foi chamado`,
         conversationId
       )
-      return { text: 'Estou com muitas conversas agora 😊 Já te respondo em instantes — se for urgente, me chama de novo daqui a pouco.' }
+      // Aviso honesto (sem promessa de tempo) enviado UMA única vez por conversa —
+      // nas mensagens seguintes o bot fica em silêncio (o dispatcher não envia
+      // texto vazio) em vez de repetir uma promessa falsa em loop.
+      const noticeSet = await redis.set(`bot:capnotice:${conversationId}`, '1', 'EX', 60 * 60 * 24, 'NX')
+      if (noticeSet === null) return { text: '' }
+      return { text: 'No momento não estou conseguindo responder por aqui 😔 Sua mensagem ficou registrada e alguém da nossa equipe vai te atender assim que possível.' }
     }
     if (spend >= cap) model = 'claude-haiku-4-5'
   }
   // Keep the bot fast/cheap: no extended thinking (haiku has none; disable it on others).
   const thinkingOff = !model.startsWith('claude-haiku')
 
-  const { stable, volatile } = buildSystemPrompt(context, live, profile, customerName, customerLastName ?? '', customerPhone, history.length > 0, botCfg)
+  const { stable, volatile } = buildSystemPrompt(context, live, profile, upcoming, customerName, customerLastName ?? '', customerPhone, history.length > 0, botCfg)
   // Prompt caching: the stable per-tenant prefix is cached; the volatile block is not.
   const system: any = [
     { type: 'text', text: stable, cache_control: { type: 'ephemeral' } },

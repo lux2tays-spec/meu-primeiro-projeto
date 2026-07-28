@@ -2,7 +2,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useRouter, usePathname } from 'next/navigation'
 import Link from 'next/link'
-import { getToken, clearToken, tenantApi, authApi } from '@/lib/api'
+import { getToken, clearToken, tenantApi, authApi, PLAN_LIMIT_EVENT } from '@/lib/api'
 import { isTenantToken, getTokenPayload } from '@/lib/auth'
 import { useQuery } from '@tanstack/react-query'
 import BrandLogo from '@/components/BrandLogo'
@@ -10,20 +10,22 @@ import { useBranding } from '@/components/BrandingProvider'
 import {
   LayoutDashboard, CalendarDays, Users, Wallet, MessageCircle, Bot, Tag,
   UserCog, Clock, CreditCard, Package, Share2, LifeBuoy, LogOut, Trash2,
-  Menu, Lock, AlarmClock, Coins, UserCircle, type LucideIcon,
+  Menu, Lock, AlarmClock, Coins, UserCircle, CalendarCheck, type LucideIcon,
 } from 'lucide-react'
 
-const NAV: { href: string; icon: LucideIcon; label: string }[] = [
+// managerOnly: SAL-11 — papéis "staff" não veem entradas de gestão financeira.
+const NAV: { href: string; icon: LucideIcon; label: string; managerOnly?: boolean }[] = [
   { href: '/dashboard',             icon: LayoutDashboard, label: 'Dashboard' },
   { href: '/calendar',              icon: CalendarDays,    label: 'Agenda' },
   { href: '/customers',             icon: Users,           label: 'Clientes' },
-  { href: '/financeiro',            icon: Wallet,          label: 'Financeiro' },
+  { href: '/financeiro',            icon: Wallet,          label: 'Financeiro', managerOnly: true },
   { href: '/comissoes',             icon: Coins,           label: 'Comissões' },
   { href: '/settings/whatsapp',     icon: MessageCircle,   label: 'WhatsApp' },
   { href: '/settings/agent',        icon: Bot,             label: 'Agente IA' },
   { href: '/settings/services',     icon: Tag,             label: 'Serviços' },
   { href: '/settings/staff',        icon: UserCog,         label: 'Equipe' },
   { href: '/settings/hours',        icon: Clock,           label: 'Horários' },
+  { href: '/settings/google-calendar', icon: CalendarCheck, label: 'Google Agenda' },
   { href: '/settings/payments',     icon: CreditCard,      label: 'Pagamentos' },
   { href: '/settings/subscription', icon: Package,         label: 'Assinatura' },
   { href: '/settings/affiliate',    icon: Share2,          label: 'Afiliados' },
@@ -38,6 +40,17 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   const [ready, setReady] = useState(false)
   const [sidebarOpen, setSidebarOpen] = useState(false)
 
+  // PAY-2: diálogo "limite do plano" — mostrado quando qualquer chamada retorna
+  // 402, sem redirecionar (o usuário não perde o que estava preenchendo).
+  const [planLimitMsg, setPlanLimitMsg] = useState<string | null>(null)
+  useEffect(() => {
+    function onPlanLimit(e: Event) {
+      setPlanLimitMsg((e as CustomEvent<string>).detail || 'Você atingiu o limite do seu plano.')
+    }
+    window.addEventListener(PLAN_LIMIT_EVENT, onPlanLimit)
+    return () => window.removeEventListener(PLAN_LIMIT_EVENT, onPlanLimit)
+  }, [])
+
   useEffect(() => {
     const token = getToken()
     if (!isTenantToken(token)) {
@@ -51,16 +64,18 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   const { data: me } = useQuery({ queryKey: ['auth-me'], queryFn: authApi.me, enabled: ready })
 
   // First-login onboarding: send the user to the wizard until it is completed or skipped.
-  const { data: onboarding } = useQuery({ queryKey: ['onboarding'], queryFn: tenantApi.onboarding, enabled: ready })
+  // AUTH-13: apenas o dono (owner) cai no wizard — admin/staff nunca são redirecionados.
+  const isOwner = ready && getTokenPayload(getToken())?.role === 'owner'
+  const { data: onboarding } = useQuery({ queryKey: ['onboarding'], queryFn: tenantApi.onboarding, enabled: isOwner })
   const onboardingRedirected = useRef(false)
   useEffect(() => {
-    if (!ready || !onboarding || onboardingRedirected.current) return
+    if (!ready || !isOwner || !onboarding || onboardingRedirected.current) return
     if (pathname?.startsWith('/onboarding')) return // safety: layout doesn't wrap it, but never loop
     if (!onboarding.completed && sessionStorage.getItem('onboarding_skipped') !== '1') {
       onboardingRedirected.current = true
       router.replace('/onboarding')
     }
-  }, [ready, onboarding, pathname, router])
+  }, [ready, isOwner, onboarding, pathname, router])
 
   function logout() {
     clearToken()
@@ -88,6 +103,8 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
 
   const payload = getTokenPayload(getToken())
   const canEditBusiness = ['owner', 'admin', 'root'].includes(payload?.role)
+  const isManager = canEditBusiness
+  const navItems = NAV.filter((item) => !item.managerOnly || isManager)
 
   return (
     <div className="flex h-screen overflow-hidden bg-gray-50">
@@ -161,7 +178,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
 
         {/* Nav */}
         <nav className="flex-1 p-4 space-y-1 overflow-y-auto">
-          {NAV.map((item) => {
+          {navItems.map((item) => {
             const active = pathname === item.href || (item.href !== '/dashboard' && pathname.startsWith(item.href))
             const Icon = item.icon
             return (
@@ -222,6 +239,36 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
           {children}
         </main>
       </div>
+
+      {/* PAY-2: diálogo de limite do plano (sem redirect cego) */}
+      {planLimitMsg && (
+        <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4" onClick={() => setPlanLimitMsg(null)}>
+          <div className="bg-white rounded-2xl w-full max-w-sm shadow-xl p-6 space-y-4" onClick={(e) => e.stopPropagation()}>
+            <div className="w-12 h-12 rounded-full bg-yellow-100 flex items-center justify-center">
+              <Lock size={22} strokeWidth={2} className="text-yellow-600" />
+            </div>
+            <div>
+              <h2 className="text-lg font-bold text-gray-900">Você atingiu o limite do plano</h2>
+              <p className="text-sm text-gray-500 mt-1">{planLimitMsg}</p>
+            </div>
+            <div className="flex gap-2">
+              <button
+                onClick={() => setPlanLimitMsg(null)}
+                className="flex-1 h-11 border border-gray-200 text-gray-600 text-sm font-semibold rounded-xl hover:bg-gray-50 transition-colors"
+              >
+                Agora não
+              </button>
+              <Link
+                href="/settings/subscription"
+                onClick={() => setPlanLimitMsg(null)}
+                className="flex-1 h-11 bg-primary hover:bg-primary-dark text-white text-sm font-semibold rounded-xl transition-colors flex items-center justify-center"
+              >
+                Ver planos
+              </Link>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

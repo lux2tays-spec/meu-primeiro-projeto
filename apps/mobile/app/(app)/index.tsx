@@ -1,4 +1,4 @@
-import { View, Text, StyleSheet, ScrollView, RefreshControl, TouchableOpacity } from 'react-native'
+import { View, Text, StyleSheet, ScrollView, RefreshControl, TouchableOpacity, ActivityIndicator } from 'react-native'
 import { useQuery } from '@tanstack/react-query'
 import { router } from 'expo-router'
 import { SafeAreaView } from 'react-native-safe-area-context'
@@ -9,10 +9,25 @@ import { Badge } from '@/components/ui/Badge'
 import { tenantApi, appointmentsApi } from '@/lib/api'
 import { colors, font, spacing } from '@/lib/theme'
 
-const _now = new Date()
-const today = `${_now.getFullYear()}-${String(_now.getMonth() + 1).padStart(2, '0')}-${String(_now.getDate()).padStart(2, '0')}`
+/** YYYY-MM-DD local (não UTC). */
+function toDateStr(d: Date) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
+/** Saudação conforme a hora do dia. */
+function greetingByHour(hour: number) {
+  if (hour >= 5 && hour < 12) return 'Bom dia'
+  if (hour >= 12 && hour < 18) return 'Boa tarde'
+  return 'Boa noite'
+}
 
 export default function DashboardScreen() {
+  // Calculado a cada render (não no load do módulo) — assim a data não
+  // "congela" quando o app fica aberto e o dia vira.
+  const now = new Date()
+  const today = toDateStr(now)
+  const greeting = greetingByHour(now.getHours())
+
   const { data: tenant } = useQuery({ queryKey: ['tenant'], queryFn: tenantApi.me })
   const { data: onboarding } = useQuery({ queryKey: ['onboarding'], queryFn: tenantApi.onboarding })
   const {
@@ -45,7 +60,7 @@ export default function DashboardScreen() {
         {/* Header */}
         <View style={styles.header}>
           <View>
-            <Text style={styles.greeting}>Bom dia! 👋</Text>
+            <Text style={styles.greeting}>{greeting}! 👋</Text>
             <Text style={styles.businessName}>{tenant?.name ?? '...'}</Text>
           </View>
           {tenant && (
@@ -121,7 +136,7 @@ export default function DashboardScreen() {
         {/* Today's appointments */}
         <Text style={styles.sectionTitle}>Próximos agendamentos</Text>
         {isLoading ? (
-          <Text style={styles.empty}>Carregando...</Text>
+          <ActivityIndicator color={colors.primary} style={{ paddingVertical: spacing.xl }} />
         ) : !appointments?.length ? (
           <Text style={styles.empty}>Nenhum agendamento para hoje</Text>
         ) : (
@@ -137,7 +152,13 @@ export default function DashboardScreen() {
         )}
       </ScrollView>
       {/* FAB */}
-      <TouchableOpacity style={styles.fab} onPress={() => router.push('/(app)/appointments/new')} activeOpacity={0.85}>
+      <TouchableOpacity
+        style={styles.fab}
+        onPress={() => router.push('/(app)/appointments/new')}
+        activeOpacity={0.85}
+        accessibilityRole="button"
+        accessibilityLabel="Novo agendamento"
+      >
         <Ionicons name="add" size={28} color="#fff" />
       </TouchableOpacity>
     </SafeAreaView>

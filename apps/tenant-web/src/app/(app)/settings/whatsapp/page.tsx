@@ -2,11 +2,12 @@
 import { useState, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import Image from 'next/image'
-import { whatsappApi } from '@/lib/api'
+import { whatsappApi, friendlyMessage } from '@/lib/api'
 
 export default function WhatsAppPage() {
   const qc = useQueryClient()
   const [connecting, setConnecting] = useState(false)
+  const [actionError, setActionError] = useState('')
 
   const { data: status, refetch: refetchStatus } = useQuery({
     queryKey: ['whatsapp-status'],
@@ -23,16 +24,23 @@ export default function WhatsAppPage() {
 
   const connectMutation = useMutation({
     mutationFn: whatsappApi.connect,
-    onSuccess: () => { setConnecting(true); refetchStatus() },
+    onSuccess: () => { setConnecting(true); setActionError(''); refetchStatus() },
+    // PAY-3: falha ao conectar mostra mensagem amigável (nunca erro técnico).
+    onError: (e: any) =>
+      setActionError(friendlyMessage(e, 'Não foi possível iniciar a conexão do WhatsApp. Tente novamente em instantes.')),
   })
 
   const disconnectMutation = useMutation({
     mutationFn: whatsappApi.disconnect,
     onSuccess: () => {
       setConnecting(false)
+      setActionError('')
       qc.invalidateQueries({ queryKey: ['whatsapp-status'] })
       refetchStatus()
     },
+    // PAY-3: falha ao desconectar mostra mensagem amigável.
+    onError: (e: any) =>
+      setActionError(friendlyMessage(e, 'Não foi possível desconectar o WhatsApp. Tente novamente em instantes.')),
   })
 
   useEffect(() => {
@@ -110,6 +118,9 @@ export default function WhatsAppPage() {
       )}
 
       {/* Actions */}
+      {actionError && (
+        <div className="bg-red-50 border border-red-200 rounded-xl px-4 py-3 text-red-600 text-sm">{actionError}</div>
+      )}
       <div>
         {!isConnected && (
           <button

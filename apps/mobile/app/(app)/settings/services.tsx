@@ -7,6 +7,7 @@ import { Card } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
 import { tenantApi } from '@/lib/api'
+import { useAuthStore } from '@/lib/store'
 import { useToast } from '@/lib/toast'
 import { colors, font, spacing, radius } from '@/lib/theme'
 
@@ -26,13 +27,17 @@ type FormErrors = { name?: string; duration_minutes?: string; price?: string }
 export default function ServicesScreen() {
   const queryClient = useQueryClient()
   const toast = useToast()
+  // Colaborador (staff) apenas visualiza — não cria, edita nem exclui serviços.
+  const role = useAuthStore((s) => s.role)
+  const canManage = ['owner', 'admin', 'root'].includes(role ?? '')
 
   const [modalVisible, setModalVisible] = useState(false)
   const [editing, setEditing] = useState<any>(null)
   const [form, setForm] = useState(emptyForm)
   const [errors, setErrors] = useState<FormErrors>({})
 
-  const { data: services = [] } = useQuery({ queryKey: ['services'], queryFn: tenantApi.services })
+  // Tela de gestão: inclui também os serviços desativados para permitir reativar.
+  const { data: services = [] } = useQuery({ queryKey: ['services', 'all'], queryFn: () => tenantApi.services(true) })
   const { data: professionals = [] } = useQuery({ queryKey: ['professionals'], queryFn: tenantApi.professionals })
 
   const createMutation = useMutation({
@@ -62,6 +67,18 @@ export default function ServicesScreen() {
       toast.show('Serviço excluído.', 'success')
     },
     onError: (err: any) => toast.show(err.message, 'error'),
+  })
+
+  // CFG-16: ativa/desativa sem excluir — serviço inativo some do bot e da
+  // agenda, mas continua aqui para poder ser religado.
+  const toggleActiveMutation = useMutation({
+    mutationFn: ({ id, active }: { id: string; active: boolean }) =>
+      tenantApi.updateService(id, { active }),
+    onSuccess: (_data, { active }) => {
+      queryClient.invalidateQueries({ queryKey: ['services'] })
+      toast.show(active ? 'Serviço ativado!' : 'Serviço desativado. Ele não será mais oferecido pelo bot.', active ? 'success' : 'info')
+    },
+    onError: (err: any) => toast.show(err.message ?? 'Não foi possível alterar o serviço.', 'error'),
   })
 
   function openCreate() {
@@ -205,15 +222,24 @@ export default function ServicesScreen() {
         contentContainerStyle={s.list}
         ItemSeparatorComponent={() => <View style={{ height: spacing.sm }} />}
         ListHeaderComponent={
-          <Button label="+ Adicionar serviço" onPress={openCreate} style={s.addBtn} />
+          canManage
+            ? <Button label="+ Adicionar serviço" onPress={openCreate} style={s.addBtn} />
+            : null
         }
         ListEmptyComponent={
           <Text style={s.empty}>Nenhum serviço cadastrado</Text>
         }
         renderItem={({ item }) => (
-          <Card style={s.serviceCard}>
+          <Card style={[s.serviceCard, item.active === false && s.serviceCardInactive]}>
             <View style={{ flex: 1 }}>
-              <Text style={s.serviceName}>{item.name}</Text>
+              <View style={s.serviceNameRow}>
+                <Text style={[s.serviceName, item.active === false && s.serviceNameInactive]}>{item.name}</Text>
+                {item.active === false && (
+                  <View style={s.inactiveBadge}>
+                    <Text style={s.inactiveBadgeText}>Inativo</Text>
+                  </View>
+                )}
+              </View>
               {item.description ? <Text style={s.serviceDesc}>{item.description}</Text> : null}
               <View style={s.serviceMeta}>
                 <Ionicons name="time-outline" size={13} color={colors.textSecondary} />
@@ -241,14 +267,39 @@ export default function ServicesScreen() {
                 </View>
               )}
             </View>
-            <View style={s.cardActions}>
-              <TouchableOpacity onPress={() => openEdit(item)} style={s.iconBtn}>
-                <Ionicons name="create-outline" size={20} color={colors.primary} />
-              </TouchableOpacity>
-              <TouchableOpacity onPress={() => confirmDelete(item)} style={s.iconBtn}>
-                <Ionicons name="trash-outline" size={20} color={colors.danger} />
-              </TouchableOpacity>
-            </View>
+            {canManage && (
+              <View style={s.cardActions}>
+                <Switch
+                  value={item.active !== false}
+                  onValueChange={(v) => toggleActiveMutation.mutate({ id: item.id, active: v })}
+                  disabled={toggleActiveMutation.isPending}
+                  trackColor={{ true: colors.primary, false: colors.border }}
+                  thumbColor="#fff"
+                  style={s.activeSwitch}
+                  accessibilityLabel={
+                    item.active === false
+                      ? `Ativar serviço ${item.name}`
+                      : `Desativar serviço ${item.name}`
+                  }
+                />
+                <TouchableOpacity
+                  onPress={() => openEdit(item)}
+                  style={s.iconBtn}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Editar serviço ${item.name}`}
+                >
+                  <Ionicons name="create-outline" size={20} color={colors.primary} />
+                </TouchableOpacity>
+                <TouchableOpacity
+                  onPress={() => confirmDelete(item)}
+                  style={s.iconBtn}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Excluir serviço ${item.name}`}
+                >
+                  <Ionicons name="trash-outline" size={20} color={colors.danger} />
+                </TouchableOpacity>
+              </View>
+            )}
           </Card>
         )}
       />
@@ -418,7 +469,16 @@ const s = StyleSheet.create({
   list: { padding: spacing.lg },
   addBtn: { marginBottom: spacing.md },
   serviceCard: { flexDirection: 'row', alignItems: 'flex-start', gap: spacing.sm },
+  serviceCardInactive: { opacity: 0.75, backgroundColor: colors.surfaceAlt },
+  serviceNameRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, flexWrap: 'wrap' },
   serviceName: { fontSize: font.md, fontWeight: '600', color: colors.text },
+  serviceNameInactive: { color: colors.textSecondary },
+  inactiveBadge: {
+    backgroundColor: colors.border, borderRadius: radius.full,
+    paddingHorizontal: 8, paddingVertical: 2,
+  },
+  inactiveBadgeText: { fontSize: 11, fontWeight: '700', color: colors.textSecondary },
+  activeSwitch: { transform: [{ scaleX: 0.85 }, { scaleY: 0.85 }], alignSelf: 'center' },
   serviceDesc: { fontSize: font.sm, color: colors.textSecondary, marginTop: 2 },
   serviceMeta: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: spacing.xs },
   serviceMetaText: { fontSize: font.sm, color: colors.textSecondary },

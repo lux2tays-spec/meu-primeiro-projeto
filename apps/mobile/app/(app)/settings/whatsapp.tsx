@@ -1,13 +1,14 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { View, Text, StyleSheet, Image, ActivityIndicator } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
+import { router } from 'expo-router'
 import { Ionicons } from '@expo/vector-icons'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
 import { Badge } from '@/components/ui/Badge'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
-import { whatsappApi } from '@/lib/api'
+import { whatsappApi, isPlanLimitError } from '@/lib/api'
 import { useToast } from '@/lib/toast'
 import { colors, font, spacing, radius } from '@/lib/theme'
 
@@ -16,6 +17,15 @@ export default function WhatsAppScreen() {
   const toast = useToast()
   const [isConnecting, setIsConnecting] = useState(false)
   const [confirmDisconnect, setConfirmDisconnect] = useState(false)
+
+  // CTA padrão quando o backend recusa por limite/assinatura do plano.
+  function showPlanLimitToast() {
+    toast.show(
+      'Recurso indisponível no seu plano atual ou assinatura inativa. Faça upgrade para conectar o WhatsApp.',
+      'warning',
+      { label: 'Ver planos', onPress: () => router.push('/(app)/settings/subscription') }
+    )
+  }
 
   const { data: status, refetch: refetchStatus } = useQuery({
     queryKey: ['whatsapp-status'],
@@ -36,7 +46,10 @@ export default function WhatsAppScreen() {
       setIsConnecting(true)
       refetchStatus()
     },
-    onError: (err: any) => toast.show(err.message ?? 'Não foi possível iniciar a conexão.', 'error'),
+    onError: (err: any) => {
+      if (isPlanLimitError(err)) showPlanLimitToast()
+      else toast.show(err.message ?? 'Não foi possível iniciar a conexão.', 'error')
+    },
   })
 
   const disconnectMutation = useMutation({
@@ -50,9 +63,18 @@ export default function WhatsAppScreen() {
     onError: (err: any) => toast.show(err.message ?? 'Não foi possível desconectar.', 'error'),
   })
 
+  // Guarda o último status conhecido para detectar a TRANSIÇÃO real para
+  // "connected" — sem isso o toast disparava toda vez que a tela abria já
+  // conectada (1ª resolução da query).
+  const prevStatusRef = useRef<string | null>(null)
   useEffect(() => {
-    if (status?.status === 'connected') {
-      setIsConnecting(false)
+    const current = status?.status
+    if (!current) return
+    const prev = prevStatusRef.current
+    prevStatusRef.current = current
+    if (current !== 'connected') return
+    setIsConnecting(false)
+    if (prev !== null && prev !== 'connected') {
       queryClient.invalidateQueries({ queryKey: ['whatsapp-status'] })
       toast.show('WhatsApp conectado com sucesso!', 'success')
     }

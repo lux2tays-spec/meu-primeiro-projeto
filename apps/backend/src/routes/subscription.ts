@@ -7,6 +7,45 @@ import { applyPreapproval } from '../lib/subscriptionState'
 // Tenant-facing subscription endpoints. Only `authenticate` (NOT planGuard) —
 // an expired-trial tenant must be able to reach checkout to reactivate.
 
+// PAY-1: mapeia os códigos de recusa do Mercado Pago (status_detail / mensagens
+// de erro que chegam em result.reason) para orientações específicas em pt-BR.
+// A ordem importa: padrões mais específicos primeiro. O texto cru do MP nunca
+// vai na resposta HTTP — só nos logs.
+const MP_DECLINE_MESSAGES: Array<{ pattern: RegExp; message: string }> = [
+  { pattern: /insufficient_amount/i,
+    message: 'Cartão sem limite disponível para esta compra. Libere limite com seu banco ou use outro cartão.' },
+  { pattern: /bad_filled_security_code|security_code/i,
+    message: 'Código de segurança (CVV) incorreto. Confira o código no verso do cartão e tente novamente.' },
+  { pattern: /bad_filled_date/i,
+    message: 'Data de validade incorreta. Confira o mês e o ano de vencimento do cartão.' },
+  { pattern: /bad_filled_card_number/i,
+    message: 'Número do cartão inválido. Confira os dígitos digitados e tente novamente.' },
+  { pattern: /bad_filled_other/i,
+    message: 'Alguns dados do cartão parecem incorretos. Revise as informações e tente novamente.' },
+  { pattern: /call_for_authorize/i,
+    message: 'Seu banco precisa autorizar este pagamento. Ligue para o banco, autorize a compra e tente novamente.' },
+  { pattern: /high_risk|blacklist/i,
+    message: 'O pagamento não foi autorizado por segurança pelo banco emissor. Tente outro cartão ou fale com seu banco.' },
+  { pattern: /card_disabled/i,
+    message: 'Este cartão está bloqueado ou desativado. Fale com seu banco para ativá-lo ou use outro cartão.' },
+  { pattern: /expired_card|card_expired/i,
+    message: 'Este cartão está vencido. Use outro cartão para continuar.' },
+  { pattern: /duplicated_payment/i,
+    message: 'Identificamos um pagamento repetido com este cartão. Aguarde alguns minutos antes de tentar novamente.' },
+  { pattern: /max_attempts/i,
+    message: 'Limite de tentativas atingido para este cartão. Aguarde alguns minutos ou use outro cartão.' },
+  { pattern: /cc_rejected/i, // catch-all para qualquer outro cc_rejected_*
+    message: 'O cartão foi recusado pelo banco emissor. Tente outro cartão ou fale com seu banco para entender o motivo.' },
+]
+
+function mapCardDecline(reason: string | undefined | null): string | null {
+  if (!reason) return null
+  for (const { pattern, message } of MP_DECLINE_MESSAGES) {
+    if (pattern.test(reason)) return message
+  }
+  return null
+}
+
 export const subscriptionRoutes: FastifyPluginAsync = async (app) => {
   app.addHook('preHandler', (app as any).authenticate)
 
@@ -82,14 +121,16 @@ export const subscriptionRoutes: FastifyPluginAsync = async (app) => {
 
     if (!result.ok) {
       request.log.error({ tenant_id, plan: planRow.slug, reason: result.reason }, 'Mercado Pago checkout failed')
-      // Card-specific rejections (declined, invalid data) should nudge the user
-      // to try another card; generic failures get the neutral message.
-      const cardIssue = /card|tarjeta|cartão|payment|token|cvv|security|amount|invalid/i.test(result.reason)
+      // PAY-1: known decline codes get a specific, actionable pt-BR message.
+      // Other card-ish rejections nudge the user to try another card; generic
+      // failures get the neutral message.
+      const specific = mapCardDecline(result.reason)
+      const cardIssue = specific !== null || /card|tarjeta|cartão|payment|token|cvv|security|amount|invalid/i.test(result.reason)
       // The raw MP reason goes only to logs (above) — never in the HTTP response.
       return reply.status(cardIssue ? 402 : 502).send({
-        error: cardIssue
+        error: specific ?? (cardIssue
           ? 'Não conseguimos aprovar este cartão. Verifique os dados ou tente outro cartão.'
-          : 'Não foi possível iniciar o pagamento. Tente novamente.',
+          : 'Não foi possível iniciar o pagamento. Tente novamente.'),
       })
     }
 
@@ -98,8 +139,10 @@ export const subscriptionRoutes: FastifyPluginAsync = async (app) => {
     if (card_token_id) {
       if (result.status !== 'authorized') {
         request.log.error({ tenant_id, plan: planRow.slug, status: result.status }, 'transparent checkout not authorized')
+        // PAY-1: o status do MP pode carregar o motivo da recusa (cc_rejected_*)
         return reply.status(402).send({
-          error: 'Não conseguimos aprovar este cartão. Verifique os dados ou tente outro cartão.',
+          error: mapCardDecline(result.status)
+            ?? 'Não conseguimos aprovar este cartão. Verifique os dados ou tente outro cartão.',
         })
       }
       await applyPreapproval({

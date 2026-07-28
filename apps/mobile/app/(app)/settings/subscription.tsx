@@ -14,14 +14,15 @@ import { tenantApi, subscriptionApi, createCardToken } from '@/lib/api'
 import { useToast } from '@/lib/toast'
 import { colors, font, spacing, radius } from '@/lib/theme'
 
-// Fallback while /subscription/plans loads (or if it's unavailable)
-const FALLBACK_PLANS = [
-  { id: 'basico',       label: 'Básico',       price: 'R$ 89/mês',  agendas: 1,  users: 1 },
-  { id: 'premium',      label: 'Premium',      price: 'R$ 169/mês', agendas: 3,  users: 3 },
-  { id: 'profissional', label: 'Profissional', price: 'R$ 299/mês', agendas: 10, users: 10 },
+// PAY-7: os planos vêm SEMPRE do backend (/subscription/plans). Este fallback
+// só é usado se a query falhar (offline etc.), para a tela não ficar vazia.
+const FALLBACK_PLANS: PlanItem[] = [
+  { id: 'basico',       label: 'Básico',       price: 'R$ 89,00/mês',  priceCents: 8900,  agendas: 1,  users: 1 },
+  { id: 'premium',      label: 'Premium',      price: 'R$ 169,00/mês', priceCents: 16900, agendas: 3,  users: 3 },
+  { id: 'profissional', label: 'Profissional', price: 'R$ 299,00/mês', priceCents: 29900, agendas: 10, users: 10 },
 ]
 
-type PlanItem = { id: string; label: string; price: string; agendas: number; users: number }
+type PlanItem = { id: string; label: string; price: string; priceCents: number; agendas: number; users: number }
 
 // ---------- input masks / helpers (client-side only, nothing is logged) ----------
 
@@ -57,7 +58,11 @@ export default function SubscriptionScreen() {
   const toast = useToast()
 
   const { data: tenant } = useQuery({ queryKey: ['tenant'], queryFn: tenantApi.me })
-  const { data: apiPlans } = useQuery({ queryKey: ['subscription-plans'], queryFn: subscriptionApi.plans })
+  const {
+    data: apiPlans,
+    isLoading: plansLoading,
+    isError: plansError,
+  } = useQuery({ queryKey: ['subscription-plans'], queryFn: subscriptionApi.plans })
 
   const [modalVisible, setModalVisible] = useState(false)
   const [selectedPlan, setSelectedPlan] = useState<PlanItem | null>(null)
@@ -74,6 +79,8 @@ export default function SubscriptionScreen() {
     enabled: modalVisible,
   })
 
+  // PAY-7: usa os planos do backend; o hardcode só entra se a query FALHOU
+  // (ou voltou vazia). Enquanto carrega, mostra um loading em vez do fallback.
   const plans: PlanItem[] = apiPlans && apiPlans.length > 0
     ? apiPlans
         .filter((p) => p.price_cents > 0)
@@ -81,12 +88,28 @@ export default function SubscriptionScreen() {
           id: p.slug,
           label: p.name,
           price: formatPrice(p.price_cents),
+          priceCents: p.price_cents,
           agendas: p.max_agendas,
           users: p.max_users,
         }))
-    : FALLBACK_PLANS
+    : plansLoading
+      ? []
+      : FALLBACK_PLANS
 
   const currentPlan = plans.find((p) => p.id === tenant?.plan)
+
+  // PAY-4: trial já expirado (data no passado) muda o aviso.
+  const trialEndsAt = tenant?.trial_ends_at ? new Date(tenant.trial_ends_at) : null
+  const isTrial = tenant?.status === 'trial'
+  const trialExpired = isTrial && !!trialEndsAt && trialEndsAt.getTime() < Date.now()
+
+  // PAY-6: rótulo do botão conforme a mudança de plano (upgrade x downgrade).
+  function planAction(plan: PlanItem): { label: string; icon: any } {
+    if (!currentPlan || tenant?.plan === 'free' || isTrial) return { label: 'Assinar', icon: 'card-outline' }
+    if (plan.priceCents > currentPlan.priceCents) return { label: 'Fazer upgrade', icon: 'arrow-up-circle-outline' }
+    if (plan.priceCents < currentPlan.priceCents) return { label: 'Fazer downgrade', icon: 'arrow-down-circle-outline' }
+    return { label: 'Assinar', icon: 'card-outline' }
+  }
 
   function openCheckout(plan: PlanItem) {
     setSelectedPlan(plan)
@@ -183,12 +206,13 @@ export default function SubscriptionScreen() {
   }
 
   function confirmCancelSubscription() {
+    // PAY-5: deixa claro que o cancelamento vale NA HORA (não no fim do ciclo).
     Alert.alert(
       'Cancelar assinatura',
-      'Sua assinatura será cancelada e sua conta voltará para o plano gratuito. Deseja continuar?',
+      'O cancelamento é imediato: sua conta volta para o plano gratuito agora e os recursos do plano pago deixam de funcionar na hora. Deseja continuar?',
       [
         { text: 'Voltar', style: 'cancel' },
-        { text: 'Cancelar assinatura', style: 'destructive', onPress: handleCancelSubscription },
+        { text: 'Cancelar agora', style: 'destructive', onPress: handleCancelSubscription },
       ]
     )
   }
@@ -202,17 +226,24 @@ export default function SubscriptionScreen() {
           <View style={styles.currentHeader}>
             <Text style={styles.currentLabel}>Plano atual</Text>
             <Badge
-              label={tenant?.status === 'trial' ? 'Trial' : 'Ativo'}
-              variant={tenant?.status === 'trial' ? 'warning' : 'success'}
+              label={isTrial ? (trialExpired ? 'Trial expirado' : 'Trial') : 'Ativo'}
+              variant={isTrial ? (trialExpired ? 'danger' : 'warning') : 'success'}
             />
           </View>
           <Text style={styles.planName}>{currentPlan?.label ?? (tenant?.plan === 'free' ? 'Gratuito (Trial)' : tenant?.plan)}</Text>
           {currentPlan && <Text style={styles.planPrice}>{currentPlan.price}</Text>}
-          {tenant?.status === 'trial' && (
+          {/* PAY-4: data no passado = trial EXPIRADO, não "expira em..." */}
+          {isTrial && (
             <View style={styles.trialInfo}>
-              <Ionicons name="time-outline" size={16} color={colors.warning} />
-              <Text style={styles.trialText}>
-                Trial expira em {tenant.trial_ends_at ? new Date(tenant.trial_ends_at).toLocaleDateString('pt-BR') : '—'}
+              <Ionicons
+                name={trialExpired ? 'alert-circle-outline' : 'time-outline'}
+                size={16}
+                color={trialExpired ? colors.danger : colors.warning}
+              />
+              <Text style={[styles.trialText, trialExpired && styles.trialTextExpired]}>
+                {trialExpired
+                  ? `Seu período de teste terminou em ${trialEndsAt!.toLocaleDateString('pt-BR')}. Assine um plano para continuar usando.`
+                  : `Trial expira em ${trialEndsAt ? trialEndsAt.toLocaleDateString('pt-BR') : '—'}`}
               </Text>
             </View>
           )}
@@ -220,8 +251,17 @@ export default function SubscriptionScreen() {
 
         {/* Plans comparison */}
         <Text style={styles.sectionTitle}>Escolha um plano</Text>
+        {plansLoading && plans.length === 0 && (
+          <ActivityIndicator color={colors.primary} style={{ paddingVertical: spacing.xl }} />
+        )}
+        {plansError && plans.length > 0 && (
+          <Text style={styles.plansOfflineHint}>
+            Não foi possível atualizar os planos agora — exibindo os valores de referência.
+          </Text>
+        )}
         {plans.map((plan) => {
           const isCurrent = plan.id === tenant?.plan
+          const action = planAction(plan)
           return (
             <TouchableOpacity
               key={plan.id}
@@ -247,10 +287,11 @@ export default function SubscriptionScreen() {
                     <Text style={[styles.featureText, isCurrent && styles.featureTextActive]}>{plan.users} usuário{plan.users > 1 ? 's' : ''}</Text>
                   </View>
                 </View>
+                {/* PAY-6: deixa claro se é upgrade ou downgrade */}
                 {!isCurrent && (
                   <View style={styles.subscribeRow}>
-                    <Ionicons name="card-outline" size={16} color={colors.primary} />
-                    <Text style={styles.subscribeText}>Assinar</Text>
+                    <Ionicons name={action.icon} size={16} color={colors.primary} />
+                    <Text style={styles.subscribeText}>{action.label}</Text>
                   </View>
                 )}
               </Card>
@@ -261,12 +302,18 @@ export default function SubscriptionScreen() {
         {/* Cancel — só aparece com assinatura paga ativa. Confirma, cancela no
             Mercado Pago via backend e a conta volta para o plano gratuito. */}
         {tenant?.status === 'active' && tenant?.plan !== 'free' && (
-          <Button
-            label="Cancelar assinatura"
-            variant="ghost"
-            loading={cancelling}
-            onPress={confirmCancelSubscription}
-          />
+          <View style={styles.cancelSection}>
+            <Button
+              label="Cancelar assinatura"
+              variant="ghost"
+              loading={cancelling}
+              onPress={confirmCancelSubscription}
+            />
+            {/* PAY-5: aviso explícito de que o cancelamento vale na hora */}
+            <Text style={styles.cancelHint}>
+              O cancelamento é imediato: sua conta volta ao plano gratuito na hora.
+            </Text>
+          </View>
         )}
       </ScrollView>
 
@@ -393,8 +440,12 @@ const styles = StyleSheet.create({
   currentLabel: { fontSize: font.sm, color: colors.textSecondary, fontWeight: '500' },
   planName: { fontSize: font.xxl, fontWeight: '800', color: colors.text },
   planPrice: { fontSize: font.lg, color: colors.primary, fontWeight: '600' },
-  trialInfo: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
-  trialText: { fontSize: font.sm, color: colors.warning, fontWeight: '500' },
+  trialInfo: { flexDirection: 'row', alignItems: 'flex-start', gap: spacing.xs },
+  trialText: { flex: 1, fontSize: font.sm, color: colors.warning, fontWeight: '500' },
+  trialTextExpired: { color: colors.danger, fontWeight: '600' },
+  plansOfflineHint: { fontSize: font.sm, color: colors.textSecondary, textAlign: 'center' },
+  cancelSection: { gap: spacing.xs },
+  cancelHint: { fontSize: font.sm, color: colors.textSecondary, textAlign: 'center' },
   sectionTitle: { fontSize: font.lg, fontWeight: '700', color: colors.text },
   planCard: { gap: spacing.sm },
   planCardActive: { borderWidth: 2, borderColor: colors.primary, backgroundColor: colors.primaryLight },

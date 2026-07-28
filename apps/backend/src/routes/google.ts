@@ -4,6 +4,7 @@ import { db } from '../lib/db'
 import { verifyGoogleIdToken, exchangeCodeForTokens } from '../services/google-calendar'
 import { hashPassword } from '../lib/password'
 import { encrypt } from '../lib/crypto'
+import { generateUniqueSlug, normalizeBrazilPhone, normalizeEmail } from './auth'
 import crypto from 'node:crypto'
 
 export const googleRoutes: FastifyPluginAsync = async (app) => {
@@ -20,11 +21,12 @@ export const googleRoutes: FastifyPluginAsync = async (app) => {
     }
 
     const googleUser = await verifyGoogleIdToken(id_token)
-    const { sub: googleSub, email, name } = googleUser
+    const { sub: googleSub, name } = googleUser
+    const email = normalizeEmail(googleUser.email)
 
     // Find existing user by google_sub or email
     const { rows: [existing] } = await db.query(
-      'SELECT id, token_version FROM users WHERE google_sub = $1 OR email = $2 LIMIT 1',
+      'SELECT id, token_version FROM users WHERE google_sub = $1 OR LOWER(email) = $2 LIMIT 1',
       [googleSub, email]
     )
 
@@ -55,12 +57,15 @@ export const googleRoutes: FastifyPluginAsync = async (app) => {
       return reply.status(422).send({ error: 'phone_required', message: 'Informe seu telefone (WhatsApp)' })
     }
 
-    const slug = business_name.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '')
+    const normalizedPhone = normalizeBrazilPhone(phone)
     const trialEndsAt = new Date(Date.now() + 5 * 24 * 60 * 60 * 1000).toISOString()
 
     const client = await db.connect()
     try {
       await client.query('BEGIN')
+
+      // AUTH-8: unique slug — collisions get a short suffix instead of a 500
+      const slug = await generateUniqueSlug(client, business_name)
 
       const { rows: [tenant] } = await client.query(
         `INSERT INTO tenants (name, slug, plan, status, trial_ends_at, max_agendas, max_users)
@@ -71,7 +76,7 @@ export const googleRoutes: FastifyPluginAsync = async (app) => {
       const { rows: [user] } = await client.query(
         `INSERT INTO users (name, email, phone, password_hash, google_sub, email_verified)
          VALUES ($1, $2, $3, $4, $5, TRUE) RETURNING id, token_version`,
-        [name, email, phone ?? null, hashPassword(crypto.randomBytes(16).toString('hex')), googleSub]
+        [name, email, normalizedPhone, hashPassword(crypto.randomBytes(16).toString('hex')), googleSub]
       )
 
       await client.query(
@@ -103,8 +108,12 @@ export const googleRoutes: FastifyPluginAsync = async (app) => {
       return reply.status(201).send({ token: jwtToken, is_new: true, tenant_id: tenant.id })
     } catch (err: any) {
       await client.query('ROLLBACK')
-      if (err.constraint === 'users_email_key') {
-        return reply.status(409).send({ error: 'Email already in use' })
+      if (err.constraint === 'users_email_key' || err.constraint === 'users_email_lower_key') {
+        return reply.status(409).send({ error: 'Este e-mail já está cadastrado' })
+      }
+      // Safety net: slug race between the uniqueness check and the INSERT
+      if (err.constraint === 'tenants_slug_key') {
+        return reply.status(409).send({ error: 'Não foi possível concluir o cadastro agora. Tente novamente.' })
       }
       throw err
     } finally {

@@ -77,7 +77,13 @@ export default function LoginScreen() {
       router.replace('/(app)')
     } catch (err: any) {
       const msg = err.message ?? ''
-      if (msg.toLowerCase().includes('senha') || msg.toLowerCase().includes('credencial') || msg.toLowerCase().includes('invalid')) {
+      if (msg === 'email_not_verified') {
+        toast.show('Seu e-mail ainda não foi confirmado. Confirme para entrar.', 'info')
+        router.push({
+          pathname: '/(auth)/aguardando-verificacao',
+          params: { email: email.trim().toLowerCase() },
+        })
+      } else if (msg.toLowerCase().includes('senha') || msg.toLowerCase().includes('credencial') || msg.toLowerCase().includes('invalid')) {
         setErrors({ password: 'E-mail ou senha incorretos' })
       } else {
         toast.show(msg || 'Não foi possível entrar. Tente novamente.', 'error')

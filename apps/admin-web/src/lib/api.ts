@@ -194,6 +194,12 @@ export const rootApi = {
   exportTenants: () => downloadFile('/root/export/tenants', 'estabelecimentos.csv'),
   exportAppointments: () => downloadFile('/root/export/appointments', 'agendamentos.csv'),
   exportSubscriptions: () => downloadFile('/root/export/subscriptions', 'assinaturas.csv'),
+  exportCommissions: () => downloadFile('/root/export/commissions', 'comissoes.csv'),
+  exportServices: () => downloadFile('/root/export/services', 'servicos.csv'),
+  exportProfessionals: () => downloadFile('/root/export/professionals', 'profissionais.csv'),
+  exportAffiliates: () => downloadFile('/root/export/affiliates', 'afiliados.csv'),
+  exportUsers: () => downloadFile('/root/export/users', 'usuarios.csv'),
+  exportAiUsage: () => downloadFile('/root/export/ai-usage', 'uso-ia.csv'),
 
   // Business Type Templates
   businessTypeTemplates: () => api.get<any[]>('/root/business-type-templates'),

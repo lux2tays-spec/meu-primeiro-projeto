@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { authApi, setToken } from '@/lib/api'
 import BrandLogo from '@/components/BrandLogo'
 import { useGoogleClientId } from '@/lib/google'
+import { formatBRPhone, normalizeBRPhone, isValidBRPhone } from '@/lib/phone'
 
 declare global {
   interface Window {
@@ -110,13 +111,14 @@ export default function RegisterPage() {
     e.preventDefault()
     setError('')
     if (!googleExtra.business_name.trim()) return setError('Informe o nome do seu estabelecimento')
-    if (!googleExtra.phone.trim()) return setError('Informe seu telefone (WhatsApp)')
+    if (!isValidBRPhone(googleExtra.phone)) return setError('Informe um telefone válido com DDD, ex.: (11) 99999-9999')
     setLoading(true)
     try {
       const res = await authApi.googleAuth({
         id_token: pendingGoogleToken,
         business_name: googleExtra.business_name.trim(),
-        phone: googleExtra.phone.trim(),
+        // AUTH-9: telefone normalizado (somente dígitos) no envio
+        phone: normalizeBRPhone(googleExtra.phone),
         referral_code: googleExtra.referral_code || undefined,
       })
       setToken(res.token)
@@ -132,18 +134,26 @@ export default function RegisterPage() {
   async function handleSubmit(e: FormEvent) {
     e.preventDefault()
     setError('')
+    if (!isValidBRPhone(form.phone)) {
+      setError('Informe um telefone válido com DDD, ex.: (11) 99999-9999')
+      return
+    }
     setLoading(true)
+    // AUTH-5: e-mail normalizado (trim/lowercase) usado no cadastro E no redirect,
+    // para a tela de verificação reenviar para o endereço certo.
+    const email = form.email.trim().toLowerCase()
     try {
       const payload: Parameters<typeof authApi.register>[0] = {
         name: form.name,
-        email: form.email.trim().toLowerCase(),
-        phone: form.phone,
+        email,
+        // AUTH-9: telefone normalizado (somente dígitos) no envio
+        phone: normalizeBRPhone(form.phone),
         password: form.password,
         business_name: form.business_name,
       }
       if (form.referral_code) payload.referral_code = form.referral_code
       await authApi.register(payload)
-      router.replace(`/aguardando-verificacao?email=${encodeURIComponent(form.email)}`)
+      router.replace(`/aguardando-verificacao?email=${encodeURIComponent(email)}`)
     } catch (err: any) {
       setError(err.message ?? 'Erro ao criar conta')
     } finally {
@@ -164,8 +174,9 @@ export default function RegisterPage() {
         </div>
         <form onSubmit={handleGoogleBusiness} className="bg-white rounded-2xl p-8 shadow-xl space-y-4">
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Nome do negócio</label>
+            <label htmlFor="gb-business-name" className="block text-sm font-medium text-gray-700 mb-1">Nome do negócio</label>
             <input
+              id="gb-business-name"
               type="text"
               value={googleExtra.business_name}
               onChange={(e) => setGE('business_name', e.target.value)}
@@ -175,19 +186,21 @@ export default function RegisterPage() {
             />
           </div>
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Telefone (WhatsApp)</label>
+            <label htmlFor="gb-phone" className="block text-sm font-medium text-gray-700 mb-1">Telefone (WhatsApp)</label>
             <input
+              id="gb-phone"
               type="tel"
               value={googleExtra.phone}
-              onChange={(e) => setGE('phone', e.target.value)}
+              onChange={(e) => setGE('phone', formatBRPhone(e.target.value))}
               placeholder="(11) 99999-9999"
               className={inputCls}
               required
             />
           </div>
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Código de indicação/Desconto (opcional)</label>
+            <label htmlFor="gb-referral" className="block text-sm font-medium text-gray-700 mb-1">Código de indicação/Desconto (opcional)</label>
             <input
+              id="gb-referral"
               type="text"
               value={googleExtra.referral_code}
               onChange={(e) => setGE('referral_code', e.target.value)}
@@ -195,7 +208,7 @@ export default function RegisterPage() {
               className={inputCls}
             />
           </div>
-          {error && <div className="bg-red-50 text-red-600 text-sm rounded-lg px-4 py-3">{error}</div>}
+          {error && <div role="alert" className="bg-red-50 text-red-600 text-sm rounded-lg px-4 py-3">{error}</div>}
           <button
             type="submit"
             disabled={loading}
@@ -236,8 +249,9 @@ export default function RegisterPage() {
         <form onSubmit={handleSubmit} className="space-y-4">
           {/* Nome */}
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Nome (Responsável pelo negócio)</label>
+            <label htmlFor="reg-name" className="block text-sm font-medium text-gray-700 mb-1">Nome (Responsável pelo negócio)</label>
             <input
+              id="reg-name"
               type="text"
               value={form.name}
               onChange={(e) => set('name', e.target.value)}
@@ -249,8 +263,9 @@ export default function RegisterPage() {
 
           {/* Email */}
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">E-mail</label>
+            <label htmlFor="reg-email" className="block text-sm font-medium text-gray-700 mb-1">E-mail</label>
             <input
+              id="reg-email"
               type="email"
               value={form.email}
               onChange={(e) => set('email', e.target.value)}
@@ -262,9 +277,10 @@ export default function RegisterPage() {
 
           {/* Senha com olho */}
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Senha</label>
+            <label htmlFor="reg-password" className="block text-sm font-medium text-gray-700 mb-1">Senha</label>
             <div className="relative">
               <input
+                id="reg-password"
                 type={showPass ? 'text' : 'password'}
                 value={form.password}
                 onChange={(e) => set('password', e.target.value)}
@@ -298,11 +314,12 @@ export default function RegisterPage() {
 
           {/* Telefone */}
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Telefone (WhatsApp)</label>
+            <label htmlFor="reg-phone" className="block text-sm font-medium text-gray-700 mb-1">Telefone (WhatsApp)</label>
             <input
+              id="reg-phone"
               type="tel"
               value={form.phone}
-              onChange={(e) => set('phone', e.target.value)}
+              onChange={(e) => set('phone', formatBRPhone(e.target.value))}
               placeholder="(11) 99999-9999"
               className={inputCls}
               required
@@ -311,8 +328,9 @@ export default function RegisterPage() {
 
           {/* Nome do negócio */}
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Nome do negócio</label>
+            <label htmlFor="reg-business-name" className="block text-sm font-medium text-gray-700 mb-1">Nome do negócio</label>
             <input
+              id="reg-business-name"
               type="text"
               value={form.business_name}
               onChange={(e) => set('business_name', e.target.value)}
@@ -324,8 +342,9 @@ export default function RegisterPage() {
 
           {/* Código de indicação */}
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Código de indicação/Desconto (opcional)</label>
+            <label htmlFor="reg-referral" className="block text-sm font-medium text-gray-700 mb-1">Código de indicação/Desconto (opcional)</label>
             <input
+              id="reg-referral"
               type="text"
               value={form.referral_code}
               onChange={(e) => set('referral_code', e.target.value)}
@@ -334,7 +353,7 @@ export default function RegisterPage() {
             />
           </div>
 
-          {error && <div className="bg-red-50 text-red-600 text-sm rounded-lg px-4 py-3">{error}</div>}
+          {error && <div role="alert" className="bg-red-50 text-red-600 text-sm rounded-lg px-4 py-3">{error}</div>}
 
           <button
             type="submit"

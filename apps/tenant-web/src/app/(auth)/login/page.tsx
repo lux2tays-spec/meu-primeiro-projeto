@@ -47,8 +47,9 @@ export default function LoginPage() {
 
       <form onSubmit={handleSubmit} className="bg-white rounded-2xl p-8 shadow-xl space-y-4">
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">E-mail</label>
+          <label htmlFor="login-email" className="block text-sm font-medium text-gray-700 mb-1">E-mail</label>
           <input
+            id="login-email"
             type="email"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
@@ -58,9 +59,10 @@ export default function LoginPage() {
           />
         </div>
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">Senha</label>
+          <label htmlFor="login-password" className="block text-sm font-medium text-gray-700 mb-1">Senha</label>
           <div className="relative">
             <input
+              id="login-password"
               type={showPassword ? 'text' : 'password'}
               value={password}
               onChange={(e) => setPassword(e.target.value)}
@@ -83,7 +85,7 @@ export default function LoginPage() {
             Esqueci minha senha
           </Link>
         </div>
-        {error && <div className="bg-red-50 text-red-600 text-sm rounded-lg px-4 py-3">{error}</div>}
+        {error && <div role="alert" className="bg-red-50 text-red-600 text-sm rounded-lg px-4 py-3">{error}</div>}
         <button
           type="submit"
           disabled={loading}

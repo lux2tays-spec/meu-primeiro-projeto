@@ -273,7 +273,7 @@ const BLANK_SERVICE = { name: '', price: '', duration_minutes: '60', reminder_da
 
 function StepServicos({ onNext, onBack }: { onNext: () => void; onBack: () => void }) {
   const qc = useQueryClient()
-  const { data: services = [], isLoading } = useQuery({ queryKey: ['services'], queryFn: tenantApi.services })
+  const { data: services = [], isLoading } = useQuery({ queryKey: ['services'], queryFn: () => tenantApi.services() })
   const { data: professionals = [] } = useQuery({ queryKey: ['professionals'], queryFn: tenantApi.professionals })
 
   const [form, setForm] = useState(BLANK_SERVICE)

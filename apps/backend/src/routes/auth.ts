@@ -48,6 +48,62 @@ function sha256Hex(value: string): string {
   return crypto.createHash('sha256').update(value).digest('hex')
 }
 
+// ── Normalização de identidade (AUTH-4 / AUTH-8 / AUTH-9) ────────────────────
+
+/** AUTH-4: normalizes an e-mail (trim + lowercase) before any query/insert. */
+export function normalizeEmail(email: string): string {
+  return email.trim().toLowerCase()
+}
+
+/**
+ * AUTH-9: normalizes a Brazilian phone to digits only, prefixed with country
+ * code 55 — e.g. "(11) 98765-4321" → "5511987654321". Best effort: unusual
+ * lengths are kept as bare digits instead of blocking the signup.
+ */
+export function normalizeBrazilPhone(raw: string): string {
+  let digits = raw.replace(/\D/g, '')
+  digits = digits.replace(/^0+/, '') // drop trunk zero(s), e.g. "011 98765-4321"
+  if ((digits.length === 12 || digits.length === 13) && digits.startsWith('55')) {
+    return digits // already 55 + DDD + number
+  }
+  if (digits.length === 10 || digits.length === 11) {
+    return `55${digits}` // DDD + number without country code
+  }
+  return digits
+}
+
+/** Slug base from a business name: accents stripped, lowercase, hyphenated. */
+function slugifyBusinessName(name: string): string {
+  return name
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '') // strip diacritics so 'Ação' → 'acao', not ''
+    .toLowerCase()
+    .trim()
+    .replace(/\s+/g, '-')
+    .replace(/[^a-z0-9-]/g, '')
+    .replace(/-+/g, '-')
+    .replace(/^-+|-+$/g, '')
+}
+
+type Queryable = { query(text: string, params?: unknown[]): Promise<{ rows: any[] }> }
+
+/**
+ * AUTH-8: generates a unique tenant slug. On collision, appends a short random
+ * suffix and retries (repeated trade names must not block the signup). When the
+ * normalized slug comes out empty (name made only of accents/symbols), falls
+ * back to a generated one.
+ */
+export async function generateUniqueSlug(q: Queryable, businessName: string): Promise<string> {
+  const base = slugifyBusinessName(businessName) || `negocio-${crypto.randomBytes(3).toString('hex')}`
+  let slug = base
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const { rows } = await q.query('SELECT 1 FROM tenants WHERE slug = $1', [slug])
+    if (rows.length === 0) return slug
+    slug = `${base}-${crypto.randomBytes(3).toString('hex')}`
+  }
+  return `${base}-${crypto.randomBytes(6).toString('hex')}`
+}
+
 function zodErrorMessage(err: ZodError): string {
   const fieldMessages: Record<string, string> = {
     password: 'A senha deve ter pelo menos 8 caracteres',
@@ -62,7 +118,17 @@ function zodErrorMessage(err: ZodError): string {
 
 export const authRoutes: FastifyPluginAsync = async (app) => {
   app.post('/register', {
-    config: { rateLimit: { max: 3, timeWindow: '1 hour' } },
+    // AUTH-12: 8/hora com resposta amigável em pt-BR ao estourar o limite
+    config: {
+      rateLimit: {
+        max: 8,
+        timeWindow: '1 hour',
+        errorResponseBuilder: () => ({
+          statusCode: 429,
+          error: 'Muitas tentativas de cadastro. Aguarde um pouco e tente novamente mais tarde.',
+        }),
+      },
+    },
   }, async (request, reply) => {
     let body: z.infer<typeof registerSchema>
     try {
@@ -74,12 +140,15 @@ export const authRoutes: FastifyPluginAsync = async (app) => {
       throw err
     }
 
-    const slug = body.business_name.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '')
+    const email = normalizeEmail(body.email)
+    const phone = normalizeBrazilPhone(body.phone)
     const trialEndsAt = new Date(Date.now() + 5 * 24 * 60 * 60 * 1000).toISOString()
 
     const client = await db.connect()
     try {
       await client.query('BEGIN')
+
+      const slug = await generateUniqueSlug(client, body.business_name)
 
       const { rows: [tenant] } = await client.query(
         `INSERT INTO tenants (name, slug, plan, status, trial_ends_at, max_agendas, max_users)
@@ -90,7 +159,7 @@ export const authRoutes: FastifyPluginAsync = async (app) => {
       const { rows: [user] } = await client.query(
         `INSERT INTO users (name, email, phone, password_hash)
          VALUES ($1, $2, $3, $4) RETURNING id`,
-        [body.name, body.email, body.phone, hashPassword(body.password)]
+        [body.name, email, phone, hashPassword(body.password)]
       )
 
       await client.query(
@@ -123,7 +192,7 @@ export const authRoutes: FastifyPluginAsync = async (app) => {
       await client.query('COMMIT')
 
       try {
-        await sendVerificationEmail(body.email, body.name, verificationToken)
+        await sendVerificationEmail(email, body.name, verificationToken)
       } catch (emailErr) {
         console.error('Falha ao enviar e-mail de verificação:', emailErr)
       }
@@ -131,7 +200,7 @@ export const authRoutes: FastifyPluginAsync = async (app) => {
       return reply.status(201).send({ needs_verification: true })
     } catch (err: any) {
       await client.query('ROLLBACK')
-      if (err.constraint === 'users_email_key') {
+      if (err.constraint === 'users_email_key' || err.constraint === 'users_email_lower_key') {
         return reply.status(409).send({ error: 'Este e-mail já está cadastrado' })
       }
       if (err.constraint === 'tenants_slug_key') {
@@ -143,33 +212,60 @@ export const authRoutes: FastifyPluginAsync = async (app) => {
     }
   })
 
+  // AUTH-6: idempotent — e-mail scanners (Outlook SafeLinks etc.) pre-fetch the
+  // GET before the user's real click, so a re-click must still succeed.
   app.get('/verify-email', async (request, reply) => {
     const { token } = request.query as { token?: string }
-    if (!token) return reply.status(400).send({ error: 'Token inválido' })
+    if (!token) return reply.status(400).send({ error: 'Link inválido' })
 
     const { rows: [record] } = await db.query(
-      'SELECT user_id, expires_at FROM email_verifications WHERE token = $1',
+      `SELECT ev.user_id, ev.expires_at, u.email_verified, u.token_version
+         FROM email_verifications ev
+         JOIN users u ON u.id = ev.user_id
+        WHERE ev.token = $1`,
       [token]
     )
 
-    if (!record) return reply.status(400).send({ error: 'Link inválido ou já utilizado' })
-    if (new Date(record.expires_at) < new Date()) {
+    if (!record) {
+      return reply.status(400).send({
+        error: 'Link inválido ou já utilizado. Se você já confirmou seu e-mail, é só fazer login normalmente.',
+      })
+    }
+
+    const expired = new Date(record.expires_at) < new Date()
+    if (expired && !record.email_verified) {
       return reply.status(400).send({ error: 'Link expirado. Solicite um novo e-mail de verificação.' })
     }
 
-    const { rows: [verifiedUser] } = await db.query(
-      'UPDATE users SET email_verified = TRUE WHERE id = $1 RETURNING token_version',
-      [record.user_id]
-    )
-    await db.query('DELETE FROM email_verifications WHERE token = $1', [token])
+    let tokenVersion = record.token_version ?? 0
+    if (!record.email_verified) {
+      const { rows: [verifiedUser] } = await db.query(
+        'UPDATE users SET email_verified = TRUE WHERE id = $1 RETURNING token_version',
+        [record.user_id]
+      )
+      tokenVersion = verifiedUser?.token_version ?? tokenVersion
+      // Instead of deleting the token, keep it alive for a short re-click
+      // window: the second access (the user's real click) also succeeds above.
+      await db.query(
+        `UPDATE email_verifications
+            SET expires_at = LEAST(expires_at, NOW() + INTERVAL '10 minutes')
+          WHERE token = $1`,
+        [token]
+      )
+    } else if (expired) {
+      // Already verified + stale link: succeed once more and retire the link.
+      await db.query('DELETE FROM email_verifications WHERE token = $1', [token])
+    }
 
+    // AUTH-7: the membership/tenant may have been removed meanwhile — fall back
+    // like /login does instead of crashing with a 500.
     const { rows: [userRole] } = await db.query(
       'SELECT ur.tenant_id, ur.role FROM user_roles ur WHERE ur.user_id = $1 LIMIT 1',
       [record.user_id]
     )
 
     const jwtToken = app.jwt.sign(
-      { user_id: record.user_id, tenant_id: userRole.tenant_id, role: userRole.role, tv: verifiedUser?.token_version ?? 0 },
+      { user_id: record.user_id, tenant_id: userRole?.tenant_id ?? null, role: userRole?.role ?? 'staff', tv: tokenVersion },
       { expiresIn: '7d' }
     )
 
@@ -190,8 +286,8 @@ export const authRoutes: FastifyPluginAsync = async (app) => {
     }
 
     const { rows: [user] } = await db.query(
-      'SELECT id, password_hash, email_verified, token_version FROM users WHERE email = $1',
-      [body.email]
+      'SELECT id, password_hash, email_verified, token_version FROM users WHERE LOWER(email) = $1',
+      [normalizeEmail(body.email)]
     )
 
     const check = user
@@ -245,8 +341,8 @@ export const authRoutes: FastifyPluginAsync = async (app) => {
     }
 
     const { rows: [user] } = await db.query(
-      'SELECT id, name, email FROM users WHERE email = $1',
-      [body.email]
+      'SELECT id, name, email FROM users WHERE LOWER(email) = $1',
+      [normalizeEmail(body.email)]
     )
     if (!user) return reply.send(genericResponse)
 
@@ -352,8 +448,8 @@ export const authRoutes: FastifyPluginAsync = async (app) => {
     }
 
     const { rows: [user] } = await db.query(
-      'SELECT id, name, email, email_verified FROM users WHERE email = $1',
-      [body.email]
+      'SELECT id, name, email, email_verified FROM users WHERE LOWER(email) = $1',
+      [normalizeEmail(body.email)]
     )
     if (!user || user.email_verified) return reply.send(genericResponse)
 
@@ -512,7 +608,7 @@ export const authRoutes: FastifyPluginAsync = async (app) => {
       throw err
     }
 
-    const newEmail = body.new_email.trim().toLowerCase()
+    const newEmail = normalizeEmail(body.new_email)
 
     const { rows: [user] } = await db.query(
       'SELECT id, name, email, password_hash, google_sub FROM users WHERE id = $1',
@@ -530,11 +626,11 @@ export const authRoutes: FastifyPluginAsync = async (app) => {
       return reply.status(400).send({ error: 'Senha incorreta' })
     }
 
-    if (newEmail === user.email) {
+    if (newEmail === normalizeEmail(user.email ?? '')) {
       return reply.status(400).send({ error: 'O novo e-mail é igual ao atual' })
     }
 
-    const { rows: [taken] } = await db.query('SELECT 1 FROM users WHERE email = $1', [newEmail])
+    const { rows: [taken] } = await db.query('SELECT 1 FROM users WHERE LOWER(email) = $1', [newEmail])
     if (taken) {
       return reply.status(409).send({ error: 'Este e-mail já está em uso por outra conta' })
     }
@@ -595,7 +691,7 @@ export const authRoutes: FastifyPluginAsync = async (app) => {
         [record.new_email, record.user_id]
       )
     } catch (err: any) {
-      if (err.constraint === 'users_email_key') {
+      if (err.constraint === 'users_email_key' || err.constraint === 'users_email_lower_key') {
         return reply.status(409).send({ error: 'Este e-mail já está em uso por outra conta' })
       }
       throw err

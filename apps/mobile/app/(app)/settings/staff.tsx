@@ -2,13 +2,14 @@ import { View, Text, StyleSheet, FlatList, TouchableOpacity, Modal, ScrollView, 
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useState } from 'react'
 import { Ionicons } from '@expo/vector-icons'
+import { router } from 'expo-router'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Card } from '@/components/ui/Card'
 import { Badge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
-import { tenantApi, api } from '@/lib/api'
+import { tenantApi, professionalsApi, isPlanLimitError } from '@/lib/api'
 import { useAuthStore } from '@/lib/store'
 import { useToast } from '@/lib/toast'
 import { colors, font, spacing, radius } from '@/lib/theme'
@@ -18,10 +19,7 @@ const ROLES = [
   { value: 'staff', label: 'Colaborador', desc: 'Ver agenda e atualizar agendamentos' },
 ]
 
-const EDIT_ROLES = [
-  { value: 'owner', label: 'Proprietário', desc: 'Acesso total, incluindo assinatura' },
-  ...ROLES,
-]
+const OWNER_ROLE = { value: 'owner', label: 'Proprietário', desc: 'Acesso total, incluindo assinatura' }
 
 const roleVariant: Record<string, any> = { owner: 'success', admin: 'info', staff: 'default' }
 const roleLabel: Record<string, string> = { owner: 'Proprietário', admin: 'Admin', staff: 'Colaborador' }
@@ -31,6 +29,8 @@ const emptyForm = { name: '', email: '', password: '', role: 'staff', also_profe
 
 type EditErrors = { name?: string; email?: string }
 const emptyEditForm = { name: '', email: '', phone: '', role: 'staff' }
+
+const emptyProfForm = { name: '', phone: '', bio: '' }
 
 function validateEmail(v: string) { return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v) }
 
@@ -45,9 +45,27 @@ export default function StaffScreen() {
   const [editForm, setEditForm] = useState(emptyEditForm)
   const [editErrors, setEditErrors] = useState<EditErrors>({})
 
+  // Profissional (com ou sem acesso ao app) — criar/editar nome, telefone e bio
+  const [profModalVisible, setProfModalVisible] = useState(false)
+  const [profEditing, setProfEditing] = useState<any>(null)
+  const [profForm, setProfForm] = useState(emptyProfForm)
+  const [profError, setProfError] = useState<string | undefined>(undefined)
+
   const role = useAuthStore((s) => s.role)
   const myUserId = useAuthStore((s) => s.userId)
   const canManage = ['owner', 'admin', 'root'].includes(role ?? '')
+  const isOwner = role === 'owner' || role === 'root'
+  // "Proprietário" só aparece como opção para quem é owner/root (CFG-10).
+  const editRoles = isOwner ? [OWNER_ROLE, ...ROLES] : ROLES
+
+  // CTA padrão quando o backend recusa por limite do plano (HTTP 402).
+  function showPlanLimitToast() {
+    toast.show(
+      'Você atingiu o limite do seu plano. Faça upgrade para adicionar mais.',
+      'warning',
+      { label: 'Ver planos', onPress: () => router.push('/(app)/settings/subscription') }
+    )
+  }
 
   const { data: staff = [] } = useQuery({ queryKey: ['staff'], queryFn: tenantApi.staff })
   const { data: professionals = [] } = useQuery({ queryKey: ['professionals'], queryFn: tenantApi.professionals })
@@ -77,8 +95,8 @@ export default function StaffScreen() {
     },
     onError: (err: any) => {
       const msg: string = err.message ?? ''
-      if (msg.toLowerCase().includes('limite')) {
-        toast.show('Limite de usuários do seu plano atingido.', 'warning')
+      if (isPlanLimitError(err)) {
+        showPlanLimitToast()
       } else if (msg.toLowerCase().includes('email') || msg.toLowerCase().includes('e-mail')) {
         setErrors((e) => ({ ...e, email: 'Este e-mail já está em uso' }))
       } else {
@@ -125,7 +143,10 @@ export default function StaffScreen() {
       queryClient.invalidateQueries({ queryKey: ['professionals'] })
       toast.show('Habilitado como profissional!', 'success')
     },
-    onError: (err: any) => toast.show(err.message ?? 'Erro ao habilitar.', 'error'),
+    onError: (err: any) => {
+      if (isPlanLimitError(err)) showPlanLimitToast()
+      else toast.show(err.message ?? 'Não foi possível habilitar como profissional.', 'error')
+    },
   })
 
   const removeAsProfessional = useMutation({
@@ -134,7 +155,42 @@ export default function StaffScreen() {
       queryClient.invalidateQueries({ queryKey: ['professionals'] })
       toast.show('Removido como profissional.', 'info')
     },
-    onError: (err: any) => toast.show(err.message ?? 'Erro ao remover.', 'error'),
+    onError: (err: any) => toast.show(err.message ?? 'Não foi possível remover.', 'error'),
+  })
+
+  // Cria profissional SEM usuário (sem acesso ao app) — POST /professionals sem user_id.
+  const createProfMutation = useMutation({
+    mutationFn: (data: typeof emptyProfForm) =>
+      professionalsApi.create({
+        name: data.name.trim(),
+        phone: data.phone.trim() || undefined,
+        bio: data.bio.trim() || undefined,
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['professionals'] })
+      closeProfModal()
+      toast.show('Profissional adicionado!', 'success')
+    },
+    onError: (err: any) => {
+      if (isPlanLimitError(err)) showPlanLimitToast()
+      else toast.show(err.message ?? 'Não foi possível adicionar o profissional.', 'error')
+    },
+  })
+
+  // Edita nome/telefone/bio de qualquer profissional — PATCH /professionals/:id.
+  const updateProfMutation = useMutation({
+    mutationFn: ({ id, data }: { id: string; data: typeof emptyProfForm }) =>
+      professionalsApi.update(id, {
+        name: data.name.trim(),
+        phone: data.phone.trim() || null,
+        bio: data.bio.trim() || null,
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['professionals'] })
+      closeProfModal()
+      toast.show('Profissional atualizado!', 'success')
+    },
+    onError: (err: any) => toast.show(err.message ?? 'Não foi possível salvar o profissional.', 'error'),
   })
 
   function setField(key: keyof typeof emptyForm) {
@@ -186,6 +242,47 @@ export default function StaffScreen() {
     editMutation.mutate({ id: editTarget.id, data: editForm })
   }
 
+  function openProfCreate() {
+    setProfEditing(null)
+    setProfForm(emptyProfForm)
+    setProfError(undefined)
+    setProfModalVisible(true)
+  }
+
+  function openProfEdit(p: any) {
+    setProfEditing(p)
+    setProfForm({ name: p.name ?? '', phone: p.phone ?? '', bio: p.bio ?? '' })
+    setProfError(undefined)
+    setProfModalVisible(true)
+  }
+
+  function closeProfModal() {
+    setProfModalVisible(false)
+    setProfEditing(null)
+    setProfForm(emptyProfForm)
+    setProfError(undefined)
+  }
+
+  function handleSaveProf() {
+    if (!profForm.name.trim()) {
+      setProfError('Informe o nome do profissional')
+      return
+    }
+    if (profEditing) updateProfMutation.mutate({ id: profEditing.id, data: profForm })
+    else createProfMutation.mutate(profForm)
+  }
+
+  function confirmRemoveProf(p: any) {
+    Alert.alert(
+      'Remover profissional',
+      `${p.name} deixará de aparecer na agenda e nos serviços.`,
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        { text: 'Remover', style: 'destructive', onPress: () => removeAsProfessional.mutate(p.id) },
+      ]
+    )
+  }
+
   function handleToggleProfessional(u: any) {
     const isProf = isProfessional(u.id)
     const profId = professionalId(u.id)
@@ -212,6 +309,62 @@ export default function StaffScreen() {
             : null
         }
         ListEmptyComponent={<Text style={s.empty}>Nenhum colaborador cadastrado</Text>}
+        ListFooterComponent={
+          <View style={s.profSection}>
+            <Text style={s.profSectionTitle}>Profissionais</Text>
+            <Text style={s.profSectionHint}>
+              Quem aparece na agenda e nos serviços. Um profissional pode ou não ter acesso ao app.
+            </Text>
+            {(professionals as any[]).length === 0 ? (
+              <Text style={s.profEmpty}>Nenhum profissional cadastrado.</Text>
+            ) : (
+              (professionals as any[]).map((p) => (
+                <Card key={p.id} style={s.profCard}>
+                  <View style={s.profAvatar}>
+                    <Ionicons name="person-outline" size={18} color={colors.primary} />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <View style={s.nameRow}>
+                      <Text style={s.name}>{p.name}</Text>
+                      {!p.user_id && <Badge label="Sem acesso ao app" variant="warning" />}
+                    </View>
+                    {p.phone ? <Text style={s.email}>{p.phone}</Text> : null}
+                    {p.bio ? <Text style={s.profBio} numberOfLines={2}>{p.bio}</Text> : null}
+                  </View>
+                  {canManage && (
+                    <View style={s.cardActions}>
+                      <TouchableOpacity
+                        onPress={() => openProfEdit(p)}
+                        style={{ padding: 4 }}
+                        accessibilityRole="button"
+                        accessibilityLabel={`Editar profissional ${p.name}`}
+                      >
+                        <Ionicons name="create-outline" size={18} color={colors.primary} />
+                      </TouchableOpacity>
+                      {!p.user_id && (
+                        <TouchableOpacity
+                          onPress={() => confirmRemoveProf(p)}
+                          style={{ padding: 4 }}
+                          accessibilityRole="button"
+                          accessibilityLabel={`Remover profissional ${p.name}`}
+                        >
+                          <Ionicons name="trash-outline" size={18} color={colors.danger} />
+                        </TouchableOpacity>
+                      )}
+                    </View>
+                  )}
+                </Card>
+              ))
+            )}
+            {canManage && (
+              <Button
+                label="+ Adicionar profissional (sem acesso)"
+                variant="outline"
+                onPress={openProfCreate}
+              />
+            )}
+          </View>
+        }
         renderItem={({ item }) => {
           const isProf = isProfessional(item.id)
           return (
@@ -246,11 +399,21 @@ export default function StaffScreen() {
               </View>
               {canManage && (
                 <View style={s.cardActions}>
-                  <TouchableOpacity onPress={() => openEditModal(item)} style={{ padding: 4 }}>
+                  <TouchableOpacity
+                    onPress={() => openEditModal(item)}
+                    style={{ padding: 4 }}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Editar colaborador ${item.name}`}
+                  >
                     <Ionicons name="create-outline" size={18} color={colors.primary} />
                   </TouchableOpacity>
                   {item.id !== myUserId && (
-                    <TouchableOpacity onPress={() => setRemoveTarget({ id: item.id, name: item.name })} style={{ padding: 4 }}>
+                    <TouchableOpacity
+                      onPress={() => setRemoveTarget({ id: item.id, name: item.name })}
+                      style={{ padding: 4 }}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Remover colaborador ${item.name}`}
+                    >
                       <Ionicons name="trash-outline" size={18} color={colors.danger} />
                     </TouchableOpacity>
                   )}
@@ -315,16 +478,74 @@ export default function StaffScreen() {
 
             <View style={s.field}>
               <Text style={s.fieldLabel}>Nível de acesso</Text>
-              {EDIT_ROLES.map((r) => (
-                <TouchableOpacity key={r.value} style={[s.roleBtn, editForm.role === r.value && s.roleBtnActive]}
-                  onPress={() => setEditForm((f) => ({ ...f, role: r.value }))}>
-                  <Text style={[s.roleName, editForm.role === r.value && s.roleNameActive]}>{r.label}</Text>
-                  <Text style={s.roleDesc}>{r.desc}</Text>
-                </TouchableOpacity>
-              ))}
+              {editTarget?.role === 'owner' && !isOwner ? (
+                // Admin não pode alterar o papel do proprietário.
+                <View style={[s.roleBtn, s.roleBtnActive]}>
+                  <Text style={s.roleName}>Proprietário</Text>
+                  <Text style={s.roleDesc}>Somente o proprietário pode alterar este nível de acesso</Text>
+                </View>
+              ) : (
+                editRoles.map((r) => (
+                  <TouchableOpacity key={r.value} style={[s.roleBtn, editForm.role === r.value && s.roleBtnActive]}
+                    onPress={() => setEditForm((f) => ({ ...f, role: r.value }))}>
+                    <Text style={[s.roleName, editForm.role === r.value && s.roleNameActive]}>{r.label}</Text>
+                    <Text style={s.roleDesc}>{r.desc}</Text>
+                  </TouchableOpacity>
+                ))
+              )}
             </View>
 
             <Button label="Salvar alterações" onPress={handleSaveEdit} loading={editMutation.isPending} />
+          </ScrollView>
+        </SafeAreaView>
+      </Modal>
+
+      {/* Professional create/edit modal */}
+      <Modal visible={profModalVisible} animationType="slide" presentationStyle="pageSheet" onRequestClose={closeProfModal}>
+        <SafeAreaView style={s.modal} edges={['top']}>
+          <View style={s.modalHeader}>
+            <Text style={s.modalTitle}>
+              {profEditing ? 'Editar profissional' : 'Novo profissional'}
+            </Text>
+            <TouchableOpacity onPress={closeProfModal} accessibilityRole="button" accessibilityLabel="Fechar">
+              <Ionicons name="close" size={24} color={colors.text} />
+            </TouchableOpacity>
+          </View>
+          <ScrollView contentContainerStyle={s.modalContent} keyboardShouldPersistTaps="handled">
+            {!profEditing && (
+              <Text style={s.profSectionHint}>
+                Profissional que atende na agenda mas não usa o app (ex.: um prestador externo).
+                Ele não recebe login nem senha.
+              </Text>
+            )}
+            <Input
+              label="Nome *"
+              value={profForm.name}
+              onChangeText={(v) => { setProfForm((f) => ({ ...f, name: v })); setProfError(undefined) }}
+              placeholder="Maria Silva"
+              error={profError}
+            />
+            <Input
+              label="Telefone"
+              value={profForm.phone}
+              onChangeText={(v) => setProfForm((f) => ({ ...f, phone: v }))}
+              placeholder="(11) 99999-9999"
+              keyboardType="phone-pad"
+            />
+            <Input
+              label="Bio (opcional)"
+              value={profForm.bio}
+              onChangeText={(v) => setProfForm((f) => ({ ...f, bio: v }))}
+              placeholder="Especialidades, mini currículo..."
+              multiline
+              numberOfLines={3}
+              style={{ height: undefined, paddingVertical: spacing.md, textAlignVertical: 'top' }}
+            />
+            <Button
+              label={profEditing ? 'Salvar alterações' : 'Adicionar profissional'}
+              onPress={handleSaveProf}
+              loading={createProfMutation.isPending || updateProfMutation.isPending}
+            />
           </ScrollView>
         </SafeAreaView>
       </Modal>
@@ -381,4 +602,15 @@ const s = StyleSheet.create({
   },
   checkboxChecked: { backgroundColor: colors.primary, borderColor: colors.primary },
   checkLabel: { flex: 1, fontSize: font.sm, color: colors.text },
+  // Profissionais
+  profSection: { marginTop: spacing.xl, gap: spacing.sm },
+  profSectionTitle: { fontSize: font.lg, fontWeight: '700', color: colors.text },
+  profSectionHint: { fontSize: font.sm, color: colors.textSecondary, lineHeight: 20 },
+  profEmpty: { fontSize: font.sm, color: colors.textDisabled, fontStyle: 'italic', paddingVertical: spacing.sm },
+  profCard: { flexDirection: 'row', alignItems: 'flex-start', gap: spacing.md },
+  profAvatar: {
+    width: 36, height: 36, borderRadius: 18, backgroundColor: colors.primaryLight,
+    alignItems: 'center', justifyContent: 'center', marginTop: 2,
+  },
+  profBio: { fontSize: font.sm, color: colors.textDisabled, marginTop: 2 },
 })

@@ -2,6 +2,7 @@
 import { useEffect, useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { tenantApi, getToken } from '@/lib/api'
+import Loading from '@/components/ui/Loading'
 import { getTokenPayload } from '@/lib/auth'
 
 export default function BusinessPage() {
@@ -64,7 +65,7 @@ export default function BusinessPage() {
       </div>
 
       {isLoading ? (
-        <p className="text-gray-400 text-sm">Carregando...</p>
+        <Loading card />
       ) : (
         <div className="bg-white rounded-2xl p-5 border border-gray-100 shadow-sm space-y-4">
           <div>

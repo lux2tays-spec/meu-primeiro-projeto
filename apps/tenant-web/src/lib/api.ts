@@ -15,6 +15,33 @@ export function clearToken() {
   localStorage.removeItem('tenant_token')
 }
 
+/**
+ * PAY-2 — erro tipado de "limite/assinatura do plano" (HTTP 402).
+ * Em vez de redirecionar às cegas (ejetando o usuário do formulário), o erro é
+ * propagado para a tela que fez a chamada E um evento global é disparado para o
+ * layout mostrar o diálogo "Você atingiu o limite do plano → Ver planos",
+ * preservando o contexto da tela.
+ */
+export class PlanLimitError extends Error {
+  constructor(message?: string) {
+    super(message || 'Você atingiu o limite do seu plano. Faça upgrade para continuar.')
+    this.name = 'PlanLimitError'
+  }
+}
+
+export const PLAN_LIMIT_EVENT = 'agendabot:plan-limit'
+
+/**
+ * Mensagem de erro amigável em pt-BR: usa a mensagem do backend quando ela é um
+ * texto curto e legível; caso contrário (JSON de validação, stack, objeto cru),
+ * cai no fallback. O usuário final nunca vê erro técnico.
+ */
+export function friendlyMessage(e: unknown, fallback: string): string {
+  const m = (e as any)?.message
+  if (typeof m === 'string' && m.trim() && m.length <= 180 && !/^[{[]/.test(m.trim())) return m
+  return fallback
+}
+
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const token = getToken()
   const res = await fetch(`${BASE_URL}${path}`, {
@@ -35,9 +62,13 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
       window.location.href = '/login'
       throw new Error('Sessão expirada')
     }
-    // 402 = subscription required (trial expired / suspended) — send them to subscribe.
-    if (res.status === 402 && typeof window !== 'undefined' && !window.location.pathname.startsWith('/settings/subscription')) {
-      window.location.href = '/settings/subscription'
+    // 402 = plano/assinatura — propaga erro tipado e avisa o layout (sem redirect).
+    if (res.status === 402) {
+      const planErr = new PlanLimitError(typeof err.error === 'string' ? err.error : undefined)
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent(PLAN_LIMIT_EVENT, { detail: planErr.message }))
+      }
+      throw planErr
     }
     throw new Error(err.error ?? `Erro ${res.status}`)
   }
@@ -112,12 +143,18 @@ export const authApi = {
 
 export const tenantApi = {
   me: () => api.get<any>('/tenant/me'),
-  services: () => api.get<any[]>('/tenant/services'),
+  /** Lista serviços ativos; `includeInactive` traz também os desativados (telas de gestão — CFG-16). */
+  services: (includeInactive = false) =>
+    api.get<any[]>(`/tenant/services${includeInactive ? '?include_inactive=1' : ''}`),
   createService: (data: any) => api.post<any>('/tenant/services', data),
   updateService: (id: string, data: any) => api.put<any>(`/tenant/services/${id}`, data),
   deleteService: (id: string) => api.delete(`/tenant/services/${id}`),
   professionals: () => api.get<any[]>('/tenant/professionals'),
-  addProfessional: (data: any) => api.post<any>('/tenant/professionals', data),
+  // CFG-7: user_id é OPCIONAL — permite criar profissional sem conta de acesso.
+  addProfessional: (data: { name: string; phone?: string | null; bio?: string | null; user_id?: string }) =>
+    api.post<any>('/tenant/professionals', data),
+  updateProfessional: (id: string, data: { name?: string; phone?: string | null; bio?: string | null }) =>
+    api.patch<any>(`/tenant/professionals/${id}`, data),
   removeProfessional: (id: string) => api.delete(`/tenant/professionals/${id}`),
   staff: () => api.get<any[]>('/tenant/staff'),
   addStaff: (data: any) => api.post<any>('/tenant/staff', data),
@@ -128,8 +165,16 @@ export const tenantApi = {
     api.put<any>('/tenant/business', data),
   customers: (search?: string) =>
     api.get<any[]>(`/tenant/customers${search ? `?search=${encodeURIComponent(search)}` : ''}`),
+  // Variante paginada: com page/limit o backend responde { data, total, page, limit }.
+  customersPaged: (params: { search?: string; page?: number; limit?: number }) => {
+    const qs = new URLSearchParams()
+    if (params.search) qs.set('search', params.search)
+    qs.set('page', String(params.page ?? 1))
+    qs.set('limit', String(params.limit ?? 50))
+    return api.get<{ data: any[]; total: number; page: number; limit: number }>(`/tenant/customers?${qs.toString()}`)
+  },
   customer: (id: string) => api.get<any>(`/tenant/customers/${id}`),
-  updateCustomer: (id: string, data: { name?: string; last_name?: string; email?: string }) =>
+  updateCustomer: (id: string, data: { name?: string; last_name?: string; email?: string; phone?: string }) =>
     api.put<any>(`/tenant/customers/${id}`, data),
   addCustomer: (data: { name: string; last_name?: string; phone: string; email?: string }) =>
     api.post<any>('/tenant/customers', data),
@@ -193,13 +238,39 @@ export const commissionsApi = {
   },
   pay: (body: { ids?: string[]; professional_id?: string; from?: string; to?: string }) =>
     api.post<{ paid_count: number }>('/commissions/pay', body),
+  // SAL-10: estorno — reverte comissões pagas para pendente (mesmos filtros do /pay).
+  refund: (body: { ids?: string[]; professional_id?: string; from?: string; to?: string }) =>
+    api.post<{ refunded_count: number }>('/commissions/refund', body),
+}
+
+export interface FinanceiroResumo {
+  mes: number
+  ano: number
+  total_vendas: number
+  receita_total: number
+  agendamentos_abertos: number
+  // SAL-8 — novos KPIs
+  ticket_medio: number
+  agendamentos_cancelados: number
+  total_agendamentos: number
+  taxa_cancelamento: number
+  receita_por_profissional: { professional_id: string; professional_nome: string; vendas: number; receita: number }[]
+  servicos_mais_vendidos: { service_id: string; servico_nome: string; vendas: number; receita: number }[]
+}
+
+export interface VendasResponse {
+  data: any[]
+  total: number
+  page: number
+  limit: number
 }
 
 export const financeiroApi = {
   resumo: (month?: number, year?: number) =>
-    api.get<any>(`/financeiro/resumo${month ? `?month=${month}&year=${year}` : ''}`),
-  vendas: (month?: number, year?: number, page = 1) =>
-    api.get<any[]>(`/financeiro/vendas?month=${month ?? ''}&year=${year ?? ''}&page=${page}`),
+    api.get<FinanceiroResumo>(`/financeiro/resumo${month ? `?month=${month}&year=${year}` : ''}`),
+  // SAL-5: paginação real — o backend responde { data, total, page, limit }.
+  vendas: (month?: number, year?: number, page = 1, limit = 20) =>
+    api.get<VendasResponse>(`/financeiro/vendas?month=${month ?? ''}&year=${year ?? ''}&page=${page}&limit=${limit}`),
   paymentLinks: () => api.get<any[]>('/financeiro/payment-links'),
   createPaymentLink: (data: { title: string; description?: string; amount: number }) =>
     api.post<any>('/financeiro/payment-links', data),
@@ -257,6 +328,17 @@ export const agentApi = {
     }
     return res.json()
   },
+}
+
+// UI-5: Google Agenda (mesmos endpoints usados pelo app mobile)
+export const googleApi = {
+  calendarStatus: () =>
+    api.get<{ connected: boolean; sync_enabled: boolean; calendar_id?: string }>('/google-calendar/status'),
+  calendarConnect: (code: string, redirectUri: string) =>
+    api.post<{ connected: boolean }>('/google-calendar/connect', { code, redirect_uri: redirectUri }),
+  calendarToggle: (syncEnabled: boolean) =>
+    api.patch<{ sync_enabled: boolean }>('/google-calendar/settings', { sync_enabled: syncEnabled }),
+  calendarDisconnect: () => api.delete<{ disconnected: boolean }>('/google-calendar/disconnect'),
 }
 
 export const whatsappApi = {

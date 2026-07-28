@@ -2,7 +2,8 @@ import { FastifyPluginAsync } from 'fastify'
 import crypto from 'node:crypto'
 import { db } from '../lib/db'
 import { redis, QR_CODE_TTL } from '../lib/redis'
-import { isDuplicateMessage, isSenderRateLimited, scheduleReply } from '../services/botDispatcher'
+import { isDuplicateMessage, scheduleReply } from '../services/botDispatcher'
+import { logBotError } from '../services/bot'
 import { getPaymentConfig } from '../lib/paymentConfig'
 import { applyPreapproval } from '../lib/subscriptionState'
 import { tenantMediaEnabled } from '../lib/planMedia'
@@ -53,15 +54,33 @@ async function webhookAuthorized(request: any): Promise<boolean> {
   return ok
 }
 
-// True when the customer is asking to talk to a human — either the handoff
-// button was clicked (id) or they typed the configured label / a clear request.
+// True when the customer is EXPLICITLY asking to be transferred to a human —
+// the handoff button was clicked (id), the typed text is EXACTLY the configured
+// label, or the phrase is an unambiguous transfer request ("falar com um
+// atendente", "me passa para", "atendente humano"). Deliberately strict: a
+// merely related phrase ("quero remarcar com a atendente Paula") must flow to
+// the bot normally — the model itself offers the specialist when it gets stuck.
+function normalizeHandoffText(text: string): string {
+  return (text || '').trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+}
+
 function isHandoffRequest(buttonId: string, text: string, buttonLabel: string): boolean {
   if (buttonId === HANDOFF_BUTTON_ID) return true
-  const t = (text || '').toLowerCase().trim()
+  const t = normalizeHandoffText(text)
   if (!t) return false
-  if (buttonLabel && t.includes(buttonLabel.toLowerCase())) return true
-  return /(especialista|atendente|humano|uma pessoa|pessoa de verdade|falar com alguém|falar com alguem)/.test(t)
-    && /(quero|preciso|pode|gostaria|falar|chama|chamar|me passa|atender)/.test(t)
+  // Deterministic shortcut ONLY for the exact label (some clients echo the
+  // button click as plain text) — never a fuzzy "contains".
+  if (buttonLabel && t === normalizeHandoffText(buttonLabel)) return true
+  return (
+    // "quero falar/conversar com um atendente/humano/especialista/uma pessoa/alguém"
+    /\b(falar|conversar)\s+com\s+(um[a]?\s+|o\s+|a\s+)?(atendente|humano|humana|especialista|pessoa|alguem)\b/.test(t) ||
+    // "me passa/transfere/encaminha para ..."
+    /\bme\s+(passa|passe|transfere|transfira|encaminha|encaminhe)\s+(para|pra|pro)\b/.test(t) ||
+    // "atendente humano", "atendimento humano", "pessoa de verdade", "pessoa real"
+    /\b(atendente|atendimento|pessoa)\s+(humano|humana|de\s+verdade|real)\b/.test(t) ||
+    // "quero/preciso de um humano"
+    /\b(quero|preciso\s+de)\s+(um\s+)?humano\b/.test(t)
+  )
 }
 
 // A `fromMe` event is EITHER our own API echo (the bot's reply) or a message the
@@ -74,7 +93,17 @@ async function maybePauseOnOwnerReply(instanceId: string, body: any): Promise<vo
   if (!remoteJid.endsWith('@s.whatsapp.net')) return // 1:1 customer chats only
   const m = body?.data?.message ?? {}
   const text = (m.conversation || m.extendedTextMessage?.text || '').trim()
-  if (!text) return                            // only manual text replies act
+  // BOT-13: mídia enviada manualmente pelo dono (áudio, imagem, vídeo,
+  // documento) também significa "humano assumiu a conversa" — deve pausar o
+  // bot igual a uma resposta em texto. O bot só envia texto, então mídia
+  // fromMe nunca é echo nosso (e o wasSentByBot abaixo cobre os echos).
+  const mediaLabel =
+    m.imageMessage ? '[imagem]' :
+    (m.audioMessage || m.pttMessage) ? '[áudio]' :
+    m.videoMessage ? '[vídeo]' :
+    m.documentMessage ? '[documento]' :
+    m.stickerMessage ? '[figurinha]' : ''
+  if (!text && !mediaLabel) return             // nothing actionable (reactions, etc.)
   if (await wasSentByBot(key?.id)) return       // our own bot/system echo — ignore
 
   const { rows: [inst] } = await db.query('SELECT tenant_id FROM whatsapp_instances WHERE instance_name = $1', [instanceId])
@@ -92,7 +121,8 @@ async function maybePauseOnOwnerReply(instanceId: string, body: any): Promise<vo
   if (!conv) return // owner messaged someone with no conversation yet — nothing to do
 
   // Owner typed the configured keyword → hand this conversation BACK to the bot now.
-  if (cfg.owner_resume_keyword && text.toLowerCase() === cfg.owner_resume_keyword.toLowerCase()) {
+  // (Only meaningful for text — media never matches the keyword.)
+  if (text && cfg.owner_resume_keyword && text.toLowerCase() === cfg.owner_resume_keyword.toLowerCase()) {
     await db.query('UPDATE conversations SET bot_paused_until = NULL WHERE id = $1', [conv.id])
     if (cfg.resume_message) await evolutionSend(instanceId, phone, cfg.resume_message)
     return
@@ -102,10 +132,11 @@ async function maybePauseOnOwnerReply(instanceId: string, body: any): Promise<vo
 
   const until = new Date(Date.now() + cfg.timeout_min * 60_000)
   await db.query('UPDATE conversations SET bot_paused_until = $1 WHERE id = $2', [until, conv.id])
-  // Keep the owner's manual reply in history so the bot has context when it resumes.
+  // Keep the owner's manual reply in history so the bot has context when it
+  // resumes (media becomes a placeholder like '[áudio]', same as elsewhere).
   await db.query(
     'INSERT INTO messages (tenant_id, conversation_id, role, content) VALUES ($1,$2,$3,$4)',
-    [tenantId, conv.id, 'assistant', text]
+    [tenantId, conv.id, 'assistant', text || mediaLabel]
   )
 }
 
@@ -237,11 +268,9 @@ export const webhookRoutes: FastifyPluginAsync = async (app) => {
         (tenantStatus.status === 'trial' && tenantStatus.trial_ends_at && new Date(tenantStatus.trial_ends_at) < new Date())
       if (botBlocked) return reply.send({ ok: true, skipped: 'tenant_inactive' })
 
-      // Per-sender rate limit: a single abusive number can't burn the AI budget
-      // (40 bot runs/hour per customer per tenant). Exceeded → drop silently.
-      if (await isSenderRateLimited(tenantId, customerPhone)) {
-        return reply.send({ ok: true, skipped: 'rate_limited' })
-      }
+      // Per-sender rate limit: consumed no botDispatcher (1x por EXECUÇÃO do bot,
+      // no flush do debounce — não por mensagem recebida). Lá a mensagem é
+      // persistida e o cliente recebe um único aviso, nunca um descarte silencioso.
 
       // Find or create customer — never overwrite a real name with the phone number
       let customer: { id: string; name: string; last_name: string | null; phone: string }
@@ -285,6 +314,16 @@ export const webhookRoutes: FastifyPluginAsync = async (app) => {
         await db.query(
           'INSERT INTO messages (tenant_id, conversation_id, role, content) VALUES ($1,$2,$3,$4)',
           [tenantId, conversationId, 'user', textContent || handoff.button_label]
+        )
+        // O ack diz "já avisei a equipe" — então AVISE de fato: registra o evento
+        // (visível ao tenant/Root Admin via bot_errors) além da mensagem do
+        // cliente que já fica no WhatsApp do dono.
+        // TODO: enviar push (mobile) / e-mail ao dono quando houver mecanismo de
+        // notificação ativa — hoje o registro abaixo é o aviso persistido.
+        await logBotError(
+          tenantId, 'handoff_solicitado',
+          `Cliente ${customerPhone} pediu atendimento humano — bot pausado até ${until.toISOString()}. Um humano precisa assumir esta conversa.`,
+          conversationId
         )
         await db.query(
           'INSERT INTO messages (tenant_id, conversation_id, role, content) VALUES ($1,$2,$3,$4)',
