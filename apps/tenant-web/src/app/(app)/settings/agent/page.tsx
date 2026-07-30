@@ -21,6 +21,7 @@ const BLANK = {
   // Tri-state ('inherit' = usar padrão global do Root Admin).
   allow_price_list: 'inherit' as 'inherit' | 'on' | 'off',
   collect_last_name: 'inherit' as 'inherit' | 'on' | 'off',
+  allow_payment_talk: 'inherit' as 'inherit' | 'on' | 'off',
   reminder_return_template: '',
   reminder_appointment_template: '',
   catalog_files: [] as { name: string; url: string }[],
@@ -76,6 +77,7 @@ export default function AgentPage() {
       reminder2_minutes:    config.reminder2_minutes ?? 30,
       allow_price_list:     config.allow_price_list == null ? 'inherit' : (config.allow_price_list ? 'on' : 'off'),
       collect_last_name:    config.collect_last_name == null ? 'inherit' : (config.collect_last_name ? 'on' : 'off'),
+      allow_payment_talk:   config.allow_payment_talk == null ? 'inherit' : (config.allow_payment_talk ? 'on' : 'off'),
       reminder_return_template:      config.reminder_return_template ?? '',
       reminder_appointment_template: config.reminder_appointment_template ?? '',
       catalog_files:        config.catalog_files ?? [],
@@ -101,6 +103,7 @@ export default function AgentPage() {
       ...f,
       allow_price_list: triState(f.allow_price_list),
       collect_last_name: triState(f.collect_last_name),
+      allow_payment_talk: triState(f.allow_payment_talk),
       reminder_return_template: f.reminder_return_template.trim() || null,
       reminder_appointment_template: f.reminder_appointment_template.trim() || null,
     }
@@ -355,6 +358,13 @@ export default function AgentPage() {
                     <option value="inherit">Herdar padrão da plataforma</option>
                     <option value="on">Sim, coletar</option>
                     <option value="off">Não coletar</option>
+                  </select>
+                </Field>
+                <Field label="Falar sobre pagamento" hint="Se o bot pode oferecer link de pagamento, PIX, desconto e parcelamento (conforme suas instruções). 'Sim' libera mesmo que o padrão da plataforma esteja desligado.">
+                  <select value={form.allow_payment_talk} onChange={(e) => set('allow_payment_talk', e.target.value)} className={inputCls}>
+                    <option value="inherit">Herdar padrão da plataforma</option>
+                    <option value="on">Sim, pode falar</option>
+                    <option value="off">Não falar</option>
                   </select>
                 </Field>
               </div>

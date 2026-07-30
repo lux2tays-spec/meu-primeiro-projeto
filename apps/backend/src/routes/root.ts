@@ -21,6 +21,7 @@ import {
 } from '../lib/supportBotConfig'
 import { encrypt, decrypt, maskSecret } from '../lib/crypto'
 import { logAdminAction, auditFromRequest } from '../lib/auditLog'
+import { sendBroadcast } from '../lib/notifications'
 
 // Secret fields (per platform_settings key) that must be encrypted at rest and
 // never returned in full to the admin panel.
@@ -1624,5 +1625,38 @@ export const rootRoutes: FastifyPluginAsync = async (app) => {
     )
     await logAdminAction(auditFromRequest(request, 'export.ai_usage', 'csv', `${rows.length} tenants (mês atual)`))
     return sendCsv(reply, 'uso-ia', csv)
+  })
+
+  // ── Comunicados (broadcasts) ────────────────────────────────────────────────
+  // Envia um aviso a todos os proprietários ou a todos os usuários, pelos canais
+  // escolhidos (aviso no sistema, e-mail e/ou WhatsApp).
+  const broadcastSchema = z.object({
+    title: z.string().min(1).max(140),
+    body: z.string().min(1).max(2000),
+    link: z.string().max(500).optional(),
+    target: z.enum(['owners', 'all']),
+    channels: z.array(z.enum(['inapp', 'push', 'email', 'whatsapp'])).min(1),
+  })
+
+  app.post('/broadcasts', async (request, reply) => {
+    const { title, body, link, target, channels } = broadcastSchema.parse(request.body)
+    const result = await sendBroadcast({
+      title, body, link: link || null, target, channels,
+      createdBy: request.user.user_id,
+    })
+    await logAdminAction(auditFromRequest(request, 'broadcast.send', result.broadcastId ?? 'n/a',
+      `alvo=${target}, canais=${channels.join('+')}, destinatários=${result.recipients}`))
+    return reply.send({ ok: true, recipients: result.recipients, id: result.broadcastId })
+  })
+
+  app.get('/broadcasts', async (_request, reply) => {
+    const { rows } = await db.query(
+      `SELECT b.id, b.title, b.body, b.link, b.target, b.channels, b.recipients_count,
+              b.created_at, u.name AS created_by_name
+       FROM broadcasts b
+       LEFT JOIN users u ON u.id = b.created_by
+       ORDER BY b.created_at DESC LIMIT 50`
+    )
+    return reply.send(rows)
   })
 }

@@ -14,6 +14,7 @@ import { getEvolutionConfig } from '../lib/integrationConfig'
 import { getHandoffConfig } from '../lib/handoffConfig'
 import { SUPPORT_INSTANCE, updateSupportBotConfig } from '../lib/supportBotConfig'
 import { runSupportBot } from '../services/supportBot'
+import { notifyTenantManagers } from '../lib/notifications'
 
 // Validate the shared secret Evolution must send with every webhook.
 // Enabled only when a webhook secret is configured (Root Admin panel, with
@@ -286,6 +287,14 @@ export const webhookRoutes: FastifyPluginAsync = async (app) => {
           [tenantId, customerPhone, customerPhone]
         )
         customer = c
+        // Aviso: novo cliente iniciou conversa no WhatsApp (ponto 4).
+        notifyTenantManagers(tenantId, {
+          type: 'new_customer',
+          title: 'Novo cliente no WhatsApp',
+          body: `Um novo contato (${customerPhone}) iniciou uma conversa.`,
+          link: '/customers',
+          data: { customer_id: c.id },
+        }).catch((e) => console.error('[notifications] new_customer falhou:', e))
       }
 
       // Find or create conversation

@@ -4,6 +4,7 @@ import { Ionicons } from '@expo/vector-icons'
 import { useQuery } from '@tanstack/react-query'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useAuthStore } from '@/lib/store'
+import { usePushNotifications } from '@/lib/push'
 import { tenantApi } from '@/lib/api'
 import { onboardingSession } from '@/lib/onboarding-session'
 import { colors } from '@/lib/theme'
@@ -14,6 +15,10 @@ export default function AppLayout() {
   const role = useAuthStore((s) => s.role)
   const theme = useTheme()
   const insets = useSafeAreaInsets()
+
+  // Push: registra o token quando logado e trata o toque em notificações.
+  // Seguro no Expo Go / sem EAS configurado (apenas não faz nada).
+  usePushNotifications()
   // Colaborador (staff) não vê o módulo Financeiro na navegação.
   const canSeeFinance = ['owner', 'admin', 'root'].includes(role ?? '')
 
@@ -92,6 +97,7 @@ export default function AppLayout() {
       {/* Rotas de navegação interna — não aparecem na tab bar */}
       <Tabs.Screen name="appointments" options={{ tabBarButton: () => null, headerShown: false }} />
       <Tabs.Screen name="comissoes" options={{ tabBarButton: () => null, headerShown: false }} />
+      <Tabs.Screen name="notifications" options={{ tabBarButton: () => null, headerShown: false }} />
     </Tabs>
   )
 }

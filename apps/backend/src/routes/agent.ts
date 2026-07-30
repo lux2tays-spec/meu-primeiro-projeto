@@ -33,6 +33,7 @@ const updateSchema = z.object({
   // Per-tenant bot behaviour (null = inherit global default from bot_config).
   allow_price_list:     z.boolean().nullable().optional(),
   collect_last_name:    z.boolean().nullable().optional(),
+  allow_payment_talk:   z.boolean().nullable().optional(),
   reminder_return_template:      z.string().max(2000).nullable().optional(),
   reminder_appointment_template: z.string().max(2000).nullable().optional(),
 }).merge(handoffUpdateSchema)

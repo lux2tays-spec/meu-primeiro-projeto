@@ -7,10 +7,11 @@ import { isTenantToken, getTokenPayload } from '@/lib/auth'
 import { useQuery } from '@tanstack/react-query'
 import BrandLogo from '@/components/BrandLogo'
 import { useBranding } from '@/components/BrandingProvider'
+import NotificationBell from '@/components/NotificationBell'
 import {
   LayoutDashboard, CalendarDays, Users, Wallet, MessageCircle, Bot, Tag,
   UserCog, Clock, CreditCard, Package, Share2, LifeBuoy, LogOut, Trash2,
-  Menu, Lock, AlarmClock, Coins, UserCircle, CalendarCheck, type LucideIcon,
+  Menu, Lock, AlarmClock, Coins, UserCircle, CalendarCheck, Bell, type LucideIcon,
 } from 'lucide-react'
 
 // managerOnly: SAL-11 — papéis "staff" não veem entradas de gestão financeira.
@@ -30,6 +31,7 @@ const NAV: { href: string; icon: LucideIcon; label: string; managerOnly?: boolea
   { href: '/settings/subscription', icon: Package,         label: 'Assinatura' },
   { href: '/settings/affiliate',    icon: Share2,          label: 'Afiliados' },
   { href: '/settings/perfil',       icon: UserCircle,      label: 'Meu Perfil' },
+  { href: '/settings/notifications', icon: Bell,           label: 'Notificações' },
   { href: '/settings/support',      icon: LifeBuoy,        label: 'Suporte' },
 ]
 
@@ -207,6 +209,10 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
               <p className="text-white text-xs font-medium truncate">{me?.name ?? payload?.role ?? 'user'}</p>
               <p className="text-gray-400 text-[11px] truncate">{me?.role ?? payload?.role ?? ''}</p>
             </div>
+            {/* Sino de notificações (desktop) — dropdown abre para cima */}
+            <div className="hidden lg:block">
+              <NotificationBell dark />
+            </div>
           </div>
           <button
             onClick={logout}
@@ -233,6 +239,9 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
             <Menu size={22} strokeWidth={1.75} />
           </button>
           <span className="font-bold text-gray-900">{appName}</span>
+          <div className="ml-auto">
+            <NotificationBell />
+          </div>
         </header>
 
         <main className="flex-1 overflow-y-auto p-4 lg:p-8">

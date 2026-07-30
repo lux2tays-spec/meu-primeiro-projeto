@@ -264,6 +264,15 @@ export default function CalendarPage() {
             <button onClick={() => navigate(1)} aria-label="Próximo período" className="p-2 hover:bg-gray-100 rounded-xl text-gray-600">
               <ChevronRight size={18} strokeWidth={2} />
             </button>
+            {/* Seletor de data: pula direto para qualquer dia/semana/mês (inclusive
+                trocando de mês), sem precisar avançar de um em um. */}
+            <input
+              type="date"
+              value={anchor.toLocaleDateString('en-CA')}
+              onChange={(e) => { if (e.target.value) setAnchor(new Date(`${e.target.value}T00:00:00`)) }}
+              aria-label="Ir para uma data"
+              className="ml-1 h-9 px-2.5 rounded-xl border border-gray-200 text-sm text-gray-700 bg-white focus:outline-none focus:ring-2 focus:ring-primary"
+            />
             <span className="ml-2 font-semibold text-gray-900 text-sm capitalize">{periodLabel}</span>
           </div>
         </div>
@@ -605,6 +614,9 @@ function EditModal({ appointment: a, services, professionals, readOnly = false, 
     notes: a.notes ?? '',
     customer_name: a.customer_name ?? '',
     customer_last_name: a.customer_last_name ?? '',
+    // Valor editável do agendamento (grava em price_snapshot). Inicia no valor
+    // efetivo — a lista já retorna COALESCE(price_snapshot, s.price) em `price`.
+    price: String(Number(a.price ?? 0)),
   })
   const [error, setError] = useState('')
 
@@ -641,7 +653,6 @@ function EditModal({ appointment: a, services, professionals, readOnly = false, 
   }, [timeOptions, slotsLoading, readOnly])
 
   const selectedService = services.find((s) => s.id === form.service_id)
-  const price = form.service_id === a.service_id ? Number(a.price) : Number(selectedService?.price ?? a.price)
   const waLink = `https://wa.me/${String(a.customer_phone ?? '').replace(/\D/g, '')}`
 
   function buildStartsAt() {
@@ -678,6 +689,9 @@ function EditModal({ appointment: a, services, professionals, readOnly = false, 
         starts_at: buildStartsAt(),
         status: form.status,
         notes: form.notes || null,
+        // Valor editado grava em price_snapshot (vazio limpa o override → volta ao
+        // preço vigente do serviço).
+        price_snapshot: form.price.trim() === '' ? null : Number(form.price),
       },
       ...(customerChanged ? { customer: { name, last_name: lastName } } : {}),
     })
@@ -685,7 +699,13 @@ function EditModal({ appointment: a, services, professionals, readOnly = false, 
 
   function markCompleted() {
     setError('')
-    saveMutation.mutate({ appointment: { status: 'completed' } })
+    // Preserva o valor exibido/editado ao concluir pela ação rápida.
+    saveMutation.mutate({
+      appointment: {
+        status: 'completed',
+        ...(form.price.trim() === '' ? {} : { price_snapshot: Number(form.price) }),
+      },
+    })
   }
 
   return (
@@ -739,7 +759,17 @@ function EditModal({ appointment: a, services, professionals, readOnly = false, 
 
         <div>
           <label className={labelCls}>Serviço</label>
-          <select value={form.service_id} onChange={(e) => setForm({ ...form, service_id: e.target.value })} className={inputCls} disabled={readOnly}>
+          <select
+            value={form.service_id}
+            onChange={(e) => {
+              // Trocar de serviço traz o preço do novo serviço para o campo Valor
+              // (o usuário ainda pode ajustar manualmente depois).
+              const newSvc = services.find((s) => s.id === e.target.value)
+              setForm({ ...form, service_id: e.target.value, price: newSvc ? String(Number(newSvc.price)) : form.price })
+            }}
+            className={inputCls}
+            disabled={readOnly}
+          >
             {services.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
           </select>
         </div>
@@ -794,9 +824,25 @@ function EditModal({ appointment: a, services, professionals, readOnly = false, 
           </div>
           <div>
             <label className={labelCls}>Valor</label>
-            <div className="h-10 px-3 rounded-xl border border-gray-100 bg-gray-50 text-sm flex items-center font-semibold text-gray-700">
-              {fmtBRL(price)}
-            </div>
+            {readOnly ? (
+              <div className="h-10 px-3 rounded-xl border border-gray-100 bg-gray-50 text-sm flex items-center font-semibold text-gray-700">
+                {fmtBRL(Number(form.price || 0))}
+              </div>
+            ) : (
+              <div className="relative">
+                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-gray-500 pointer-events-none">R$</span>
+                <input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  inputMode="decimal"
+                  value={form.price}
+                  onChange={(e) => setForm({ ...form, price: e.target.value })}
+                  className={`${inputCls} pl-9 font-semibold`}
+                  placeholder="0,00"
+                />
+              </div>
+            )}
           </div>
         </div>
 

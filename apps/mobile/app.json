@@ -30,11 +30,24 @@
     },
     "plugins": [
       "expo-router",
-      "expo-secure-store"
+      "expo-secure-store",
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/notification-icon.png",
+          "color": "#EF4444",
+          "defaultChannel": "default"
+        }
+      ]
     ],
     "scheme": "agendabot",
     "experiments": {
       "typedRoutes": true
+    },
+    "extra": {
+      "eas": {
+        "projectId": "PREENCHER_COM_eas_init"
+      }
     }
   }
 }

@@ -63,6 +63,17 @@ function toISO(d: Date) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 }
 
+// Converte um valor digitado (aceita "135", "135,50", "1.234,56", "135.50") para
+// número. Usa o ÚLTIMO separador como decimal e trata o resto como milhar.
+function parseBRLPrice(raw: string): number {
+  const cleaned = raw.replace(/[^0-9.,]/g, '')
+  const lastSep = Math.max(cleaned.lastIndexOf(','), cleaned.lastIndexOf('.'))
+  if (lastSep === -1) return parseFloat(cleaned) || 0
+  const intPart = cleaned.slice(0, lastSep).replace(/[.,]/g, '')
+  const decPart = cleaned.slice(lastSep + 1).replace(/[.,]/g, '')
+  return parseFloat(`${intPart}.${decPart}`) || 0
+}
+
 function addDays(d: Date, n: number) {
   const r = new Date(d)
   r.setDate(r.getDate() + n)
@@ -120,6 +131,9 @@ export default function CalendarScreen() {
   // Day strip: stripBase-7 .. stripBase+7 (scrollable), chevrons shift the window
   const [selected, setSelected] = useState(new Date())
   const [stripBase, setStripBase] = useState(new Date())
+  // Seletor de mês/dia: permite pular direto para qualquer data (inclusive
+  // trocando de mês), em vez de avançar semana a semana.
+  const [datePickerOpen, setDatePickerOpen] = useState(false)
   const stripDates = useMemo(
     () => Array.from({ length: 15 }, (_, i) => addDays(stripBase, i - 7)),
     [stripBase]
@@ -191,6 +205,8 @@ export default function CalendarScreen() {
   const [editCustomerName, setEditCustomerName] = useState<string>('')
   const [editCustomerLastName, setEditCustomerLastName] = useState<string>('')
   const [editNotes, setEditNotes] = useState<string>('')
+  // Valor editável do agendamento (grava em price_snapshot). String para o input.
+  const [editPrice, setEditPrice] = useState<string>('')
   // Data/horário originais do agendamento — o horário atual continua selecionável
   // mesmo que o backend não o liste como "livre" (está ocupado por ele próprio).
   const [editOriginalDate, setEditOriginalDate] = useState<string>('')
@@ -240,10 +256,9 @@ export default function CalendarScreen() {
     setEditCustomerName(a.customer_name ?? '')
     setEditCustomerLastName(a.customer_last_name ?? '')
     setEditNotes(a.notes ?? '')
+    // Valor efetivo — a lista já retorna COALESCE(price_snapshot, s.price) em `price`.
+    setEditPrice(String(Number(a.price ?? 0)))
   }
-
-  const editService = services?.find((s: any) => s.id === editServiceId)
-  const editPrice = editService?.price ?? editing?.price ?? 0
 
   const editMutation = useMutation({
     mutationFn: async () => {
@@ -266,6 +281,8 @@ export default function CalendarScreen() {
         starts_at: startsAt.toISOString(),
         status: editStatus,
         notes: editNotes.trim() ? editNotes.trim() : null,
+        // Valor editado grava em price_snapshot (vazio limpa o override).
+        price_snapshot: editPrice.trim() === '' ? null : parseBRLPrice(editPrice),
       })
     },
     onSuccess: () => {
@@ -400,7 +417,15 @@ export default function CalendarScreen() {
         <TouchableOpacity onPress={() => setStripBase(addDays(stripBase, -7))} hitSlop={8}>
           <Ionicons name="chevron-back" size={22} color={colors.primary} />
         </TouchableOpacity>
-        <Text style={styles.monthLabel}>{monthLabel}</Text>
+        <TouchableOpacity
+          style={styles.monthLabelBtn}
+          onPress={() => setDatePickerOpen(true)}
+          accessibilityRole="button"
+          accessibilityLabel="Escolher uma data"
+        >
+          <Text style={styles.monthLabel}>{monthLabel}</Text>
+          <Ionicons name="calendar-outline" size={16} color={colors.primary} />
+        </TouchableOpacity>
         <View style={styles.monthActions}>
           <TouchableOpacity
             style={styles.todayBtn}
@@ -631,7 +656,11 @@ export default function CalendarScreen() {
                         key={s.id}
                         label={s.name}
                         selected={editServiceId === s.id}
-                        onPress={() => setEditServiceId(s.id)}
+                        onPress={() => {
+                          setEditServiceId(s.id)
+                          // Trocar de serviço traz o preço do novo serviço (ainda editável).
+                          setEditPrice(String(Number(s.price ?? 0)))
+                        }}
                       />
                     ))}
                   </View>
@@ -722,11 +751,20 @@ export default function CalendarScreen() {
                     multiline
                   />
 
-                  {/* Valor */}
-                  <View style={styles.priceRow}>
-                    <Text style={styles.fieldLabel}>Valor</Text>
-                    <Text style={styles.priceValue}>{formatBRL(editPrice)}</Text>
-                  </View>
+                  {/* Valor (editável — grava em price_snapshot) */}
+                  <Text style={styles.fieldLabel}>Valor (R$)</Text>
+                  <TextInput
+                    style={styles.priceInput}
+                    value={editPrice}
+                    onChangeText={(v) => setEditPrice(v.replace(/[^0-9,\.]/g, ''))}
+                    keyboardType="decimal-pad"
+                    placeholder="0,00"
+                    placeholderTextColor={colors.textDisabled}
+                  />
+                  <Text style={styles.priceHint}>
+                    Valor cobrado neste atendimento. Altere para dar desconto ou cobrar um valor
+                    diferente do padrão do serviço.
+                  </Text>
 
                   <Button
                     label="Salvar alterações"
@@ -744,6 +782,14 @@ export default function CalendarScreen() {
           </View>
         </KeyboardAvoidingView>
       </Modal>
+
+      {/* ── Month/date picker (pular direto para qualquer dia) ── */}
+      <MonthPickerModal
+        visible={datePickerOpen}
+        value={selected}
+        onClose={() => setDatePickerOpen(false)}
+        onPick={(d) => { setSelected(d); setStripBase(d); setDatePickerOpen(false) }}
+      />
 
       {/* ── Bulk reschedule modal (owner/admin) ── */}
       <Modal visible={bulkOpen} transparent animationType="slide" onRequestClose={() => setBulkOpen(false)}>
@@ -938,6 +984,83 @@ function DateStepper({ value, onChange }: { value: string; onChange: (v: string)
   )
 }
 
+// Seletor de mês em JS puro (sem dependência nativa) para pular para qualquer data.
+function MonthPickerModal({ visible, value, onClose, onPick }: {
+  visible: boolean
+  value: Date
+  onClose: () => void
+  onPick: (d: Date) => void
+}) {
+  const [cursor, setCursor] = useState(() => new Date(value.getFullYear(), value.getMonth(), 1))
+  useEffect(() => {
+    if (visible) setCursor(new Date(value.getFullYear(), value.getMonth(), 1))
+  }, [visible, value])
+
+  const year = cursor.getFullYear()
+  const month = cursor.getMonth()
+  const firstWeekday = new Date(year, month, 1).getDay() // 0=Dom
+  const daysInMonth = new Date(year, month + 1, 0).getDate()
+  const cells: (Date | null)[] = []
+  for (let i = 0; i < firstWeekday; i++) cells.push(null)
+  for (let d = 1; d <= daysInMonth; d++) cells.push(new Date(year, month, d))
+
+  const selectedISO = toISO(value)
+  const todayISO = toISO(new Date())
+  const WEEKDAYS = ['D', 'S', 'T', 'Q', 'Q', 'S', 'S']
+
+  return (
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
+      <TouchableOpacity style={styles.overlay} activeOpacity={1} onPress={onClose}>
+        <TouchableOpacity activeOpacity={1} style={monthPickerStyles.card}>
+          <View style={monthPickerStyles.header}>
+            <TouchableOpacity onPress={() => setCursor(new Date(year, month - 1, 1))} hitSlop={8} style={monthPickerStyles.navBtn}>
+              <Ionicons name="chevron-back" size={20} color={colors.primary} />
+            </TouchableOpacity>
+            <Text style={monthPickerStyles.title}>{MONTHS[month]} {year}</Text>
+            <TouchableOpacity onPress={() => setCursor(new Date(year, month + 1, 1))} hitSlop={8} style={monthPickerStyles.navBtn}>
+              <Ionicons name="chevron-forward" size={20} color={colors.primary} />
+            </TouchableOpacity>
+          </View>
+
+          <View style={monthPickerStyles.weekRow}>
+            {WEEKDAYS.map((w, i) => (
+              <Text key={i} style={monthPickerStyles.weekday}>{w}</Text>
+            ))}
+          </View>
+
+          <View style={monthPickerStyles.grid}>
+            {cells.map((d, i) => {
+              if (!d) return <View key={`e${i}`} style={monthPickerStyles.cell} />
+              const iso = toISO(d)
+              const isSelected = iso === selectedISO
+              const isToday = iso === todayISO
+              return (
+                <TouchableOpacity
+                  key={iso}
+                  style={[monthPickerStyles.cell, monthPickerStyles.dayCell, isSelected && monthPickerStyles.daySelected]}
+                  onPress={() => onPick(d)}
+                >
+                  <Text style={[
+                    monthPickerStyles.dayText,
+                    isToday && !isSelected && monthPickerStyles.dayToday,
+                    isSelected && monthPickerStyles.dayTextSelected,
+                  ]}>
+                    {d.getDate()}
+                  </Text>
+                </TouchableOpacity>
+              )
+            })}
+          </View>
+
+          <TouchableOpacity style={monthPickerStyles.todayBtn} onPress={() => onPick(new Date())}>
+            <Text style={monthPickerStyles.todayBtnText}>Ir para hoje</Text>
+          </TouchableOpacity>
+        </TouchableOpacity>
+      </TouchableOpacity>
+    </Modal>
+  )
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Styles
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1017,6 +1140,36 @@ const stepperStyles = StyleSheet.create({
   label: { fontSize: font.sm, fontWeight: '600', color: colors.text, textTransform: 'capitalize' },
 })
 
+const monthPickerStyles = StyleSheet.create({
+  card: {
+    backgroundColor: colors.surface,
+    borderRadius: radius.lg,
+    padding: spacing.lg,
+    width: '86%',
+    maxWidth: 360,
+    alignSelf: 'center',
+  },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: spacing.md,
+  },
+  navBtn: { width: 36, height: 36, alignItems: 'center', justifyContent: 'center' },
+  title: { fontSize: font.md, fontWeight: '700', color: colors.text, textTransform: 'capitalize' },
+  weekRow: { flexDirection: 'row', marginBottom: spacing.xs },
+  weekday: { flex: 1, textAlign: 'center', fontSize: 11, fontWeight: '600', color: colors.textSecondary },
+  grid: { flexDirection: 'row', flexWrap: 'wrap' },
+  cell: { width: `${100 / 7}%`, aspectRatio: 1, alignItems: 'center', justifyContent: 'center' },
+  dayCell: { borderRadius: radius.full },
+  daySelected: { backgroundColor: colors.primary },
+  dayText: { fontSize: font.sm, fontWeight: '600', color: colors.text },
+  dayToday: { color: colors.primary, fontWeight: '800' },
+  dayTextSelected: { color: '#fff', fontWeight: '800' },
+  todayBtn: { marginTop: spacing.md, alignItems: 'center', paddingVertical: spacing.sm },
+  todayBtnText: { fontSize: font.sm, fontWeight: '700', color: colors.primary },
+})
+
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.background },
   monthRow: {
@@ -1028,7 +1181,8 @@ const styles = StyleSheet.create({
     paddingBottom: spacing.sm,
     gap: spacing.sm,
   },
-  monthLabel: { fontSize: font.lg, fontWeight: '700', color: colors.text, flex: 1 },
+  monthLabelBtn: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 6 },
+  monthLabel: { fontSize: font.lg, fontWeight: '700', color: colors.text, textTransform: 'capitalize' },
   monthActions: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
   todayBtn: {
     paddingHorizontal: spacing.md,
@@ -1234,4 +1388,16 @@ const styles = StyleSheet.create({
     textAlignVertical: 'top',
   },
   hintText: { fontSize: font.sm, color: colors.textSecondary, marginBottom: spacing.sm },
+  priceInput: {
+    borderWidth: 1.5,
+    borderColor: colors.border,
+    borderRadius: radius.md,
+    backgroundColor: colors.surface,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    fontSize: font.md,
+    fontWeight: '700',
+    color: colors.text,
+  },
+  priceHint: { fontSize: font.sm, color: colors.textSecondary, marginTop: spacing.xs, marginBottom: spacing.sm },
 })

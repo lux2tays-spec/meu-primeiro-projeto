@@ -208,7 +208,12 @@ export type BookResult =
   | { ok: false; reason: 'unavailable' | 'invalid' | 'sem_horario_config' | 'dia_bloqueado' | 'horario_no_passado' | 'fora_do_expediente' }
   | { ok: false; reason: 'dia_fechado'; openDays: string[] }
 
-/** Create an appointment for the bot (created_by = NULL). Rechecks conflicts. */
+/**
+ * Create an appointment for the bot (created_by = NULL). Rechecks conflicts.
+ * When `rescheduleId` is given, MOVES that existing appointment in place (same row,
+ * same id) instead of inserting a new one — a remarcação passa a mover o serviço
+ * para a nova data confirmada, sem deixar uma cópia "cancelada" na data antiga.
+ */
 export async function bookAppointment(params: {
   tenantId: string
   customerId: string
@@ -216,8 +221,9 @@ export async function bookAppointment(params: {
   professionalId: string
   date: string
   time: string
+  rescheduleId?: string
 }): Promise<BookResult> {
-  const { tenantId, customerId, serviceId, professionalId, date, time } = params
+  const { tenantId, customerId, serviceId, professionalId, date, time, rescheduleId } = params
 
   const { rows: [service] } = await db.query(
     'SELECT duration_minutes FROM services WHERE id = $1 AND tenant_id = $2',
@@ -291,26 +297,53 @@ export async function bookAppointment(params: {
     // time zone, so the old tsrange(starts_at, ends_at) threw "function does not
     // exist" on EVERY booking, the error was swallowed upstream, and the bot
     // fabricated a confirmation. tstzrange() is the correct range type here.
+    // Conflito de horário — ao remarcar (mover no lugar), o próprio agendamento
+    // não pode conflitar consigo mesmo, então é excluído da checagem.
+    const conflictParams: unknown[] = [professionalId, tenantId, startsAt.toISOString(), endsAt.toISOString()]
+    let conflictExcludeSelf = ''
+    if (rescheduleId) {
+      conflictExcludeSelf = ' AND id <> $5'
+      conflictParams.push(rescheduleId)
+    }
     const { rows: conflicts } = await db.query(
       `SELECT id FROM appointments
        WHERE professional_id = $1 AND tenant_id = $2 AND status <> 'cancelled'
-         AND tstzrange(starts_at, ends_at) && tstzrange($3::timestamptz, $4::timestamptz)`,
-      [professionalId, tenantId, startsAt.toISOString(), endsAt.toISOString()]
+         AND tstzrange(starts_at, ends_at) && tstzrange($3::timestamptz, $4::timestamptz)${conflictExcludeSelf}`,
+      conflictParams
     )
     if (conflicts.length > 0) {
       console.error(`[scheduling] bookAppointment FALHOU: conflito de horário em ${date} ${time} para professional=${professionalId} (tenant=${tenantId})`)
       return { ok: false, reason: 'unavailable' }
     }
 
-    const { rows: [appt] } = await db.query(
-      `INSERT INTO appointments (tenant_id, customer_id, professional_id, service_id, starts_at, ends_at, status, created_by)
-       VALUES ($1, $2, $3, $4, $5, $6, 'confirmed', NULL) RETURNING id`,
-      [tenantId, customerId, professionalId, serviceId, startsAt.toISOString(), endsAt.toISOString()]
-    )
+    let apptId: string
+    if (rescheduleId) {
+      // Remarcação: move a MESMA linha para a nova data/serviço/profissional e
+      // garante status 'confirmed'. Sem INSERT novo, sem cancelar a antiga.
+      const { rows: [appt] } = await db.query(
+        `UPDATE appointments
+           SET professional_id = $1, service_id = $2, starts_at = $3, ends_at = $4, status = 'confirmed'
+         WHERE id = $5 AND tenant_id = $6 RETURNING id`,
+        [professionalId, serviceId, startsAt.toISOString(), endsAt.toISOString(), rescheduleId, tenantId]
+      )
+      if (!appt) {
+        console.error(`[scheduling] bookAppointment (reschedule) FALHOU: agendamento ${rescheduleId} não encontrado (tenant=${tenantId})`)
+        return { ok: false, reason: 'invalid' }
+      }
+      apptId = appt.id
+      console.log(`[scheduling] bookAppointment OK (remarcado in-place): appointment=${apptId} → ${date} ${time} customer=${customerId} professional=${professionalId} (tenant=${tenantId})`)
+    } else {
+      const { rows: [appt] } = await db.query(
+        `INSERT INTO appointments (tenant_id, customer_id, professional_id, service_id, starts_at, ends_at, status, created_by)
+         VALUES ($1, $2, $3, $4, $5, $6, 'confirmed', NULL) RETURNING id`,
+        [tenantId, customerId, professionalId, serviceId, startsAt.toISOString(), endsAt.toISOString()]
+      )
+      apptId = appt.id
+      console.log(`[scheduling] bookAppointment OK: appointment=${apptId} ${date} ${time} customer=${customerId} professional=${professionalId} (tenant=${tenantId})`)
+    }
 
-    console.log(`[scheduling] bookAppointment OK: appointment=${appt.id} ${date} ${time} customer=${customerId} professional=${professionalId} (tenant=${tenantId})`)
-    syncAppointmentToCalendar(appt.id).catch(console.error)
-    return { ok: true, appointmentId: appt.id, startsAt: startsAt.toISOString() }
+    syncAppointmentToCalendar(apptId).catch(console.error)
+    return { ok: true, appointmentId: apptId, startsAt: startsAt.toISOString() }
   } catch (err) {
     // Corrida de double-booking: duas reservas simultâneas passaram pela checagem
     // de conflito acima, mas a EXCLUDE constraint appointments_no_overlap

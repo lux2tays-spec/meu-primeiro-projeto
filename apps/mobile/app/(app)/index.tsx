@@ -6,6 +6,7 @@ import { Ionicons } from '@expo/vector-icons'
 import { StatCard } from '@/components/StatCard'
 import { AppointmentCard } from '@/components/AppointmentCard'
 import { Badge } from '@/components/ui/Badge'
+import { NotificationBell } from '@/components/NotificationBell'
 import { tenantApi, appointmentsApi } from '@/lib/api'
 import { colors, font, spacing } from '@/lib/theme'
 
@@ -63,12 +64,15 @@ export default function DashboardScreen() {
             <Text style={styles.greeting}>{greeting}! 👋</Text>
             <Text style={styles.businessName}>{tenant?.name ?? '...'}</Text>
           </View>
-          {tenant && (
-            <Badge
-              label={tenant.plan.charAt(0).toUpperCase() + tenant.plan.slice(1)}
-              variant={planVariant[tenant.plan] ?? 'default'}
-            />
-          )}
+          <View style={styles.headerRight}>
+            <NotificationBell />
+            {tenant && (
+              <Badge
+                label={tenant.plan.charAt(0).toUpperCase() + tenant.plan.slice(1)}
+                variant={planVariant[tenant.plan] ?? 'default'}
+              />
+            )}
+          </View>
         </View>
 
         {/* Onboarding progress card */}
@@ -169,6 +173,7 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.background },
   content: { padding: spacing.lg, gap: spacing.lg },
   header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' },
+  headerRight: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
   greeting: { fontSize: font.md, color: colors.textSecondary },
   businessName: { fontSize: font.xl, fontWeight: '700', color: colors.text, marginTop: 2 },
   onboardingCard: {

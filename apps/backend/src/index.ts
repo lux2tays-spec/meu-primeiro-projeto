@@ -24,12 +24,14 @@ import { financeiroRoutes } from './routes/financeiro'
 import { commissionRoutes } from './routes/commissions'
 import { subscriptionRoutes } from './routes/subscription'
 import { brandingRoutes } from './routes/branding'
+import { notificationRoutes } from './routes/notifications'
 import { resumePendingBotFlushes } from './services/botDispatcher'
 import { startReminderJob } from './jobs/reminders'
 import { startAppointmentReminders } from './jobs/appointmentReminders'
 import { startSubscriptionEnforcer } from './jobs/subscriptionEnforcer'
 import { startWhatsappReconciler } from './jobs/whatsappReconciler'
 import { startTrialEndingNotifier } from './jobs/trialEndingNotifier'
+import { startServiceCompletionNotifier } from './jobs/serviceCompletion'
 
 // Validate required environment variables at boot — fail fast before binding to port
 const REQUIRED_ENVS = ['JWT_SECRET', 'DATABASE_URL', 'REDIS_URL', 'ANTHROPIC_API_KEY'] as const
@@ -175,6 +177,7 @@ async function start() {
   await app.register(appointmentRoutes, { prefix: '/appointments' })
   await app.register(whatsappRoutes, { prefix: '/whatsapp' })
   await app.register(agentRoutes, { prefix: '/agent' })
+  await app.register(notificationRoutes, { prefix: '/notifications' })
   await app.register(supportRoutes, { prefix: '/support' })
 
   // Affiliate routes (any authenticated user)
@@ -215,6 +218,7 @@ async function start() {
   startSubscriptionEnforcer()
   startWhatsappReconciler()
   startTrialEndingNotifier()
+  startServiceCompletionNotifier()
 }
 
 // Graceful shutdown — drain in-flight requests before exiting

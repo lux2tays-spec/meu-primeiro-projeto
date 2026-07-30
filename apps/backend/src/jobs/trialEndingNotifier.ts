@@ -1,4 +1,5 @@
 import { db } from '../lib/db'
+import { notifyTenantManagers } from '../lib/notifications'
 
 // PAY-8: aviso de trial acabando — recuperação de conversão.
 //
@@ -35,8 +36,16 @@ export async function notifyTrialsEndingSoon(): Promise<void> {
 
   for (const t of rows) {
     console.log(
-      `[trial-notice] tenant=${t.id} "${t.name}": trial termina em ${t.ends_fmt} — aviso registrado (trial_ending_notified_at). TODO: push/e-mail.`
+      `[trial-notice] tenant=${t.id} "${t.name}": trial termina em ${t.ends_fmt} — aviso registrado (trial_ending_notified_at).`
     )
+    // Notifica o dono via central de avisos (+ canais habilitados). O UPDATE acima
+    // já garante que isto roda uma única vez por janela de trial.
+    notifyTenantManagers(t.id, {
+      type: 'trial_ending',
+      title: 'Seu período de teste está acabando',
+      body: `Seu teste termina em ${t.ends_fmt}. Assine para manter o atendimento no WhatsApp ativo.`,
+      link: '/settings/subscription',
+    }).catch((e) => console.error('[trial-notice] notificação falhou:', e))
   }
   if (rows.length > 0) {
     console.log(`[trial-notice] ${rows.length} aviso(s) de fim de trial registrado(s)`)

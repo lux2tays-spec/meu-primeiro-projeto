@@ -396,6 +396,40 @@ export const supportApi = {
     api.post<{ ok: boolean }>(`/support/tickets/${id}/messages`, { body }),
 }
 
+export interface AppNotification {
+  id: string
+  tenant_id: string | null
+  type: string
+  title: string
+  body: string
+  link: string | null
+  data: Record<string, unknown> | null
+  read_at: string | null
+  created_at: string
+}
+
+export interface NotificationPrefs {
+  channel_inapp: boolean
+  channel_push: boolean
+  channel_email: boolean
+  channel_whatsapp: boolean
+  evt_appointment_reminder: boolean
+  evt_new_customer: boolean
+  evt_reschedule: boolean
+  evt_confirmation: boolean
+  evt_service_completion: boolean
+  evt_broadcast: boolean
+}
+
+export const notificationsApi = {
+  list: (limit = 30) => api.get<{ notifications: AppNotification[]; unread: number }>(`/notifications?limit=${limit}`),
+  unreadCount: () => api.get<{ unread: number }>('/notifications/unread-count'),
+  markRead: (id: string) => api.patch<{ ok: boolean }>(`/notifications/${id}/read`, {}),
+  markAllRead: () => api.post<{ ok: boolean }>('/notifications/read-all', {}),
+  preferences: () => api.get<NotificationPrefs>('/notifications/preferences'),
+  updatePreferences: (prefs: Partial<NotificationPrefs>) => api.put<NotificationPrefs>('/notifications/preferences', prefs),
+}
+
 export const subscriptionApi = {
   plans: () => api.get<any[]>('/subscription/plans'),
   paymentInfo: () => api.get<{ available: boolean; public_key: string | null }>('/subscription/payment-info'),

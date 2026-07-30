@@ -169,6 +169,29 @@ async function sendViaSmtp(p: SendEmailParams): Promise<boolean> {
 
 // ── E-mails transacionais (remetente: contato) ───────────────────────────────
 
+/**
+ * E-mail simples de aviso/notificação (remetente: suporte). Usado pelo sistema
+ * de notificações para entregar avisos por e-mail quando o usuário opta por isso.
+ * `bodyHtml` é o conteúdo (será embrulhado em um layout básico).
+ */
+export async function sendNotificationEmail(to: string, subject: string, bodyHtml: string, link?: string) {
+  const cta = link
+    ? `<a href="${link}" style="display:inline-block;margin:16px 0;padding:12px 24px;background:#6366f1;color:#fff;border-radius:10px;text-decoration:none;font-weight:700;font-size:15px">Abrir</a>`
+    : ''
+  await sendEmail({
+    from: await resolveFrom('suporte'),
+    to,
+    subject,
+    html: `
+      <div style="font-family:sans-serif;max-width:480px;margin:0 auto;color:#111">
+        <div style="font-size:15px;line-height:1.5">${bodyHtml}</div>
+        ${cta}
+        <p style="color:#999;font-size:12px;margin-top:24px">Você recebeu este aviso porque ativou notificações por e-mail no AiConfirma. Ajuste em Configurações → Notificações.</p>
+      </div>
+    `,
+  })
+}
+
 export async function sendVerificationEmail(to: string, name: string, token: string) {
   const baseUrl = process.env.TENANT_WEB_URL ?? 'http://localhost:3002'
   const link = `${baseUrl}/confirmar-email?token=${token}`

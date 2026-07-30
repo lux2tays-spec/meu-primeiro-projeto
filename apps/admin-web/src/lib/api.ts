@@ -201,6 +201,11 @@ export const rootApi = {
   exportUsers: () => downloadFile('/root/export/users', 'usuarios.csv'),
   exportAiUsage: () => downloadFile('/root/export/ai-usage', 'uso-ia.csv'),
 
+  // Comunicados / broadcasts
+  sendBroadcast: (data: { title: string; body: string; link?: string; target: 'owners' | 'all'; channels: Array<'inapp' | 'push' | 'email' | 'whatsapp'> }) =>
+    api.post<{ ok: boolean; recipients: number; id: string | null }>('/root/broadcasts', data),
+  broadcasts: () => api.get<any[]>('/root/broadcasts'),
+
   // Business Type Templates
   businessTypeTemplates: () => api.get<any[]>('/root/business-type-templates'),
   createBusinessTypeTemplate: (data: any) => api.post<any>('/root/business-type-templates', data),

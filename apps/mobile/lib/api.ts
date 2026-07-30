@@ -286,6 +286,45 @@ export const appointmentsApiExt = {
   }),
 }
 
+// Notificações / avisos
+export interface AppNotification {
+  id: string
+  tenant_id: string | null
+  type: string
+  title: string
+  body: string
+  link: string | null
+  data: Record<string, unknown> | null
+  read_at: string | null
+  created_at: string
+}
+
+export interface NotificationPrefs {
+  channel_inapp: boolean
+  channel_push: boolean
+  channel_email: boolean
+  channel_whatsapp: boolean
+  evt_appointment_reminder: boolean
+  evt_new_customer: boolean
+  evt_reschedule: boolean
+  evt_confirmation: boolean
+  evt_service_completion: boolean
+  evt_broadcast: boolean
+}
+
+export const notificationsApi = {
+  list: (limit = 30) => api.get<{ notifications: AppNotification[]; unread: number }>(`/notifications?limit=${limit}`),
+  unreadCount: () => api.get<{ unread: number }>('/notifications/unread-count'),
+  markRead: (id: string) => api.patch<any>(`/notifications/${id}/read`, {}),
+  markAllRead: () => api.post<any>('/notifications/read-all', {}),
+  preferences: () => api.get<NotificationPrefs>('/notifications/preferences'),
+  updatePreferences: (prefs: Partial<NotificationPrefs>) => api.put<NotificationPrefs>('/notifications/preferences', prefs),
+  registerPushToken: (token: string, platform?: 'ios' | 'android') =>
+    api.post<any>('/notifications/push-token', { token, platform }),
+  deletePushToken: (token: string) =>
+    request<any>('/notifications/push-token', { method: 'DELETE', body: JSON.stringify({ token }) }),
+}
+
 // Working hours
 export const hoursApi = {
   get: (professionalId?: string) =>

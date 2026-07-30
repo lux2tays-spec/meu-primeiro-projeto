@@ -14,6 +14,7 @@ const nav = [
   { href: '/dashboard/ai-templates', icon: '🤖', label: 'Templates IA' },
   { href: '/dashboard/ai',          icon: '⚡', label: 'IA & Custos' },
   { href: '/dashboard/bot-suporte', icon: '💬', label: 'Bot do Site' },
+  { href: '/dashboard/notificacoes', icon: '📢', label: 'Notificações' },
   { href: '/dashboard/payments',    icon: '💳', label: 'Pagamentos' },
   { href: '/dashboard/integracoes', icon: '🔌', label: 'Integrações' },
   { href: '/dashboard/infra',       icon: '🩺', label: 'Infra' },

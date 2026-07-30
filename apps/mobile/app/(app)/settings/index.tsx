@@ -8,6 +8,7 @@ import { Badge } from '@/components/ui/Badge'
 import { useAuthStore } from '@/lib/store'
 import { useBrandingStore } from '@/lib/branding'
 import { tenantApi, authApi } from '@/lib/api'
+import { unregisterPushToken } from '@/lib/push'
 import { colors, font, spacing } from '@/lib/theme'
 
 const WEB_URL = process.env.EXPO_PUBLIC_WEB_URL ?? 'https://aiconfirma.com.br'
@@ -21,7 +22,7 @@ export default function SettingsScreen() {
   function handleLogout() {
     Alert.alert('Sair', 'Deseja sair da conta?', [
       { text: 'Cancelar', style: 'cancel' },
-      { text: 'Sair', style: 'destructive', onPress: () => { clearAuth(); router.replace('/(auth)/login') } },
+      { text: 'Sair', style: 'destructive', onPress: async () => { await unregisterPushToken(); clearAuth(); router.replace('/(auth)/login') } },
     ])
   }
 
@@ -170,6 +171,7 @@ export default function SettingsScreen() {
         <Text style={styles.section}>Conta</Text>
         <Card style={styles.group}>
           <SettingsRow icon="person-circle-outline" label="Meu Perfil" subtitle="Nome, telefone, e-mail de login e senha" onPress={() => router.push('/(app)/settings/perfil')} />
+          <SettingsRow icon="notifications-outline" label="Notificações" subtitle="Escolha como e sobre o que ser avisado" onPress={() => router.push('/(app)/settings/notifications' as any)} />
           <View style={styles.divider} />
           <SettingsRow icon="log-out-outline" iconColor={colors.danger} label="Sair" showChevron={false} onPress={handleLogout} />
           <View style={styles.divider} />

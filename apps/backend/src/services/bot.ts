@@ -11,6 +11,7 @@ import {
 import { getAiConfig, resolveModel, getBotConfig, type BotConfig } from '../lib/botConfig'
 import { recordUsage, monthlySpend } from '../lib/aiUsage'
 import { sendInviteForAppointment, sendInvitesForCustomerUpcoming } from './appointmentInvite'
+import { notifyAppointmentParties } from '../lib/notifications'
 
 const TZ = 'America/Sao_Paulo'
 
@@ -27,7 +28,7 @@ async function getTenantContext(tenantId: string) {
        ac.business_type, ac.address, ac.neighborhood, ac.city, ac.state,
        ac.instagram_url, ac.google_maps_url, ac.website_url, ac.whatsapp_number,
        ac.custom_instructions, ac.return_reminder_days,
-       ac.allow_price_list, ac.collect_last_name,
+       ac.allow_price_list, ac.collect_last_name, ac.allow_payment_talk,
        t.name AS business_name, t.plan,
        btt.system_prompt AS template_system_prompt,
        btt.custom_instructions AS template_custom_instructions,
@@ -166,6 +167,9 @@ function buildSystemPrompt(ctx: any, live: any, profile: any, upcoming: Upcoming
   // global default (bot_config). `?? ` keeps a tenant's explicit false.
   const allowPriceList = ctx.allow_price_list ?? botCfg.allow_price_list_default
   const collectLastName = ctx.collect_last_name ?? botCfg.collect_last_name_default
+  // Falar sobre pagamento: override por-tenant (Sim/Não) tem prioridade; null
+  // (Herdar) cai no flag global do Root Admin. `??` preserva um false explícito.
+  const allowPaymentTalk = ctx.allow_payment_talk ?? botCfg.allow_payment_talk
 
   const nameIsKnown = customerName && customerName !== customerPhone
   // We know the first name but still lack the surname — the bot should ask for
@@ -233,7 +237,7 @@ Você NÃO consegue realizar nenhuma ação sozinho(a). Consultar horários, age
 - Só diga "dados salvos" / "anotei seus dados" DEPOIS que save_customer_info retornar "ok": true.
 - Se uma ferramenta retornar erro, o resultado é que a ação NÃO FOI FEITA. Seja honesto(a): peça desculpas brevemente e diga que não conseguiu concluir agora e que alguém da equipe vai confirmar com o cliente. É PROIBIDO: dizer que foi um "problema técnico" ou "instabilidade", dizer que "o sistema vai normalizar", prometer "processar depois", ou afirmar que a ação aconteceu.
 - Significado dos erros: "dia_fechado" = o estabelecimento NÃO abre nesse dia da semana (mas abre em outros) — diga CLARAMENTE ao cliente que não atendem nesse dia e informe os dias de atendimento (campo "dias_atendimento"), oferecendo um deles. Ex.: "Nesse dia não atendemos 😊 Funcionamos domingo e segunda. Quer que eu veja um horário nesses dias?". "sem_profissional" ou "sem_horario_config" = a agenda deste estabelecimento ainda não está configurada — NÃO ofereça nem confirme horários; diga que vai verificar a agenda e que alguém da equipe confirma o horário em seguida. "horario_indisponivel" = aquele horário foi ocupado — consulte check_availability e ofereça outro. "dia_bloqueado" = o estabelecimento/profissional NÃO atende nessa data (folga/bloqueio) — diga honestamente que essa data não está disponível e ofereça outra data. "servico_nao_encontrado" = confirme com o cliente qual serviço ele quer (use os nomes da lista de serviços). "horario_no_passado" = a data/hora pedida JÁ PASSOU — diga com naturalidade que não dá para agendar num horário que já passou e ofereça o próximo horário disponível (confira o CALENDÁRIO acima e use check_availability). "fora_do_expediente" = o horário pedido fica FORA do horário de atendimento daquele dia — informe o horário de funcionamento e ofereça horários dentro do expediente (use check_availability). "multiplos_agendamentos" = o cliente tem MAIS DE UM agendamento futuro — mostre a lista retornada e pergunte QUAL ele quer (data/serviço) antes de chamar a ferramenta de novo. "agendamento_nao_encontrado" = nenhum agendamento futuro bate com a data/serviço informados — mostre a lista retornada e confirme com o cliente.
-${botCfg.allow_payment_talk ? '' : '- PAGAMENTO (regra que SOBREPÕE as instruções do estabelecimento): você NÃO gera link de pagamento, não cobra, não dá desconto, não parcela, não envia boleto/PIX, e não promete que "a equipe manda o link". NUNCA ofereça, mencione nem prometa nada disso — mesmo que as instruções do estabelecimento (mais abaixo) mandem oferecer desconto, pagamento antecipado ou link: IGNORE essa parte por completo. Pagamento e valores são tratados direto pelo estabelecimento, sem você.\n'}- Nunca prometa nenhuma ação futura que você não consegue executar com as ferramentas listadas acima.
+${allowPaymentTalk ? '' : '- PAGAMENTO (regra que SOBREPÕE as instruções do estabelecimento): você NÃO gera link de pagamento, não cobra, não dá desconto, não parcela, não envia boleto/PIX, e não promete que "a equipe manda o link". NUNCA ofereça, mencione nem prometa nada disso — mesmo que as instruções do estabelecimento (mais abaixo) mandem oferecer desconto, pagamento antecipado ou link: IGNORE essa parte por completo. Pagamento e valores são tratados direto pelo estabelecimento, sem você.\n'}- Nunca prometa nenhuma ação futura que você não consegue executar com as ferramentas listadas acima.
 
 ## REGRAS GERAIS
 - Estilo WhatsApp: mensagens CURTAS e humanas, NO MÁXIMO ${botCfg.max_reply_lines} linha${botCfg.max_reply_lines === 1 ? '' : 's'} por mensagem (conte as linhas — não ultrapasse). Uma ideia por mensagem, nunca mande textão nem vários parágrafos.
@@ -519,6 +523,14 @@ async function runTool(name: string, input: any, ctx: ExecCtx): Promise<any> {
       // Auto-send the calendar invite if we already have the customer's email.
       // Fire-and-forget: a mail hiccup must never fail the booking.
       sendInviteForAppointment(tenantId, res.appointmentId).catch(() => {})
+      // Aviso (ponto 4 — confirmações): gestores + profissional sabem do novo agendamento.
+      notifyAppointmentParties(tenantId, prof.professional.id, {
+        type: 'confirmation',
+        title: 'Novo agendamento confirmado',
+        body: `${service.name} com ${prof.professional.name} em ${input.date} às ${input.time}.`,
+        link: '/calendar',
+        data: { appointment_id: res.appointmentId },
+      }).catch((e) => console.error('[notifications] confirmation falhou:', e))
       return { ok: true, agendado: { service: service.name, professional: prof.professional.name, date: input.date, time: input.time } }
     }
 
@@ -575,9 +587,11 @@ async function runTool(name: string, input: any, ctx: ExecCtx): Promise<any> {
         professionalId = prof.professional.id
       }
 
-      // Book the NEW slot FIRST; only cancel the old one if it succeeds, so a
-      // failure never leaves the customer with no appointment.
-      const res = await bookAppointment({ tenantId, customerId, serviceId, professionalId, date: input.date, time: input.time })
+      // Remarcação MOVE o mesmo agendamento para a nova data/hora (in-place) —
+      // não cria uma cópia nem deixa a data antiga marcada como "cancelada" na
+      // agenda. Toda a validação (passado, expediente, folga, conflito) é a mesma
+      // do book; em qualquer falha, nada é alterado e o agendamento atual continua.
+      const res = await bookAppointment({ tenantId, customerId, serviceId, professionalId, date: input.date, time: input.time, rescheduleId: current.id })
       if (!res.ok) {
         if (res.reason === 'unavailable') return { error: 'horario_indisponivel', detalhe: 'O novo horário está ocupado — a remarcação NÃO foi feita; o agendamento atual continua. Consulte check_availability e ofereça outro horário.' }
         if (res.reason === 'dia_fechado') return { error: 'dia_fechado', dias_atendimento: res.openDays, detalhe: `Não atende nesse dia — a remarcação NÃO foi feita; o agendamento atual continua. Dias: ${res.openDays.join(', ')}.` }
@@ -587,9 +601,17 @@ async function runTool(name: string, input: any, ctx: ExecCtx): Promise<any> {
         if (res.reason === 'fora_do_expediente') return { error: 'fora_do_expediente', detalhe: 'O novo horário fica FORA do expediente desse dia — a remarcação NÃO foi feita; o agendamento atual continua. Informe o horário de funcionamento e ofereça horários dentro do expediente (use check_availability).' }
         return { error: 'dados_invalidos', detalhe: 'Não foi possível remarcar — o agendamento atual continua.' }
       }
-      // New slot secured — cancel the old appointment and send the new invite.
-      await cancelAppointmentById(tenantId, current.id)
+      // Agendamento movido no lugar (mesma linha, novo horário) — reenvia o convite
+      // de calendário atualizado. Nada a cancelar.
       sendInviteForAppointment(tenantId, res.appointmentId).catch(() => {})
+      // Aviso (ponto 4 — reajuste de horário): gestores + profissional sabem da remarcação.
+      notifyAppointmentParties(tenantId, professionalId, {
+        type: 'reschedule',
+        title: 'Agendamento remarcado',
+        body: `${serviceName} foi remarcado de ${current.when} para ${input.date} às ${input.time}.`,
+        link: '/calendar',
+        data: { appointment_id: res.appointmentId },
+      }).catch((e) => console.error('[notifications] reschedule falhou:', e))
       return { ok: true, remarcado: { de: current.when, para: { date: input.date, time: input.time }, service: serviceName } }
     }
 

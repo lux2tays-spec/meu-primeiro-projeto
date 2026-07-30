@@ -20,6 +20,11 @@ const updateSchema = z.object({
   starts_at: z.string().datetime().optional(),
   notes: z.string().nullable().optional(),
   status: z.enum(['pending', 'confirmed', 'completed', 'cancelled']).optional(),
+  // Valor editável por agendamento: grava um preço específico em price_snapshot,
+  // sobrescrevendo o preço da tabela de serviços para ESTE atendimento. null limpa
+  // o override (volta a usar o preço vigente do serviço). O financeiro usa
+  // COALESCE(price_snapshot, s.price), então o override também vale na receita.
+  price_snapshot: z.number().nonnegative().nullable().optional(),
 })
 
 async function canEditAppointment(
@@ -56,7 +61,7 @@ export const appointmentRoutes: FastifyPluginAsync = async (app) => {
     let query = `
       SELECT a.*, c.name as customer_name, c.last_name as customer_last_name, c.phone as customer_phone,
              p.name as professional_name, s.name as service_name,
-             s.duration_minutes, s.price,
+             s.duration_minutes, COALESCE(a.price_snapshot, s.price) AS price,
              u.name as created_by_name
       FROM appointments a
       JOIN customers c ON c.id = a.customer_id
@@ -113,7 +118,7 @@ export const appointmentRoutes: FastifyPluginAsync = async (app) => {
     const { rows: [appt] } = await db.query(
       `SELECT a.*, c.name as customer_name, c.phone as customer_phone,
               p.name as professional_name, p.user_id as professional_user_id,
-              s.name as service_name, s.duration_minutes, s.price
+              s.name as service_name, s.duration_minutes, COALESCE(a.price_snapshot, s.price) AS price
        FROM appointments a
        JOIN customers c ON c.id = a.customer_id
        JOIN professionals p ON p.id = a.professional_id
@@ -259,12 +264,18 @@ export const appointmentRoutes: FastifyPluginAsync = async (app) => {
     if (endsAt !== undefined)               { sets.push(`ends_at = $${i++}`); values.push(endsAt) }
     if (body.notes !== undefined)           { sets.push(`notes = $${i++}`); values.push(body.notes) }
     if (body.status !== undefined)          { sets.push(`status = $${i++}`); values.push(body.status) }
-    // SAL-14: ao CONCLUIR, congela o preço vigente do serviço em price_snapshot
-    // (migration 037) — o financeiro usa COALESCE(price_snapshot, s.price), então
-    // reajustar o preço depois não muda a receita de vendas já concluídas. O
-    // COALESCE interno preserva um snapshot já gravado (re-concluir não regrava).
-    // Se o serviço estiver sendo trocado NA MESMA chamada, usa o novo serviço.
-    if (body.status === 'completed') {
+    // Valor editável: se veio um price_snapshot explícito, ele manda — grava o
+    // override (ou null para limpar). Tem prioridade sobre a lógica de conclusão
+    // abaixo, para não gerar dupla atribuição da mesma coluna no UPDATE.
+    if (body.price_snapshot !== undefined) {
+      sets.push(`price_snapshot = $${i++}`); values.push(body.price_snapshot)
+    } else if (body.status === 'completed') {
+      // SAL-14: ao CONCLUIR (sem valor explícito), congela o preço vigente do
+      // serviço em price_snapshot (migration 037) — o financeiro usa
+      // COALESCE(price_snapshot, s.price), então reajustar o preço depois não muda
+      // a receita de vendas já concluídas. O COALESCE interno preserva um snapshot
+      // já gravado (re-concluir não regrava). Se o serviço estiver sendo trocado NA
+      // MESMA chamada, usa o novo serviço.
       const svcRef = serviceIdParamIdx !== null ? `$${serviceIdParamIdx}::uuid` : 'appointments.service_id'
       sets.push(`price_snapshot = COALESCE(price_snapshot, (SELECT s.price FROM services s WHERE s.id = ${svcRef}))`)
     }
