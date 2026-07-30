@@ -14,7 +14,7 @@
     },
     "ios": {
       "supportsTablet": false,
-      "bundleIdentifier": "com.agendabot.app",
+      "bundleIdentifier": "com.aiconfirma.app",
       "buildNumber": "1",
       "config": {
         "usesNonExemptEncryption": false
@@ -25,7 +25,7 @@
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#1C9DAA"
       },
-      "package": "com.agendabot.app",
+      "package": "com.aiconfirma.app",
       "versionCode": 1,
       "googleServicesFile": "./google-services.json"
     },
