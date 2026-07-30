@@ -10,7 +10,7 @@ import { Button } from '@/components/ui/Button'
 import { BrandLogo } from '@/components/BrandLogo'
 import { useAuthStore } from '@/lib/store'
 import { authApi, googleApi } from '@/lib/api'
-import { useGoogleAuth } from '@/lib/google-auth'
+import { useGoogleAuth, GOOGLE_CONFIGURED } from '@/lib/google-auth'
 import { useToast } from '@/lib/toast'
 import { colors, font, spacing } from '@/lib/theme'
 
@@ -104,14 +104,16 @@ export default function LoginScreen() {
         </View>
 
         <View style={styles.form}>
-          <Button
-            label="Continuar com Google"
-            onPress={() => googlePromptAsync()}
-            loading={googleLoading}
-            disabled={!googleRequest}
-            variant="outline"
-            style={styles.googleBtn}
-          />
+          {GOOGLE_CONFIGURED && (
+            <Button
+              label="Continuar com Google"
+              onPress={() => googlePromptAsync()}
+              loading={googleLoading}
+              disabled={!googleRequest}
+              variant="outline"
+              style={styles.googleBtn}
+            />
+          )}
 
           <View style={styles.dividerRow}>
             <View style={styles.dividerLine} />

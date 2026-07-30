@@ -8,6 +8,7 @@ interface Props {
 }
 interface State {
   hasError: boolean
+  message?: string
 }
 
 // App-wide safety net: if any screen crashes while rendering, show a friendly
@@ -16,8 +17,8 @@ interface State {
 export class ErrorBoundary extends Component<Props, State> {
   state: State = { hasError: false }
 
-  static getDerivedStateFromError(): State {
-    return { hasError: true }
+  static getDerivedStateFromError(error: Error): State {
+    return { hasError: true, message: error?.message }
   }
 
   componentDidCatch(error: Error, info: unknown) {
@@ -25,7 +26,7 @@ export class ErrorBoundary extends Component<Props, State> {
     console.error('[ErrorBoundary]', error, info)
   }
 
-  reset = () => this.setState({ hasError: false })
+  reset = () => this.setState({ hasError: false, message: undefined })
 
   render() {
     if (!this.state.hasError) return this.props.children
@@ -42,6 +43,10 @@ export class ErrorBoundary extends Component<Props, State> {
         <TouchableOpacity style={styles.button} onPress={this.reset} activeOpacity={0.85}>
           <Text style={styles.buttonText}>Tentar novamente</Text>
         </TouchableOpacity>
+        {/* DIAGNÓSTICO (build de teste): mensagem do erro para depurar. Remover/gate antes da produção. */}
+        {this.state.message ? (
+          <Text style={styles.debug} selectable>{this.state.message}</Text>
+        ) : null}
       </View>
     )
   }
@@ -60,4 +65,5 @@ const styles = StyleSheet.create({
     height: 50, borderRadius: radius.md, alignItems: 'center', justifyContent: 'center',
   },
   buttonText: { color: '#fff', fontWeight: '700', fontSize: font.md },
+  debug: { marginTop: spacing.lg, fontSize: 11, color: colors.textDisabled, textAlign: 'center', maxWidth: 320 },
 })
