@@ -46,9 +46,11 @@
       "typedRoutes": true
     },
     "extra": {
+      "router": {},
       "eas": {
-        "projectId": "PREENCHER_COM_eas_init"
+        "projectId": "8c147de5-c162-4a81-aea7-46a9308eb70f"
       }
-    }
+    },
+    "owner": "aiconfirma"
   }
 }
