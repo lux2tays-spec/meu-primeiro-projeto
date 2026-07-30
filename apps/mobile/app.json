@@ -26,7 +26,8 @@
         "backgroundColor": "#1C9DAA"
       },
       "package": "com.agendabot.app",
-      "versionCode": 1
+      "versionCode": 1,
+      "googleServicesFile": "./google-services.json"
     },
     "plugins": [
       "expo-router",
