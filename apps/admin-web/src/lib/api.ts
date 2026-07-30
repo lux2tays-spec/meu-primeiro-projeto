@@ -206,6 +206,14 @@ export const rootApi = {
     api.post<{ ok: boolean; recipients: number; id: string | null }>('/root/broadcasts', data),
   broadcasts: () => api.get<any[]>('/root/broadcasts'),
 
+  // Subtipos de despesa (parâmetros financeiros da plataforma)
+  expenseSubtypes: () => api.get<any[]>('/root/expense-subtypes'),
+  createExpenseSubtype: (data: { tipo: string; nome: string; is_percent?: boolean; color?: string; icon?: string; sort?: number; active?: boolean }) =>
+    api.post<any>('/root/expense-subtypes', data),
+  updateExpenseSubtype: (id: string, data: any) => api.patch<any>(`/root/expense-subtypes/${id}`, data),
+  deleteExpenseSubtype: (id: string) => api.delete(`/root/expense-subtypes/${id}`),
+  tenantFinanceiro: (id: string) => api.get<any>(`/root/tenants/${id}/financeiro`),
+
   // Business Type Templates
   businessTypeTemplates: () => api.get<any[]>('/root/business-type-templates'),
   createBusinessTypeTemplate: (data: any) => api.post<any>('/root/business-type-templates', data),

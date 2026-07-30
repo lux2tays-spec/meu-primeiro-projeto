@@ -5,6 +5,7 @@ import { useQuery } from '@tanstack/react-query'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useAuthStore } from '@/lib/store'
 import { usePushNotifications } from '@/lib/push'
+import { QuickActionFab } from '@/components/QuickActionFab'
 import { tenantApi } from '@/lib/api'
 import { onboardingSession } from '@/lib/onboarding-session'
 import { colors } from '@/lib/theme'
@@ -38,6 +39,7 @@ export default function AppLayout() {
   }
 
   return (
+    <>
     <Tabs
       screenOptions={{
         headerShown: false,
@@ -99,5 +101,7 @@ export default function AppLayout() {
       <Tabs.Screen name="comissoes" options={{ tabBarButton: () => null, headerShown: false }} />
       <Tabs.Screen name="notifications" options={{ tabBarButton: () => null, headerShown: false }} />
     </Tabs>
+    <QuickActionFab />
+    </>
   )
 }

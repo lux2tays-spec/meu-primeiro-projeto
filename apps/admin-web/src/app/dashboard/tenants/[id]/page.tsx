@@ -36,6 +36,12 @@ export default function TenantDetailPage() {
     queryFn: () => rootApi.tenant(id),
   })
 
+  // Saúde financeira do tenant (mês atual) para o relatório do Root.
+  const { data: fin } = useQuery({
+    queryKey: ['root-tenant-financeiro', id],
+    queryFn: () => rootApi.tenantFinanceiro(id),
+  })
+
   // Registered business types (AI templates) — used to pick the tenant's segment.
   const { data: bizTemplates = [] } = useQuery({ queryKey: ['ai-templates'], queryFn: rootApi.businessTypeTemplates })
 
@@ -510,6 +516,40 @@ export default function TenantDetailPage() {
             </button>
           </div>
         </div>
+      </div>
+
+      {/* Saúde financeira (mês atual) */}
+      <div className="bg-white rounded-xl border border-gray-200 p-6">
+        <h2 className="font-semibold text-gray-900 mb-4">Saúde financeira <span className="text-xs font-normal text-gray-400">(mês atual)</span></h2>
+        {!fin ? (
+          <p className="text-sm text-gray-400">Carregando…</p>
+        ) : (
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            {[
+              { label: 'Receita (vendas)', value: fin.receita_vendas, color: 'text-green-600' },
+              { label: 'Despesas', value: fin.despesas_total, color: 'text-red-500' },
+              { label: 'Lucro', value: fin.lucro, color: (fin.lucro ?? 0) >= 0 ? 'text-gray-900' : 'text-red-500' },
+              { label: 'Meta de lucro', value: fin.meta_lucro, color: 'text-gray-900' },
+            ].map((c) => (
+              <div key={c.label}>
+                <p className="text-xs text-gray-500">{c.label}</p>
+                <p className={`text-xl font-bold ${c.color}`}>{(c.value ?? 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL', maximumFractionDigits: 0 })}</p>
+              </div>
+            ))}
+            <div>
+              <p className="text-xs text-gray-500">Vendas concluídas</p>
+              <p className="text-xl font-bold text-gray-900">{fin.num_vendas ?? 0}</p>
+            </div>
+            <div>
+              <p className="text-xs text-gray-500">Meta de vendas</p>
+              <p className="text-xl font-bold text-gray-900">{fin.meta_lucro > 0 ? (fin.meta_vendas ?? 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL', maximumFractionDigits: 0 }) : '—'}</p>
+            </div>
+            <div>
+              <p className="text-xs text-gray-500">Progresso da meta</p>
+              <p className="text-xl font-bold text-gray-900">{fin.meta_lucro > 0 ? `${fin.progresso_meta ?? 0}%` : '—'}</p>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Remote support toolkit */}

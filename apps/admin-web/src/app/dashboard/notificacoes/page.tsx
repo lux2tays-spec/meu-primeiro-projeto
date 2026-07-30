@@ -139,6 +139,8 @@ export default function NotificacoesPage() {
         </button>
       </section>
 
+      <PushConfigSection />
+
       <section>
         <h2 className="text-lg font-bold text-gray-900 mb-3">Enviados recentemente</h2>
         <div className="bg-white rounded-xl border border-gray-200 divide-y divide-gray-100">
@@ -164,5 +166,53 @@ export default function NotificacoesPage() {
         </div>
       </section>
     </div>
+  )
+}
+
+// Configuração de Push (Notificações) — variáveis de integração no Root Admin.
+function PushConfigSection() {
+  const qc = useQueryClient()
+  const { data: settings } = useQuery({ queryKey: ['root-settings'], queryFn: rootApi.settings })
+  const [form, setForm] = useState<{ eas_project_id: string; expo_access_token: string }>({ eas_project_id: '', expo_access_token: '' })
+  const [loaded, setLoaded] = useState(false)
+  const [saved, setSaved] = useState(false)
+
+  if (settings && !loaded) {
+    const pc = settings.push_config ?? {}
+    setForm({ eas_project_id: pc.eas_project_id ?? '', expo_access_token: pc.expo_access_token ?? '' })
+    setLoaded(true)
+  }
+
+  const save = useMutation({
+    mutationFn: () => rootApi.updateSettings('push_config', form),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['root-settings'] }); setSaved(true); setTimeout(() => setSaved(false), 3000) },
+  })
+
+  const inputCls = 'w-full h-10 px-3 rounded-lg border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500'
+
+  return (
+    <section className="bg-white rounded-xl border border-gray-200 p-6 space-y-4">
+      <div>
+        <h2 className="text-lg font-bold text-gray-900">Configuração de Push (mobile)</h2>
+        <p className="text-gray-500 text-sm mt-1">Variáveis de integração do push do aplicativo. Preencha após configurar o EAS.</p>
+      </div>
+      <div>
+        <label className="block text-xs font-semibold text-gray-600 mb-1">EAS Project ID</label>
+        <input value={form.eas_project_id} onChange={(e) => setForm({ ...form, eas_project_id: e.target.value })} className={inputCls}
+          placeholder="ex.: 12345678-abcd-... (do comando eas init)" />
+        <p className="text-xs text-gray-400 mt-1">Id do projeto Expo/EAS. O app usa para gerar o token de push. Obtido com <code>eas init</code>.</p>
+      </div>
+      <div>
+        <label className="block text-xs font-semibold text-gray-600 mb-1">Expo Access Token (opcional)</label>
+        <input value={form.expo_access_token} onChange={(e) => setForm({ ...form, expo_access_token: e.target.value })} className={inputCls}
+          placeholder="deixe em branco para nao usar" type="password" />
+        <p className="text-xs text-gray-400 mt-1">Token de acesso da Expo para enviar pushes autenticado (mais seguro). Gere em expo.dev, Account, Access Tokens.</p>
+      </div>
+      {saved && <p className="text-sm font-semibold text-green-600">Configuracao salva</p>}
+      <button onClick={() => save.mutate()} disabled={save.isPending}
+        className="h-10 px-5 rounded-lg bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white text-sm font-semibold">
+        {save.isPending ? 'Salvando...' : 'Salvar configuracao de push'}
+      </button>
+    </section>
   )
 }

@@ -2,6 +2,7 @@ import { db } from './db'
 import { sendNotificationEmail } from './email'
 import { evolutionSend } from '../services/evolution'
 import { SUPPORT_INSTANCE } from './supportBotConfig'
+import { getPushConfig } from './pushConfig'
 
 /**
  * Serviço central de avisos e notificações.
@@ -241,9 +242,13 @@ async function dispatchPush(
     body,
     data: { ...(data ?? {}), link },
   }))
+  // Token de acesso da Expo (Root Admin, opcional): envia autenticado quando presente.
+  const { expo_access_token } = await getPushConfig()
+  const headers: Record<string, string> = { 'Content-Type': 'application/json', Accept: 'application/json' }
+  if (expo_access_token) headers.Authorization = `Bearer ${expo_access_token}`
   const res = await fetch('https://exp.host/--/api/v2/push/send', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+    headers,
     body: JSON.stringify(messages),
   })
   if (!res.ok) {

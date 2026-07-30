@@ -20,8 +20,16 @@ Notifications.setNotificationHandler({
 
 let lastRegisteredToken: string | null = null
 
-/** Lê o projectId do EAS (necessário para gerar o ExpoPushToken). */
-function getProjectId(): string | null {
+/**
+ * Lê o projectId do EAS (necessário para gerar o ExpoPushToken). Prioriza o valor
+ * configurado no Root Admin (backend); cai para o app.json quando o backend não
+ * tem. Assim o projectId é uma variável gerenciável no painel.
+ */
+async function getProjectId(): Promise<string | null> {
+  try {
+    const { eas_project_id } = await notificationsApi.pushConfig()
+    if (eas_project_id) return eas_project_id
+  } catch { /* backend indisponível → usa o app.json */ }
   const id =
     (Constants.expoConfig?.extra as any)?.eas?.projectId ??
     (Constants as any)?.easConfig?.projectId ??
@@ -53,9 +61,9 @@ export async function registerForPushNotifications(): Promise<string | null> {
   }
   if (status !== 'granted') return null
 
-  const projectId = getProjectId()
+  const projectId = await getProjectId()
   if (!projectId) {
-    console.warn('[push] EAS projectId ausente — rode `eas init` e preencha app.json. Push desativado por ora.')
+    console.warn('[push] EAS projectId ausente — configure no Root Admin (ou rode `eas init`). Push desativado por ora.')
     return null
   }
 

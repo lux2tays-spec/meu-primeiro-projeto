@@ -22,6 +22,8 @@ import {
 import { encrypt, decrypt, maskSecret } from '../lib/crypto'
 import { logAdminAction, auditFromRequest } from '../lib/auditLog'
 import { sendBroadcast } from '../lib/notifications'
+import { computeFinanceExtras } from '../lib/financeiroCalc'
+import { invalidatePushConfig } from '../lib/pushConfig'
 
 // Secret fields (per platform_settings key) that must be encrypted at rest and
 // never returned in full to the admin panel.
@@ -32,6 +34,7 @@ const SECRET_FIELDS: Record<string, string[]> = {
   smtp_config: ['pass'],
   email_config: ['resend_api_key'],
   google_config: ['client_secret'],
+  push_config: ['expo_access_token'],
 }
 import { invalidatePaymentConfig } from '../lib/paymentConfig'
 import {
@@ -496,6 +499,7 @@ export const rootRoutes: FastifyPluginAsync = async (app) => {
     if (key === 'email_config') await invalidateEmailConfig()
     if (key === 'google_config') await invalidateGoogleConfig()
     if (key === 'brand_config') await invalidateBrandConfig()
+    if (key === 'push_config') await invalidatePushConfig()
     // Governance: record WHO changed the config (secret values never logged).
     const changed = body && typeof body === 'object' ? Object.keys(body).join(', ') : ''
     await logAdminAction(auditFromRequest(request, 'settings.update', key, `campos: ${changed}`))
@@ -1658,5 +1662,79 @@ export const rootRoutes: FastifyPluginAsync = async (app) => {
        ORDER BY b.created_at DESC LIMIT 50`
     )
     return reply.send(rows)
+  })
+
+  // ── Taxonomia de subtipos de despesa (parâmetros da plataforma) ─────────────
+  app.get('/expense-subtypes', async (_request, reply) => {
+    const { rows } = await db.query('SELECT * FROM expense_subtypes ORDER BY tipo, sort, nome')
+    return reply.send(rows)
+  })
+
+  const subtypeSchema = z.object({
+    tipo: z.enum(['Fixa', 'Variável']),
+    nome: z.string().min(1).max(60),
+    is_percent: z.boolean().optional(),
+    color: z.string().max(9).optional(),
+    icon: z.string().max(40).optional(),
+    sort: z.number().int().optional(),
+    active: z.boolean().optional(),
+  })
+
+  app.post('/expense-subtypes', async (request, reply) => {
+    const b = subtypeSchema.parse(request.body)
+    const { rows: [row] } = await db.query(
+      `INSERT INTO expense_subtypes (tipo, nome, is_percent, color, icon, sort, active)
+       VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *`,
+      [b.tipo, b.nome, b.is_percent ?? false, b.color ?? '#6B7280', b.icon ?? null, b.sort ?? 0, b.active ?? true]
+    )
+    await logAdminAction(auditFromRequest(request, 'expense_subtype.create', row.id, `${b.tipo}/${b.nome}`))
+    return reply.status(201).send(row)
+  })
+
+  app.patch<{ Params: { id: string } }>('/expense-subtypes/:id', async (request, reply) => {
+    const b = subtypeSchema.partial().parse(request.body)
+    const sets: string[] = []
+    const vals: unknown[] = []
+    let i = 1
+    for (const [k, v] of Object.entries(b)) { sets.push(`${k} = $${i++}`); vals.push(v) }
+    if (sets.length === 0) return reply.status(400).send({ error: 'Nada para atualizar' })
+    vals.push(request.params.id)
+    const { rows: [row] } = await db.query(`UPDATE expense_subtypes SET ${sets.join(', ')} WHERE id = $${i} RETURNING *`, vals)
+    if (!row) return reply.status(404).send({ error: 'Subtipo não encontrado' })
+    await logAdminAction(auditFromRequest(request, 'expense_subtype.update', request.params.id, `campos: ${Object.keys(b).join(', ')}`))
+    return reply.send(row)
+  })
+
+  app.delete<{ Params: { id: string } }>('/expense-subtypes/:id', async (request, reply) => {
+    await db.query('DELETE FROM expense_subtypes WHERE id = $1', [request.params.id])
+    await logAdminAction(auditFromRequest(request, 'expense_subtype.delete', request.params.id, ''))
+    return reply.send({ deleted: true })
+  })
+
+  // ── Saúde financeira de um tenant (mês atual) para os relatórios do Root ────
+  app.get<{ Params: { id: string } }>('/tenants/:id/financeiro', async (request, reply) => {
+    const tenantId = request.params.id
+    const spNow = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/Sao_Paulo' }))
+    const y = spNow.getFullYear(), m = spNow.getMonth() + 1
+    const pad = (n: number) => String(n).padStart(2, '0')
+    const start = `${y}-${pad(m)}-01`
+    const end = m === 12 ? `${y + 1}-01-01` : `${y}-${pad(m + 1)}-01`
+    const { rows: [tot] } = await db.query(
+      `SELECT COUNT(*) FILTER (WHERE a.status='completed')::int AS n,
+              COALESCE(SUM(COALESCE(a.price_snapshot, s.price)) FILTER (WHERE a.status='completed'),0)::float AS receita
+       FROM appointments a JOIN services s ON s.id=a.service_id
+       WHERE a.tenant_id=$1 AND a.starts_at >= ($2::date::timestamp AT TIME ZONE 'America/Sao_Paulo')
+         AND a.starts_at < ($3::date::timestamp AT TIME ZONE 'America/Sao_Paulo')`,
+      [tenantId, start, end]
+    )
+    const receitaVendas = Number(tot.receita), numVendas = Number(tot.n)
+    const ticket = numVendas ? receitaVendas / numVendas : 0
+    const ex = await computeFinanceExtras(tenantId, y, m, receitaVendas, numVendas, Math.round(ticket))
+    return reply.send({
+      mes: m, ano: y,
+      receita_vendas: receitaVendas,
+      num_vendas: numVendas,
+      ...ex,
+    })
   })
 }

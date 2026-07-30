@@ -2,6 +2,7 @@ import { FastifyPluginAsync } from 'fastify'
 import { z } from 'zod'
 import { db } from '../lib/db'
 import { getNotificationPrefs } from '../lib/notifications'
+import { getPushConfig } from '../lib/pushConfig'
 
 const prefsSchema = z.object({
   channel_inapp: z.boolean().optional(),
@@ -100,6 +101,12 @@ export const notificationRoutes: FastifyPluginAsync = async (app) => {
       insertVals
     )
     return reply.send(row)
+  })
+
+  // Config pública de push para o app (só o projectId; o token fica no servidor).
+  app.get('/push-config', async (_request, reply) => {
+    const { eas_project_id } = await getPushConfig()
+    return reply.send({ eas_project_id })
   })
 
   // ── Registro / remoção de push token (Expo) ─────────────────────────────────

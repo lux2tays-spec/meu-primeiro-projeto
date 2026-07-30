@@ -68,7 +68,7 @@ export const appointmentRoutes: FastifyPluginAsync = async (app) => {
       JOIN professionals p ON p.id = a.professional_id
       JOIN services s ON s.id = a.service_id
       LEFT JOIN users u ON u.id = a.created_by
-      WHERE a.tenant_id = $1
+      WHERE a.tenant_id = $1 AND a.source <> 'quick_sale'
     `
     const params: unknown[] = [tenant_id]
     let paramIdx = 2

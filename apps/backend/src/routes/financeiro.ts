@@ -2,6 +2,7 @@ import { FastifyPluginAsync } from 'fastify'
 import { z } from 'zod'
 import { db } from '../lib/db'
 import { decrypt } from '../lib/crypto'
+import { resolveDespesas, applyPercentValues, computeFinanceExtras } from '../lib/financeiroCalc'
 
 const paymentLinkSchema = z.object({
   title: z.string().min(1),
@@ -62,16 +63,19 @@ export const financeiroRoutes: FastifyPluginAsync = async (app) => {
         params
       ),
       db.query(
-        `SELECT p.id AS professional_id, p.name AS professional_nome,
+        // LEFT JOIN: vendas avulsas sem profissional entram num bucket "Sem
+        // profissional", para a soma do breakdown bater com receita_total.
+        `SELECT COALESCE(p.id::text, 'none') AS professional_id,
+                COALESCE(p.name, 'Sem profissional') AS professional_nome,
                 COUNT(*)::int AS vendas,
                 COALESCE(SUM(COALESCE(a.price_snapshot, s.price)), 0)::float AS receita
          FROM appointments a
          JOIN services s ON s.id = a.service_id
-         JOIN professionals p ON p.id = a.professional_id
+         LEFT JOIN professionals p ON p.id = a.professional_id
          WHERE a.tenant_id = $1 AND a.status = 'completed'
            AND a.starts_at >= ${SP_MONTH_START} AND a.starts_at < ${SP_MONTH_END}
          GROUP BY p.id, p.name
-         ORDER BY receita DESC, p.name`,
+         ORDER BY receita DESC, professional_nome`,
         params
       ),
       db.query(
@@ -94,6 +98,12 @@ export const financeiroRoutes: FastifyPluginAsync = async (app) => {
     const receitaTotal = Number(totals.receita_total)
     const cancelados = Number(totals.agendamentos_cancelados)
     const totalAgendamentos = Number(totals.total_agendamentos)
+    const ticketMedio = totalVendas > 0 ? Math.round((receitaTotal / totalVendas) * 100) / 100 : 0
+
+    // Extensão financeira (migration 042): despesas, meta de lucro e a fórmula
+    // de margem de contribuição para a meta de vendas. receita_total aqui é a
+    // receita de VENDAS (agendamentos concluídos); receita_outras é aditiva.
+    const extras = await computeFinanceExtras(tenant_id!, y, m, receitaTotal, totalVendas, ticketMedio)
 
     return reply.send({
       mes: m,
@@ -102,7 +112,7 @@ export const financeiroRoutes: FastifyPluginAsync = async (app) => {
       receita_total: receitaTotal,
       agendamentos_abertos: Number(totals.agendamentos_abertos),
       // SAL-8 — novos KPIs (campos aditivos; os existentes acima não mudam):
-      ticket_medio: totalVendas > 0 ? Math.round((receitaTotal / totalVendas) * 100) / 100 : 0,
+      ticket_medio: ticketMedio,
       agendamentos_cancelados: cancelados,
       total_agendamentos: totalAgendamentos,
       // % de agendamentos do período que foram cancelados (inclui no-show,
@@ -110,6 +120,8 @@ export const financeiroRoutes: FastifyPluginAsync = async (app) => {
       taxa_cancelamento: totalAgendamentos > 0 ? Math.round((cancelados / totalAgendamentos) * 1000) / 10 : 0,
       receita_por_profissional: porProfissionalRes.rows,
       servicos_mais_vendidos: porServicoRes.rows,
+      // Extensão financeira — despesas / lucro / meta:
+      ...extras,
     })
   })
 
@@ -137,6 +149,8 @@ export const financeiroRoutes: FastifyPluginAsync = async (app) => {
            a.starts_at,
            a.status,
            a.notes,
+           a.payment_method,
+           a.source,
            c.name  AS cliente_nome,
            c.phone AS cliente_telefone,
            s.name  AS servico_nome,
@@ -145,7 +159,7 @@ export const financeiroRoutes: FastifyPluginAsync = async (app) => {
          FROM appointments a
          JOIN customers    c ON c.id = a.customer_id
          JOIN services     s ON s.id = a.service_id
-         JOIN professionals p ON p.id = a.professional_id
+         LEFT JOIN professionals p ON p.id = a.professional_id -- vendas avulsas podem não ter profissional
          WHERE a.tenant_id = $1 AND a.status = 'completed'
            AND a.starts_at >= ${SP_MONTH_START} AND a.starts_at < ${SP_MONTH_END}
          ORDER BY a.starts_at DESC
@@ -245,5 +259,249 @@ export const financeiroRoutes: FastifyPluginAsync = async (app) => {
       [request.params.id, tenant_id]
     )
     return reply.send({ deleted: true })
+  })
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // Extensão financeira (migration 042): despesas, outras receitas, meta, venda
+  // rápida, subtipos e histórico. Tudo restrito a owner/admin/root (staff não vê
+  // gestão financeira — mesmo padrão dos endpoints acima).
+  // ═══════════════════════════════════════════════════════════════════════════
+  const isManager = (role: string) => ['owner', 'admin', 'root'].includes(role)
+
+  // ── Subtipos de despesa (taxonomia da plataforma + custom do tenant) ────────
+  app.get('/expense-subtypes', async (request, reply) => {
+    const { tenant_id, role } = request.user
+    if (!isManager(role)) return reply.status(403).send({ error: 'Sem permissão' })
+    const [platform, custom] = await Promise.all([
+      db.query(`SELECT tipo, nome, is_percent, color, icon FROM expense_subtypes WHERE active = TRUE ORDER BY tipo, sort, nome`),
+      db.query(`SELECT tipo, nome FROM tenant_expense_subtypes WHERE tenant_id = $1 ORDER BY tipo, nome`, [tenant_id]),
+    ])
+    const customMapped = custom.rows.map((c: any) => ({ tipo: c.tipo, nome: c.nome, is_percent: false, color: '#6B7280', icon: 'ellipsis-horizontal', custom: true }))
+    return reply.send([...platform.rows, ...customMapped])
+  })
+
+  // ── Despesas ────────────────────────────────────────────────────────────────
+  const despesaBase = z.object({
+    descricao: z.string().min(1),
+    tipo: z.enum(['Fixa', 'Variável']),
+    subtipo: z.string().min(1),
+    valor: z.number().nonnegative().nullable().optional(),
+    pct: z.number().min(0).max(100).nullable().optional(),
+    data: z.string(), // YYYY-MM-DD
+    recorrente: z.boolean().optional(),
+  })
+  const despesaSchema = despesaBase.refine((d) => (d.pct != null && d.pct > 0) || (d.valor != null && d.valor >= 0), {
+    message: 'Informe um valor em R$ ou um percentual.',
+  })
+
+  // Lista as despesas EFETIVAS do mês (recorrentes calculadas + overrides), já
+  // com valor_reais dos percentuais resolvido pela receita de vendas do mês.
+  app.get('/despesas', async (request, reply) => {
+    const { tenant_id, role } = request.user
+    if (!isManager(role)) return reply.status(403).send({ error: 'Sem permissão' })
+    const { month, year } = request.query as { month?: string; year?: string }
+    const { y, m, start, end } = monthBoundsSP(month, year)
+    const { rows: [rv] } = await db.query(
+      `SELECT COALESCE(SUM(COALESCE(a.price_snapshot, s.price)), 0)::float AS r
+       FROM appointments a JOIN services s ON s.id = a.service_id
+       WHERE a.tenant_id = $1 AND a.status = 'completed'
+         AND a.starts_at >= ${SP_MONTH_START} AND a.starts_at < ${SP_MONTH_END}`,
+      [tenant_id, start, end]
+    )
+    const despesas = applyPercentValues(await resolveDespesas(tenant_id!, y, m), Number(rv?.r ?? 0))
+    return reply.send(despesas.sort((a, b) => b.data.localeCompare(a.data)))
+  })
+
+  app.post('/despesas', async (request, reply) => {
+    const { tenant_id, role } = request.user
+    if (!isManager(role)) return reply.status(403).send({ error: 'Sem permissão' })
+    const b = despesaSchema.parse(request.body)
+    // "Outro" com texto livre → guarda como subtipo custom do tenant para reuso.
+    const isKnown = await db.query(`SELECT 1 FROM expense_subtypes WHERE tipo = $1 AND nome = $2 AND active = TRUE`, [b.tipo, b.subtipo])
+    if (isKnown.rowCount === 0) {
+      await db.query(
+        `INSERT INTO tenant_expense_subtypes (tenant_id, tipo, nome) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING`,
+        [tenant_id, b.tipo, b.subtipo]
+      )
+    }
+    const { rows: [d] } = await db.query(
+      `INSERT INTO despesas (tenant_id, descricao, tipo, subtipo, valor, pct, data, recorrente)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
+      [tenant_id, b.descricao, b.tipo, b.subtipo, b.valor ?? null, b.pct ?? null, b.data, b.recorrente ?? (b.tipo === 'Fixa')]
+    )
+    return reply.status(201).send(d)
+  })
+
+  app.patch<{ Params: { id: string } }>('/despesas/:id', async (request, reply) => {
+    const { tenant_id, role } = request.user
+    if (!isManager(role)) return reply.status(403).send({ error: 'Sem permissão' })
+    const b = despesaBase.partial().parse(request.body)
+    const sets: string[] = []
+    const vals: unknown[] = []
+    let i = 1
+    for (const [k, v] of Object.entries(b)) { sets.push(`${k} = $${i++}`); vals.push(v) }
+    if (sets.length === 0) return reply.status(400).send({ error: 'Nada para atualizar' })
+    sets.push('updated_at = NOW()')
+    vals.push(request.params.id, tenant_id)
+    const { rows: [d] } = await db.query(
+      `UPDATE despesas SET ${sets.join(', ')} WHERE id = $${i++} AND tenant_id = $${i} RETURNING *`,
+      vals
+    )
+    if (!d) return reply.status(404).send({ error: 'Despesa não encontrada' })
+    return reply.send(d)
+  })
+
+  app.delete<{ Params: { id: string } }>('/despesas/:id', async (request, reply) => {
+    const { tenant_id, role } = request.user
+    if (!isManager(role)) return reply.status(403).send({ error: 'Sem permissão' })
+    await db.query('DELETE FROM despesas WHERE id = $1 AND tenant_id = $2', [request.params.id, tenant_id])
+    return reply.send({ deleted: true })
+  })
+
+  // Override de uma ocorrência de despesa recorrente (editar valor/pct ou pular).
+  app.patch<{ Params: { id: string } }>('/despesas/:id/ocorrencia', async (request, reply) => {
+    const { tenant_id, role } = request.user
+    if (!isManager(role)) return reply.status(403).send({ error: 'Sem permissão' })
+    const b = z.object({
+      ano: z.number().int(), mes: z.number().int().min(1).max(12),
+      valor: z.number().nonnegative().nullable().optional(),
+      pct: z.number().min(0).max(100).nullable().optional(),
+      skip: z.boolean().optional(),
+    }).parse(request.body)
+    // Garante que a despesa é do tenant.
+    const owns = await db.query('SELECT 1 FROM despesas WHERE id = $1 AND tenant_id = $2', [request.params.id, tenant_id])
+    if (owns.rowCount === 0) return reply.status(404).send({ error: 'Despesa não encontrada' })
+    const { rows: [ov] } = await db.query(
+      `INSERT INTO despesa_ocorrencia_override (despesa_id, tenant_id, ano, mes, valor, pct, skip)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)
+       ON CONFLICT (despesa_id, ano, mes) DO UPDATE SET
+         valor = EXCLUDED.valor, pct = EXCLUDED.pct, skip = EXCLUDED.skip, updated_at = NOW()
+       RETURNING *`,
+      [request.params.id, tenant_id, b.ano, b.mes, b.valor ?? null, b.pct ?? null, b.skip ?? false]
+    )
+    return reply.send(ov)
+  })
+
+  // ── Outras receitas (não-vendas) ────────────────────────────────────────────
+  const outraReceitaSchema = z.object({
+    descricao: z.string().min(1),
+    categoria: z.string().min(1),
+    valor: z.number().positive(),
+    data: z.string(),
+  })
+
+  app.get('/outras-receitas', async (request, reply) => {
+    const { tenant_id, role } = request.user
+    if (!isManager(role)) return reply.status(403).send({ error: 'Sem permissão' })
+    const { month, year } = request.query as { month?: string; year?: string }
+    const { start, end } = monthBoundsSP(month, year)
+    const { rows } = await db.query(
+      `SELECT * FROM outras_receitas WHERE tenant_id = $1 AND data >= $2::date AND data < $3::date ORDER BY data DESC`,
+      [tenant_id, start, end]
+    )
+    return reply.send(rows)
+  })
+
+  app.post('/outras-receitas', async (request, reply) => {
+    const { tenant_id, role } = request.user
+    if (!isManager(role)) return reply.status(403).send({ error: 'Sem permissão' })
+    const b = outraReceitaSchema.parse(request.body)
+    const { rows: [r] } = await db.query(
+      `INSERT INTO outras_receitas (tenant_id, descricao, categoria, valor, data) VALUES ($1, $2, $3, $4, $5) RETURNING *`,
+      [tenant_id, b.descricao, b.categoria, b.valor, b.data]
+    )
+    return reply.status(201).send(r)
+  })
+
+  app.delete<{ Params: { id: string } }>('/outras-receitas/:id', async (request, reply) => {
+    const { tenant_id, role } = request.user
+    if (!isManager(role)) return reply.status(403).send({ error: 'Sem permissão' })
+    await db.query('DELETE FROM outras_receitas WHERE id = $1 AND tenant_id = $2', [request.params.id, tenant_id])
+    return reply.send({ deleted: true })
+  })
+
+  // ── Meta de lucro mensal (por tenant) ───────────────────────────────────────
+  app.patch('/meta-lucro', async (request, reply) => {
+    const { tenant_id, role } = request.user
+    if (!isManager(role)) return reply.status(403).send({ error: 'Sem permissão' })
+    const { meta } = z.object({ meta: z.number().nonnegative() }).parse(request.body)
+    await db.query('UPDATE tenants SET meta_lucro_mensal = $1 WHERE id = $2', [meta, tenant_id])
+    return reply.send({ ok: true, meta_lucro_mensal: meta })
+  })
+
+  // ── Venda rápida (venda avulsa) → agendamento 'completed' sem ocupar agenda ──
+  app.post('/vendas', async (request, reply) => {
+    const { tenant_id, user_id, role } = request.user
+    if (!isManager(role)) return reply.status(403).send({ error: 'Sem permissão' })
+    const b = z.object({
+      customer_id: z.string().uuid(),
+      service_id: z.string().uuid(),
+      professional_id: z.string().uuid().nullable().optional(),
+      valor: z.number().nonnegative(),
+      notes: z.string().optional(),
+      payment_method: z.enum(['pix', 'payment_link', 'credit_card', 'debit_card', 'cash']),
+      data: z.string().optional(), // YYYY-MM-DD (default: agora)
+    }).parse(request.body)
+
+    // Valida cliente e serviço do tenant; profissional (se informado) também.
+    const [cust, svc] = await Promise.all([
+      db.query('SELECT id FROM customers WHERE id = $1 AND tenant_id = $2', [b.customer_id, tenant_id]),
+      db.query('SELECT id FROM services WHERE id = $1 AND tenant_id = $2', [b.service_id, tenant_id]),
+    ])
+    if (cust.rowCount === 0) return reply.status(404).send({ error: 'Cliente não encontrado' })
+    if (svc.rowCount === 0) return reply.status(404).send({ error: 'Serviço não encontrado' })
+    if (b.professional_id) {
+      const prof = await db.query('SELECT id FROM professionals WHERE id = $1 AND tenant_id = $2', [b.professional_id, tenant_id])
+      if (prof.rowCount === 0) return reply.status(404).send({ error: 'Profissional não encontrado' })
+    }
+
+    // Instante da venda. ends_at = starts_at → intervalo vazio: não conflita com
+    // a constraint de overlap e não ocupa slot na agenda (venda pontual).
+    const startsAt = b.data ? new Date(`${b.data}T12:00:00-03:00`) : new Date()
+    const { rows: [venda] } = await db.query(
+      `INSERT INTO appointments
+         (tenant_id, customer_id, professional_id, service_id, starts_at, ends_at, status, notes, created_by, price_snapshot, payment_method, source)
+       VALUES ($1, $2, $3, $4, $5, $5, 'completed', $6, $7, $8, $9, 'quick_sale') RETURNING *`,
+      [tenant_id, b.customer_id, b.professional_id ?? null, b.service_id, startsAt.toISOString(), b.notes ?? null, user_id, b.valor, b.payment_method]
+    )
+    return reply.status(201).send(venda)
+  })
+
+  // ── Histórico mensal (para o gráfico de evolução) ───────────────────────────
+  app.get('/historico', async (request, reply) => {
+    const { tenant_id, role } = request.user
+    if (!isManager(role)) return reply.status(403).send({ error: 'Sem permissão' })
+    const meses = Math.min(Math.max(Number((request.query as any).meses) || 6, 1), 12)
+    const { y: cy, m: cm } = monthBoundsSP()
+    const MES_LABEL = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez']
+
+    const out: any[] = []
+    for (let k = meses - 1; k >= 0; k--) {
+      let m = cm - k, y = cy
+      while (m <= 0) { m += 12; y -= 1 }
+      const pad = (n: number) => String(n).padStart(2, '0')
+      const start = `${y}-${pad(m)}-01`
+      const end = m === 12 ? `${y + 1}-01-01` : `${y}-${pad(m + 1)}-01`
+      const { rows: [tot] } = await db.query(
+        `SELECT COUNT(*) FILTER (WHERE a.status='completed')::int AS n,
+                COALESCE(SUM(COALESCE(a.price_snapshot, s.price)) FILTER (WHERE a.status='completed'),0)::float AS receita
+         FROM appointments a JOIN services s ON s.id=a.service_id
+         WHERE a.tenant_id=$1 AND a.starts_at >= ($2::date::timestamp AT TIME ZONE 'America/Sao_Paulo')
+           AND a.starts_at < ($3::date::timestamp AT TIME ZONE 'America/Sao_Paulo')`,
+        [tenant_id, start, end]
+      )
+      const receitaVendas = Number(tot.receita)
+      const numVendas = Number(tot.n)
+      const ticket = numVendas ? receitaVendas / numVendas : 0
+      const ex = await computeFinanceExtras(tenant_id!, y, m, receitaVendas, numVendas, Math.round(ticket))
+      out.push({
+        mes: MES_LABEL[m - 1], ano: y,
+        receita: Math.round(ex.faturamento),
+        despesa: Math.round(ex.despesas_total),
+        lucro: Math.round(ex.lucro),
+        meta: Math.round(ex.meta_lucro),
+      })
+    }
+    return reply.send(out)
   })
 }

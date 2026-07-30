@@ -4,6 +4,11 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { financeiroApi, getToken, friendlyMessage } from '@/lib/api'
 import Loading from '@/components/ui/Loading'
 import { getTokenPayload } from '@/lib/auth'
+import MetaCard from './MetaCard'
+import DespesasTab from './DespesasTab'
+import ProjecaoTab from './ProjecaoTab'
+import NovoLancamentoModal from './NovoLancamentoModal'
+import NovaVendaModal from './NovaVendaModal'
 
 const MONTHS = ['Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez']
 
@@ -22,7 +27,19 @@ export default function FinanceiroPage() {
   const now = new Date()
   const [month, setMonth] = useState(now.getMonth() + 1)
   const [year,  setYear]  = useState(now.getFullYear())
-  const [tab, setTab] = useState<'vendas' | 'links'>('vendas')
+  const [tab, setTab] = useState<'despesas' | 'projecao' | 'vendas' | 'links'>('despesas')
+  const [showNovoLancamento, setShowNovoLancamento] = useState(false)
+  const [showNovaVenda, setShowNovaVenda] = useState(false)
+
+  function afterLancamento() {
+    qc.invalidateQueries({ queryKey: ['fin-resumo'] })
+    qc.invalidateQueries({ queryKey: ['fin-resumo-dashboard'] })
+    qc.invalidateQueries({ queryKey: ['fin-despesas'] })
+    qc.invalidateQueries({ queryKey: ['fin-historico'] })
+    qc.invalidateQueries({ queryKey: ['fin-vendas'] })
+    setShowNovoLancamento(false)
+    setShowNovaVenda(false)
+  }
 
   // SAL-11: papel "staff" não acessa o financeiro (o backend também bloqueia).
   const [role, setRole] = useState<string | null>(null)
@@ -100,7 +117,7 @@ export default function FinanceiroPage() {
     <div className="max-w-4xl space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h1 className="text-2xl font-bold text-gray-900">Financeiro</h1>
-        <div className="flex gap-2">
+        <div className="flex gap-2 flex-wrap items-center">
           <select value={month} onChange={(e) => setMonth(Number(e.target.value))}
             className="h-9 px-3 rounded-xl border border-gray-200 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-primary">
             {MONTHS.map((m, i) => <option key={i} value={i + 1}>{m}</option>)}
@@ -109,35 +126,60 @@ export default function FinanceiroPage() {
             className="h-9 px-3 rounded-xl border border-gray-200 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-primary">
             {years.map((y) => <option key={y} value={y}>{y}</option>)}
           </select>
+          <button onClick={() => setShowNovaVenda(true)}
+            className="h-9 px-4 rounded-xl border border-success text-success text-sm font-semibold hover:bg-success/10 transition-colors">
+            Nova venda
+          </button>
+          <button onClick={() => setShowNovoLancamento(true)}
+            className="h-9 px-4 rounded-xl bg-success hover:brightness-95 text-white text-sm font-semibold transition-colors">
+            + Novo lançamento
+          </button>
         </div>
       </div>
 
-      {/* KPIs (SAL-8: inclui ticket médio e taxa de cancelamento) */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
-        <div className={cardCls}>
+      {/* KPIs — 5 originais + Despesas e Lucro (flex-wrap no mobile) */}
+      <div className="flex flex-wrap gap-4">
+        <div className={`${cardCls} flex-1 min-w-[150px]`}>
           <p className="text-xs text-gray-500 mb-1">Receita do mês</p>
           <p className="text-2xl font-bold text-green-600">{fmtBRL(resumo?.receita_total ?? 0)}</p>
         </div>
-        <div className={cardCls}>
+        <div className={`${cardCls} flex-1 min-w-[150px]`}>
           <p className="text-xs text-gray-500 mb-1">Vendas concluídas</p>
           <p className="text-2xl font-bold text-gray-900">{resumo?.total_vendas ?? 0}</p>
         </div>
-        <div className={cardCls}>
+        <div className={`${cardCls} flex-1 min-w-[150px]`}>
           <p className="text-xs text-gray-500 mb-1">Ticket médio</p>
           <p className="text-2xl font-bold text-gray-900">{fmtBRL(resumo?.ticket_medio ?? 0)}</p>
         </div>
-        <div className={cardCls}>
+        <div className={`${cardCls} flex-1 min-w-[150px]`}>
           <p className="text-xs text-gray-500 mb-1">Agendamentos abertos</p>
           <p className="text-2xl font-bold text-blue-600">{resumo?.agendamentos_abertos ?? 0}</p>
         </div>
-        <div className={cardCls}>
+        <div className={`${cardCls} flex-1 min-w-[150px]`}>
           <p className="text-xs text-gray-500 mb-1">Taxa de cancelamento</p>
           <p className="text-2xl font-bold text-red-500">{(resumo?.taxa_cancelamento ?? 0).toLocaleString('pt-BR')}%</p>
           <p className="text-[11px] text-gray-400 mt-0.5">
             {resumo?.agendamentos_cancelados ?? 0} de {resumo?.total_agendamentos ?? 0} agendamentos
           </p>
         </div>
+        <div className={`${cardCls} flex-1 min-w-[150px]`}>
+          <p className="text-xs text-gray-500 mb-1">Despesas do mês</p>
+          <p className="text-2xl font-bold text-red-500">{fmtBRL(resumo?.despesas_total ?? 0)}</p>
+          <p className="text-[11px] text-gray-400 mt-0.5">Fixas {fmtBRL(resumo?.despesas_fixas ?? 0)}</p>
+        </div>
+        <div className={`${cardCls} flex-1 min-w-[150px]`}>
+          <p className="text-xs text-gray-500 mb-1">Lucro</p>
+          <p className={`text-2xl font-bold ${(resumo?.lucro ?? 0) >= (resumo?.meta_lucro ?? 0) && (resumo?.meta_lucro ?? 0) > 0 ? 'text-green-600' : 'text-gray-900'}`}>
+            {fmtBRL(resumo?.lucro ?? 0)}
+          </p>
+          <p className="text-[11px] text-gray-400 mt-0.5">
+            Meta {fmtBRL(resumo?.meta_lucro ?? 0)}{(resumo?.meta_lucro ?? 0) > 0 ? ` · ${resumo?.progresso_meta ?? 0}%` : ''}
+          </p>
+        </div>
       </div>
+
+      {/* Card de Meta de Lucro (quanto faturar + nº de vendas) */}
+      <MetaCard resumo={resumo} onEdit={() => setShowNovoLancamento(true)} />
 
       {/* SAL-8: receita por profissional + serviços mais vendidos */}
       {((resumo?.receita_por_profissional?.length ?? 0) > 0 || (resumo?.servicos_mais_vendidos?.length ?? 0) > 0) && (
@@ -180,16 +222,24 @@ export default function FinanceiroPage() {
       )}
 
       {/* Tabs */}
-      <div className="flex gap-1 bg-gray-100 p-1 rounded-xl w-fit">
-        {(['vendas', 'links'] as const).map((t) => (
+      <div className="flex gap-1 bg-gray-100 p-1 rounded-xl w-fit overflow-x-auto max-w-full">
+        {([
+          ['despesas', 'Despesas & Categorias'],
+          ['projecao', 'Projeção histórica'],
+          ['vendas', 'Controle de Vendas'],
+          ['links', 'Links de Pagamento'],
+        ] as const).map(([t, label]) => (
           <button key={t} onClick={() => setTab(t)}
-            className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+            className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-colors whitespace-nowrap ${
               tab === t ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'
             }`}>
-            {t === 'vendas' ? 'Controle de Vendas' : 'Links de Pagamento'}
+            {label}
           </button>
         ))}
       </div>
+
+      {tab === 'despesas' && <DespesasTab month={month} year={year} />}
+      {tab === 'projecao' && <ProjecaoTab />}
 
       {/* ── Vendas ─────────────────────────────────────────────────────── */}
       {tab === 'vendas' && (
@@ -350,6 +400,13 @@ export default function FinanceiroPage() {
             </div>
           )}
         </div>
+      )}
+
+      {showNovoLancamento && (
+        <NovoLancamentoModal onClose={() => setShowNovoLancamento(false)} onSaved={afterLancamento} currentMeta={resumo?.meta_lucro ?? 0} />
+      )}
+      {showNovaVenda && (
+        <NovaVendaModal onClose={() => setShowNovaVenda(false)} onSaved={afterLancamento} />
       )}
     </div>
   )

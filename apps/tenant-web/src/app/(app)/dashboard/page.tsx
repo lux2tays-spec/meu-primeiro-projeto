@@ -1,9 +1,12 @@
 'use client'
 import { useQuery } from '@tanstack/react-query'
 import Link from 'next/link'
-import { tenantApi, appointmentsApi } from '@/lib/api'
+import { tenantApi, appointmentsApi, financeiroApi, getToken } from '@/lib/api'
+import { getTokenPayload } from '@/lib/auth'
 import Loading from '@/components/ui/Loading'
 import { Rocket, ArrowRight } from 'lucide-react'
+
+const fmtBRL = (v: number) => (v || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL', maximumFractionDigits: 0 })
 
 // SAL-19: data calculada a cada render (no componente), não no load do módulo —
 // o painel aberto de um dia para o outro não fica preso na data antiga.
@@ -73,6 +76,15 @@ export default function DashboardPage() {
   const confirmed = appointments.filter((a: any) => a.status === 'confirmed').length
   const pending = appointments.filter((a: any) => a.status === 'pending').length
 
+  // Vendas do mês (só gestores veem o financeiro; o backend também bloqueia staff).
+  const role = getTokenPayload(getToken())?.role
+  const isManager = ['owner', 'admin', 'root'].includes(role ?? '')
+  const { data: resumo } = useQuery({
+    queryKey: ['fin-resumo-dashboard'],
+    queryFn: () => financeiroApi.resumo(),
+    enabled: isManager,
+  })
+
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -118,6 +130,36 @@ export default function DashboardPage() {
           ))}
         </div>
       </div>
+
+      {/* Vendas do mês (Total de Vendas + Meta de Vendas) */}
+      {isManager && (
+        <div>
+          <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">Vendas do mês</h2>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <div className="bg-white rounded-2xl p-5 shadow-sm border border-gray-100">
+              <p className="text-gray-500 text-sm mb-1">Total de Vendas</p>
+              <p className="text-3xl font-bold text-green-600">{resumo ? fmtBRL(resumo.receita_total) : '—'}</p>
+              <p className="text-[11px] text-gray-400 mt-0.5">{resumo?.total_vendas ?? 0} venda(s) concluída(s)</p>
+            </div>
+            <div className="bg-white rounded-2xl p-5 shadow-sm border border-gray-100">
+              <p className="text-gray-500 text-sm mb-1">Meta de Vendas</p>
+              <p className="text-3xl font-bold text-gray-900">{resumo && resumo.meta_lucro > 0 ? fmtBRL(resumo.meta_vendas) : '—'}</p>
+              <p className="text-[11px] text-gray-400 mt-0.5">
+                {resumo && resumo.meta_lucro > 0
+                  ? (resumo.vendas_faltantes > 0 ? `Faltam ${resumo.vendas_faltantes} venda(s)` : 'Meta batida! 🎉')
+                  : <Link href="/financeiro" className="text-primary hover:underline">Defina uma meta de lucro</Link>}
+              </p>
+            </div>
+            <div className="bg-white rounded-2xl p-5 shadow-sm border border-gray-100">
+              <p className="text-gray-500 text-sm mb-1">Lucro do mês</p>
+              <p className={`text-3xl font-bold ${resumo && resumo.meta_lucro > 0 && resumo.lucro >= resumo.meta_lucro ? 'text-green-600' : 'text-gray-900'}`}>
+                {resumo ? fmtBRL(resumo.lucro) : '—'}
+              </p>
+              <p className="text-[11px] text-gray-400 mt-0.5">Despesas {resumo ? fmtBRL(resumo.despesas_total) : '—'}</p>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Appointments */}
       <div>

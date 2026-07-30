@@ -323,6 +323,7 @@ export const notificationsApi = {
     api.post<any>('/notifications/push-token', { token, platform }),
   deletePushToken: (token: string) =>
     request<any>('/notifications/push-token', { method: 'DELETE', body: JSON.stringify({ token }) }),
+  pushConfig: () => api.get<{ eas_project_id: string }>('/notifications/push-config'),
 }
 
 // Working hours
@@ -379,6 +380,18 @@ export const financeiroApi = {
   createPaymentLink: (data: { title: string; description?: string; amount: number }) =>
     api.post<any>('/financeiro/payment-links', data),
   deletePaymentLink: (id: string) => api.delete<any>(`/financeiro/payment-links/${id}`),
+  // Extensão financeira (migration 042)
+  despesas: (month: number, year: number) => api.get<any[]>(`/financeiro/despesas?month=${month}&year=${year}`),
+  createDespesa: (data: any) => api.post<any>('/financeiro/despesas', data),
+  deleteDespesa: (id: string) => api.delete<any>(`/financeiro/despesas/${id}`),
+  outrasReceitas: (month: number, year: number) => api.get<any[]>(`/financeiro/outras-receitas?month=${month}&year=${year}`),
+  createOutraReceita: (data: { descricao: string; categoria: string; valor: number; data: string }) =>
+    api.post<any>('/financeiro/outras-receitas', data),
+  setMetaLucro: (meta: number) => api.patch<any>('/financeiro/meta-lucro', { meta }),
+  expenseSubtypes: () => api.get<any[]>('/financeiro/expense-subtypes'),
+  historico: (meses = 6) => api.get<any[]>(`/financeiro/historico?meses=${meses}`),
+  createVenda: (data: { customer_id: string; service_id: string; professional_id?: string | null; valor: number; notes?: string; payment_method: string; data?: string }) =>
+    api.post<any>('/financeiro/vendas', data),
 }
 
 // Comissões

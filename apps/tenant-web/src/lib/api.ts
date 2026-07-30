@@ -256,6 +256,60 @@ export interface FinanceiroResumo {
   taxa_cancelamento: number
   receita_por_profissional: { professional_id: string; professional_nome: string; vendas: number; receita: number }[]
   servicos_mais_vendidos: { service_id: string; servico_nome: string; vendas: number; receita: number }[]
+  // Extensão financeira (migration 042)
+  receita_outras: number
+  faturamento: number
+  despesas_fixas: number
+  despesas_variaveis: number
+  despesas_total: number
+  lucro: number
+  meta_lucro: number
+  meta_vendas: number
+  vendas_necessarias: number
+  vendas_faltantes: number
+  progresso_meta: number
+  ticket_base: number
+  pct_sobre_venda: number
+  meta_inatingivel: boolean
+}
+
+export interface Despesa {
+  id: string
+  descricao: string
+  tipo: 'Fixa' | 'Variável'
+  subtipo: string
+  valor: number | null
+  pct: number | null
+  data: string
+  recorrente: boolean
+  is_percent: boolean
+  valor_reais: number
+}
+
+export interface ExpenseSubtype {
+  tipo: 'Fixa' | 'Variável'
+  nome: string
+  is_percent: boolean
+  color: string
+  icon: string | null
+  custom?: boolean
+}
+
+export interface OutraReceita {
+  id: string
+  descricao: string
+  categoria: string
+  valor: number
+  data: string
+}
+
+export interface HistoricoPonto {
+  mes: string
+  ano: number
+  receita: number
+  despesa: number
+  lucro: number
+  meta: number
 }
 
 export interface VendasResponse {
@@ -275,6 +329,25 @@ export const financeiroApi = {
   createPaymentLink: (data: { title: string; description?: string; amount: number }) =>
     api.post<any>('/financeiro/payment-links', data),
   deletePaymentLink: (id: string) => api.delete(`/financeiro/payment-links/${id}`),
+  // Extensão financeira (migration 042)
+  despesas: (month: number, year: number) =>
+    api.get<Despesa[]>(`/financeiro/despesas?month=${month}&year=${year}`),
+  createDespesa: (data: Partial<Despesa> & { descricao: string; tipo: string; subtipo: string; data: string }) =>
+    api.post<Despesa>('/financeiro/despesas', data),
+  updateDespesa: (id: string, data: Partial<Despesa>) => api.patch<Despesa>(`/financeiro/despesas/${id}`, data),
+  deleteDespesa: (id: string) => api.delete(`/financeiro/despesas/${id}`),
+  overrideOcorrencia: (id: string, data: { ano: number; mes: number; valor?: number | null; pct?: number | null; skip?: boolean }) =>
+    api.patch(`/financeiro/despesas/${id}/ocorrencia`, data),
+  outrasReceitas: (month: number, year: number) =>
+    api.get<OutraReceita[]>(`/financeiro/outras-receitas?month=${month}&year=${year}`),
+  createOutraReceita: (data: { descricao: string; categoria: string; valor: number; data: string }) =>
+    api.post<OutraReceita>('/financeiro/outras-receitas', data),
+  deleteOutraReceita: (id: string) => api.delete(`/financeiro/outras-receitas/${id}`),
+  setMetaLucro: (meta: number) => api.patch<{ ok: boolean; meta_lucro_mensal: number }>('/financeiro/meta-lucro', { meta }),
+  expenseSubtypes: () => api.get<ExpenseSubtype[]>('/financeiro/expense-subtypes'),
+  historico: (meses = 6) => api.get<HistoricoPonto[]>(`/financeiro/historico?meses=${meses}`),
+  createVenda: (data: { customer_id: string; service_id: string; professional_id?: string | null; valor: number; notes?: string; payment_method: string; data?: string }) =>
+    api.post<any>('/financeiro/vendas', data),
 }
 
 export interface AppointmentListParams {

@@ -7,8 +7,11 @@ import { StatCard } from '@/components/StatCard'
 import { AppointmentCard } from '@/components/AppointmentCard'
 import { Badge } from '@/components/ui/Badge'
 import { NotificationBell } from '@/components/NotificationBell'
-import { tenantApi, appointmentsApi } from '@/lib/api'
+import { tenantApi, appointmentsApi, financeiroApi } from '@/lib/api'
+import { useAuthStore } from '@/lib/store'
 import { colors, font, spacing } from '@/lib/theme'
+
+const fmtBRL = (v: number) => Number(v ?? 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL', maximumFractionDigits: 0 })
 
 /** YYYY-MM-DD local (não UTC). */
 function toDateStr(d: Date) {
@@ -44,6 +47,15 @@ export default function DashboardScreen() {
   const confirmed = appointments?.filter((a) => a.status === 'confirmed').length ?? 0
   const pending = appointments?.filter((a) => a.status === 'pending').length ?? 0
   const total = appointments?.length ?? 0
+
+  // Vendas do mês — só gestores (o backend também bloqueia staff).
+  const role = useAuthStore((st) => st.role)
+  const isManager = ['owner', 'admin', 'root'].includes(role ?? '')
+  const { data: resumo } = useQuery({
+    queryKey: ['fin-resumo-dashboard'],
+    queryFn: () => financeiroApi.resumo(now.getMonth() + 1, now.getFullYear()),
+    enabled: isManager,
+  })
 
   const planVariant: Record<string, any> = {
     free: 'warning',
@@ -137,6 +149,19 @@ export default function DashboardScreen() {
           />
         </View>
 
+        {/* Vendas do mês (Total de Vendas + Meta de Vendas) — só gestores */}
+        {isManager && (
+          <>
+            <Text style={styles.sectionTitle}>Vendas do mês</Text>
+            <View style={styles.statsRow}>
+              <StatCard label="Total de Vendas" value={resumo ? fmtBRL(resumo.receita_total) : '—'} icon="cash-outline" color={colors.success}
+                subtitle={`${resumo?.total_vendas ?? 0} venda(s)`} />
+              <StatCard label="Meta de Vendas" value={resumo && resumo.meta_lucro > 0 ? fmtBRL(resumo.meta_vendas) : '—'} icon="flag-outline" color={colors.primary}
+                subtitle={resumo && resumo.meta_lucro > 0 ? (resumo.vendas_faltantes > 0 ? `Faltam ${resumo.vendas_faltantes}` : 'Batida! 🎉') : 'Defina no Financeiro'} />
+            </View>
+          </>
+        )}
+
         {/* Today's appointments */}
         <Text style={styles.sectionTitle}>Próximos agendamentos</Text>
         {isLoading ? (
@@ -155,16 +180,7 @@ export default function DashboardScreen() {
           </View>
         )}
       </ScrollView>
-      {/* FAB */}
-      <TouchableOpacity
-        style={styles.fab}
-        onPress={() => router.push('/(app)/appointments/new')}
-        activeOpacity={0.85}
-        accessibilityRole="button"
-        accessibilityLabel="Novo agendamento"
-      >
-        <Ionicons name="add" size={28} color="#fff" />
-      </TouchableOpacity>
+      {/* Ação rápida global (Nova venda / Novo agendamento) vive no layout das tabs. */}
     </SafeAreaView>
   )
 }

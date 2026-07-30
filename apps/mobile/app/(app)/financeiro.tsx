@@ -9,6 +9,9 @@ import { useQuery, useInfiniteQuery, useMutation, useQueryClient } from '@tansta
 import { financeiroApi } from '@/lib/api'
 import { useToast } from '@/lib/toast'
 import { colors, font, spacing, radius } from '@/lib/theme'
+import { MonthlyChart } from '@/components/financeiro/MonthlyChart'
+import { NovaVendaSheet } from '@/components/financeiro/NovaVendaSheet'
+import { NovoLancamentoSheet } from '@/components/financeiro/NovoLancamentoSheet'
 
 const MONTHS = ['Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez']
 
@@ -44,7 +47,7 @@ function rankCount(item: any): number | null {
   return Number.isFinite(n) ? n : null
 }
 
-type Tab = 'vendas' | 'links'
+type Tab = 'despesas' | 'projecao' | 'vendas' | 'links'
 
 export default function FinanceiroScreen() {
   const qc = useQueryClient()
@@ -52,7 +55,30 @@ export default function FinanceiroScreen() {
   const now = new Date()
   const [month, setMonth] = useState(now.getMonth() + 1)
   const [year, setYear]   = useState(now.getFullYear())
-  const [tab, setTab]     = useState<Tab>('vendas')
+  const [tab, setTab]     = useState<Tab>('despesas')
+  const [showNovaVenda, setShowNovaVenda] = useState(false)
+  const [showNovoLancamento, setShowNovoLancamento] = useState(false)
+
+  function afterLancamento() {
+    qc.invalidateQueries({ queryKey: ['fin-resumo'] })
+    qc.invalidateQueries({ queryKey: ['fin-resumo-dashboard'] })
+    qc.invalidateQueries({ queryKey: ['fin-despesas'] })
+    qc.invalidateQueries({ queryKey: ['fin-historico'] })
+    qc.invalidateQueries({ queryKey: ['fin-vendas'] })
+    setShowNovaVenda(false)
+    setShowNovoLancamento(false)
+  }
+
+  const { data: despesas = [] } = useQuery({
+    queryKey: ['fin-despesas', month, year],
+    queryFn: () => financeiroApi.despesas(month, year),
+    enabled: tab === 'despesas',
+  })
+  const { data: historico = [] } = useQuery({
+    queryKey: ['fin-historico'],
+    queryFn: () => financeiroApi.historico(6),
+    enabled: tab === 'projecao',
+  })
 
   // Link form
   const [showModal, setShowModal] = useState(false)
@@ -151,6 +177,18 @@ export default function FinanceiroScreen() {
         {/* Header */}
         <Text style={s.title}>Financeiro</Text>
 
+        {/* Ações rápidas */}
+        <View style={s.actionRow}>
+          <TouchableOpacity style={s.actionOutline} onPress={() => setShowNovaVenda(true)}>
+            <Ionicons name="cart-outline" size={16} color={colors.success} />
+            <Text style={[s.actionText, { color: colors.success }]}>Nova venda</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={s.actionFilled} onPress={() => setShowNovoLancamento(true)}>
+            <Ionicons name="add" size={16} color="#fff" />
+            <Text style={[s.actionText, { color: '#fff' }]}>Novo lançamento</Text>
+          </TouchableOpacity>
+        </View>
+
         {/* Month picker */}
         <View style={s.monthRow}>
           <TouchableOpacity
@@ -216,6 +254,60 @@ export default function FinanceiroScreen() {
               </View>
             </View>
 
+            {/* KPIs financeiros: despesas + lucro */}
+            <View style={s.kpiRow}>
+              <View style={[s.kpi, { backgroundColor: '#FEF2F2' }]}>
+                <Text style={s.kpiLabel}>Despesas</Text>
+                <Text style={[s.kpiValue, { color: colors.danger }]}>{fmtBRL(resumo?.despesas_total ?? 0)}</Text>
+                <Text style={s.kpiSub}>Fixas {fmtBRL(resumo?.despesas_fixas ?? 0)}</Text>
+              </View>
+              <View style={[s.kpi, { backgroundColor: '#ECFDF5' }]}>
+                <Text style={s.kpiLabel}>Lucro</Text>
+                <Text style={[s.kpiValue, { color: (resumo?.lucro ?? 0) >= (resumo?.meta_lucro ?? 0) && (resumo?.meta_lucro ?? 0) > 0 ? colors.success : colors.text }]}>
+                  {fmtBRL(resumo?.lucro ?? 0)}
+                </Text>
+                <Text style={s.kpiSub}>Meta {fmtBRL(resumo?.meta_lucro ?? 0)}{(resumo?.meta_lucro ?? 0) > 0 ? ` · ${resumo?.progresso_meta ?? 0}%` : ''}</Text>
+              </View>
+            </View>
+
+            {/* Card de Meta de Lucro */}
+            {(resumo?.meta_lucro ?? 0) > 0 ? (
+              <View style={s.metaCard}>
+                <View style={s.rowBetween}>
+                  <Text style={s.metaTitle}>🎯 Meta de lucro do mês</Text>
+                  <TouchableOpacity onPress={() => setShowNovoLancamento(true)}><Text style={s.link}>Editar</Text></TouchableOpacity>
+                </View>
+                <View style={s.progressTrack}>
+                  <View style={[s.progressFill, { width: `${Math.max(2, Math.min(100, resumo?.progresso_meta ?? 0))}%` }]} />
+                </View>
+                {resumo?.meta_inatingivel ? (
+                  <Text style={s.metaWarn}>Taxa + comissão somam {resumo?.pct_sobre_venda ?? 0}% — meta inatingível. Ajuste os percentuais ou a meta.</Text>
+                ) : (
+                  <>
+                    <View style={s.metaGrid}>
+                      <View style={s.metaBox}>
+                        <Text style={s.metaBoxLabel}>Precisa faturar</Text>
+                        <Text style={s.metaBoxValue}>{fmtBRL(resumo?.meta_vendas ?? 0)}</Text>
+                      </View>
+                      <View style={s.metaBox}>
+                        <Text style={s.metaBoxLabel}>Ou seja</Text>
+                        <Text style={s.metaBoxValue}>{resumo?.vendas_necessarias ?? 0} vendas</Text>
+                        <Text style={s.metaBoxSub}>ticket {fmtBRL(resumo?.ticket_base ?? 0)}</Text>
+                      </View>
+                    </View>
+                    <Text style={[s.metaStatus, { color: (resumo?.vendas_faltantes ?? 0) === 0 ? colors.success : colors.warning }]}>
+                      {(resumo?.vendas_faltantes ?? 0) === 0 ? '✓ Meta batida!' : `Faltam ${resumo?.vendas_faltantes} venda(s) — ${resumo?.total_vendas ?? 0} de ${resumo?.vendas_necessarias ?? 0}.`}
+                    </Text>
+                  </>
+                )}
+              </View>
+            ) : (
+              <TouchableOpacity style={s.metaCard} onPress={() => setShowNovoLancamento(true)}>
+                <Text style={s.metaTitle}>🎯 Defina sua meta de lucro</Text>
+                <Text style={s.metaBoxSub}>Descubra quanto precisa faturar e quantas vendas fazer no mês.</Text>
+              </TouchableOpacity>
+            )}
+
             {/* Receita por profissional */}
             {Array.isArray(resumo?.receita_por_profissional) && resumo.receita_por_profissional.length > 0 && (
               <View style={s.rankCard}>
@@ -251,16 +343,48 @@ export default function FinanceiroScreen() {
         )}
 
         {/* Tabs */}
-        <View style={s.tabRow}>
-          {(['vendas', 'links'] as Tab[]).map((t) => (
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.tabRow}>
+          {(['despesas', 'projecao', 'vendas', 'links'] as Tab[]).map((t) => (
             <TouchableOpacity key={t} onPress={() => setTab(t)}
               style={[s.tabBtn, tab === t && s.tabBtnActive]}>
               <Text style={[s.tabLabel, tab === t && s.tabLabelActive]}>
-                {t === 'vendas' ? 'Vendas' : 'Links de Pagamento'}
+                {t === 'despesas' ? 'Despesas' : t === 'projecao' ? 'Projeção' : t === 'vendas' ? 'Vendas' : 'Links'}
               </Text>
             </TouchableOpacity>
           ))}
-        </View>
+        </ScrollView>
+
+        {/* ── Despesas & Categorias ─────────────── */}
+        {tab === 'despesas' && (
+          <View style={s.rankCard}>
+            {(despesas as any[]).length === 0 ? (
+              <Text style={s.emptyText}>Nenhuma despesa neste mês. Use “Novo lançamento”.</Text>
+            ) : (
+              (despesas as any[]).map((d) => (
+                <View key={d.id} style={s.despRow}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={s.despDesc} numberOfLines={1}>{d.descricao}</Text>
+                    <Text style={s.despSub}>
+                      {new Date(`${String(d.data).slice(0, 10)}T12:00:00`).toLocaleDateString('pt-BR')} · {d.subtipo}
+                      {d.is_percent ? ` (${d.pct}%)` : ''}{d.recorrente ? ' · recorrente' : ''}
+                    </Text>
+                  </View>
+                  <Text style={s.despValor}>{fmtBRL(d.valor_reais)}</Text>
+                </View>
+              ))
+            )}
+          </View>
+        )}
+
+        {/* ── Projeção histórica ────────────────── */}
+        {tab === 'projecao' && (
+          <View style={s.rankCard}>
+            <Text style={s.rankTitle}>Evolução mensal</Text>
+            {(historico as any[]).length === 0
+              ? <ActivityIndicator color={colors.primary} style={{ paddingVertical: spacing.lg }} />
+              : <MonthlyChart data={historico as any[]} />}
+          </View>
+        )}
 
         {/* ── Vendas ─────────────────────────────── */}
         {tab === 'vendas' && (
@@ -408,6 +532,9 @@ export default function FinanceiroScreen() {
           </ScrollView>
         </SafeAreaView>
       </Modal>
+
+      <NovaVendaSheet visible={showNovaVenda} onClose={() => setShowNovaVenda(false)} onSaved={afterLancamento} />
+      <NovoLancamentoSheet visible={showNovoLancamento} onClose={() => setShowNovoLancamento(false)} onSaved={afterLancamento} currentMeta={resumo?.meta_lucro ?? 0} />
     </SafeAreaView>
   )
 }
@@ -419,6 +546,28 @@ const s = StyleSheet.create({
   monthRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: spacing.lg },
   monthBtn: { padding: spacing.sm },
   monthLabel: { fontSize: font.lg, fontWeight: '700', color: colors.text, minWidth: 100, textAlign: 'center' },
+  actionRow: { flexDirection: 'row', gap: spacing.sm },
+  actionOutline: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: spacing.sm, borderRadius: radius.md, borderWidth: 1.5, borderColor: colors.success, backgroundColor: colors.surface },
+  actionFilled: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: spacing.sm, borderRadius: radius.md, backgroundColor: colors.success },
+  actionText: { fontSize: font.sm, fontWeight: '700' },
+  metaCard: { backgroundColor: colors.surface, borderRadius: radius.lg, padding: spacing.md, gap: spacing.sm, borderLeftWidth: 4, borderLeftColor: colors.success },
+  metaTitle: { fontSize: font.md, fontWeight: '700', color: colors.text },
+  link: { fontSize: font.sm, fontWeight: '700', color: colors.primary },
+  rowBetween: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  progressTrack: { height: 8, borderRadius: 4, backgroundColor: colors.surfaceAlt, overflow: 'hidden' },
+  progressFill: { height: '100%', borderRadius: 4, backgroundColor: colors.success },
+  metaWarn: { fontSize: font.sm, color: colors.danger },
+  metaGrid: { flexDirection: 'row', gap: spacing.sm },
+  metaBox: { flex: 1, backgroundColor: '#ECFDF5', borderRadius: radius.md, padding: spacing.md },
+  metaBoxLabel: { fontSize: 11, color: colors.textSecondary },
+  metaBoxValue: { fontSize: font.lg, fontWeight: '800', color: colors.success, marginTop: 2 },
+  metaBoxSub: { fontSize: 11, color: colors.textSecondary, marginTop: 2 },
+  metaStatus: { fontSize: font.sm, fontWeight: '700' },
+  despRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingVertical: spacing.sm, borderBottomWidth: 1, borderBottomColor: colors.border },
+  despDesc: { fontSize: font.md, fontWeight: '600', color: colors.text },
+  despSub: { fontSize: font.sm, color: colors.textSecondary, marginTop: 2 },
+  despValor: { fontSize: font.md, fontWeight: '700', color: colors.danger },
+  emptyText: { fontSize: font.sm, color: colors.textSecondary, textAlign: 'center', paddingVertical: spacing.lg },
   kpiRow: { flexDirection: 'row', gap: spacing.sm },
   kpi: { flex: 1, borderRadius: radius.lg, padding: spacing.md, gap: 4 },
   kpiLabel: { fontSize: font.sm, color: colors.textSecondary, fontWeight: '500' },
