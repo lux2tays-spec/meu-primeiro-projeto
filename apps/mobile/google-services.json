@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "1014470282872",
+    "project_id": "aiconfirma-58bb7",
+    "storage_bucket": "aiconfirma-58bb7.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:1014470282872:android:d360cda497e6139101278d",
+        "android_client_info": {
+          "package_name": "com.aiconfirma.app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBrU7L1zrF3-Bj-o44ZCIiXw0rJUnGowv4"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
