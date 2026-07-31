@@ -3,6 +3,9 @@ import { z } from 'zod'
 import { db } from '../lib/db'
 import { decrypt } from '../lib/crypto'
 import { resolveDespesas, applyPercentValues, computeFinanceExtras } from '../lib/financeiroCalc'
+import { syncCommissionForAppointment } from '../lib/commissions'
+import { deleteCalendarEvent } from '../services/google-calendar'
+import { logTenantActivity } from '../lib/tenantActivity'
 
 const paymentLinkSchema = z.object({
   title: z.string().min(1),
@@ -126,23 +129,36 @@ export const financeiroRoutes: FastifyPluginAsync = async (app) => {
   })
 
   // ── Lista de vendas (appointments completed) ──────────────────────────────
+  // Aceita filtro por MÊS (month/year) OU por RANGE de datas (from/to, YYYY-MM-DD,
+  // interpretadas no fuso de São Paulo). Retorna também total_valor do período.
   app.get('/vendas', async (request, reply) => {
     const { tenant_id, role } = request.user
     // SAL-11: staff não vê a lista de vendas do negócio
     if (!['owner', 'admin', 'root'].includes(role)) return reply.status(403).send({ error: 'Sem permissão' })
 
-    const { month, year, page = '1', limit = '50' } = request.query as {
-      month?: string; year?: string; page?: string; limit?: string
+    const { month, year, from, to, page = '1', limit = '50' } = request.query as {
+      month?: string; year?: string; from?: string; to?: string; page?: string; limit?: string
     }
 
-    const { start, end } = monthBoundsSP(month, year)
-    // SAL-5: paginação real com `total` no payload, para o frontend paginar e
-    // conferir a soma com o KPI de receita do /resumo.
+    // Range explícito (from/to) tem prioridade; senão usa o mês. `to` é inclusivo
+    // (viramos para o dia seguinte para pegar o dia inteiro).
+    let start: string, end: string
+    if (from && to) {
+      const t = new Date(`${to}T00:00:00`)
+      const nextDay = new Date(t.getTime() + 24 * 60 * 60 * 1000).toISOString().slice(0, 10)
+      start = from
+      end = nextDay
+    } else {
+      const b = monthBoundsSP(month, year)
+      start = b.start
+      end = b.end
+    }
+
     const lim = Math.min(Math.max(Number(limit) || 50, 1), 100)
     const pg = Math.max(Number(page) || 1, 1)
     const offset = (pg - 1) * lim
 
-    const [dataRes, countRes] = await Promise.all([
+    const [dataRes, aggRes] = await Promise.all([
       db.query(
         `SELECT
            a.id,
@@ -151,6 +167,9 @@ export const financeiroRoutes: FastifyPluginAsync = async (app) => {
            a.notes,
            a.payment_method,
            a.source,
+           a.customer_id,
+           a.service_id,
+           a.professional_id,
            c.name  AS cliente_nome,
            c.phone AS cliente_telefone,
            s.name  AS servico_nome,
@@ -167,8 +186,9 @@ export const financeiroRoutes: FastifyPluginAsync = async (app) => {
         [tenant_id, start, end, lim, offset]
       ),
       db.query(
-        `SELECT COUNT(*)::int AS total
-         FROM appointments a
+        `SELECT COUNT(*)::int AS total,
+                COALESCE(SUM(COALESCE(a.price_snapshot, s.price)), 0)::float AS total_valor
+         FROM appointments a JOIN services s ON s.id = a.service_id
          WHERE a.tenant_id = $1 AND a.status = 'completed'
            AND a.starts_at >= ${SP_MONTH_START} AND a.starts_at < ${SP_MONTH_END}`,
         [tenant_id, start, end]
@@ -177,10 +197,61 @@ export const financeiroRoutes: FastifyPluginAsync = async (app) => {
 
     return reply.send({
       data: dataRes.rows,
-      total: Number(countRes.rows[0].total),
+      total: Number(aggRes.rows[0].total),
+      total_valor: Number(aggRes.rows[0].total_valor),
       page: pg,
       limit: lim,
     })
+  })
+
+  // ── Excluir uma venda (manager) — com log visível ao proprietário ───────────
+  app.delete<{ Params: { id: string } }>('/vendas/:id', async (request, reply) => {
+    const { tenant_id, user_id, role } = request.user
+    if (!['owner', 'admin', 'root'].includes(role)) return reply.status(403).send({ error: 'Sem permissão' })
+
+    // Busca a venda (para o log e para decidir hard-delete vs cancelar).
+    const { rows: [venda] } = await db.query(
+      `SELECT a.id, a.source, a.customer_id, a.service_id,
+              c.name AS cliente_nome, s.name AS servico_nome,
+              COALESCE(a.price_snapshot, s.price) AS valor
+       FROM appointments a JOIN customers c ON c.id=a.customer_id JOIN services s ON s.id=a.service_id
+       WHERE a.id = $1 AND a.tenant_id = $2 AND a.status = 'completed'`,
+      [request.params.id, tenant_id]
+    )
+    if (!venda) return reply.status(404).send({ error: 'Venda não encontrada' })
+
+    // Venda avulsa (quick_sale): remove a linha (não tem agenda/comissão). Venda
+    // de agendamento normal: cancela (mantém histórico da agenda e comissões).
+    if (venda.source === 'quick_sale') {
+      await db.query('DELETE FROM appointments WHERE id = $1 AND tenant_id = $2', [request.params.id, tenant_id])
+    } else {
+      await db.query(`UPDATE appointments SET status = 'cancelled' WHERE id = $1 AND tenant_id = $2`, [request.params.id, tenant_id])
+      syncCommissionForAppointment(request.params.id).catch(() => {})
+      deleteCalendarEvent(request.params.id).catch(() => {})
+    }
+
+    // Log durável para o painel do proprietário + aviso.
+    const { rows: [actor] } = await db.query('SELECT name FROM users WHERE id = $1', [user_id])
+    const summary = `Venda de ${Number(venda.valor).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })} (${venda.servico_nome} — ${venda.cliente_nome}) excluída`
+    await logTenantActivity({
+      tenantId: tenant_id!, actorId: user_id, actorName: actor?.name ?? null,
+      action: 'sale.delete', target: request.params.id, summary,
+      data: { valor: Number(venda.valor), cliente: venda.cliente_nome, servico: venda.servico_nome, source: venda.source },
+    })
+
+    return reply.send({ deleted: true })
+  })
+
+  // ── Log de atividades do tenant (proprietário) ──────────────────────────────
+  app.get('/activity-log', async (request, reply) => {
+    const { tenant_id, role } = request.user
+    if (!['owner', 'admin', 'root'].includes(role)) return reply.status(403).send({ error: 'Sem permissão' })
+    const { rows } = await db.query(
+      `SELECT id, actor_name, action, target, summary, data, created_at
+       FROM tenant_activity_log WHERE tenant_id = $1 ORDER BY created_at DESC LIMIT 100`,
+      [tenant_id]
+    )
+    return reply.send(rows)
   })
 
   // ── Links de pagamento ────────────────────────────────────────────────────

@@ -10,8 +10,8 @@ import { useBranding } from '@/components/BrandingProvider'
 import NotificationBell from '@/components/NotificationBell'
 import {
   LayoutDashboard, CalendarDays, Users, Wallet, MessageCircle, Bot, Tag,
-  UserCog, Clock, CreditCard, Package, Share2, LifeBuoy, LogOut, Trash2,
-  Menu, Lock, AlarmClock, Coins, UserCircle, CalendarCheck, Bell, type LucideIcon,
+  UserCog, Clock, CreditCard, Package, Share2, LifeBuoy, LogOut,
+  Menu, Lock, AlarmClock, Coins, UserCircle, CalendarCheck, Bell, ShoppingBag, type LucideIcon,
 } from 'lucide-react'
 
 // managerOnly: SAL-11 — papéis "staff" não veem entradas de gestão financeira.
@@ -19,6 +19,7 @@ const NAV: { href: string; icon: LucideIcon; label: string; managerOnly?: boolea
   { href: '/dashboard',             icon: LayoutDashboard, label: 'Dashboard' },
   { href: '/calendar',              icon: CalendarDays,    label: 'Agenda' },
   { href: '/customers',             icon: Users,           label: 'Clientes' },
+  { href: '/vendas',                icon: ShoppingBag,     label: 'Vendas', managerOnly: true },
   { href: '/financeiro',            icon: Wallet,          label: 'Financeiro', managerOnly: true },
   { href: '/comissoes',             icon: Coins,           label: 'Comissões' },
   { href: '/settings/whatsapp',     icon: MessageCircle,   label: 'WhatsApp' },
@@ -84,22 +85,6 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     router.replace('/login')
   }
 
-  async function deleteAccount() {
-    const currentRole = getTokenPayload(getToken())?.role
-    const isOwner = currentRole === 'owner' || currentRole === 'root'
-    const msg = isOwner
-      ? 'Isso apaga permanentemente sua conta e TODOS os dados do negócio (clientes, agendamentos, conversas). Não pode ser desfeito. Continuar?'
-      : 'Isso remove permanentemente seu acesso e sua conta. Não pode ser desfeito. Continuar?'
-    if (!window.confirm(msg)) return
-    if (!window.confirm('Tem certeza? Esta ação é definitiva.')) return
-    try {
-      await authApi.deleteAccount()
-      clearToken()
-      router.replace('/login')
-    } catch (e: any) {
-      alert(e?.message ?? 'Não foi possível excluir a conta.')
-    }
-  }
 
   if (!ready) return null
 
@@ -221,13 +206,8 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
             <LogOut size={16} strokeWidth={1.75} className="shrink-0" />
             Sair
           </button>
-          <button
-            onClick={deleteAccount}
-            className="w-full flex items-center gap-2.5 text-left text-red-400/80 hover:text-red-300 text-sm px-3 py-2 rounded-xl hover:bg-sidebar-hover transition-colors"
-          >
-            <Trash2 size={16} strokeWidth={1.75} className="shrink-0" />
-            Excluir conta
-          </button>
+          {/* "Excluir conta" removido do painel web (mantido apenas no app, de forma
+              discreta, para atender à exigência de exclusão de conta das lojas). */}
         </div>
       </aside>
 

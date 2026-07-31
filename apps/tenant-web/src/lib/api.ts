@@ -315,6 +315,7 @@ export interface HistoricoPonto {
 export interface VendasResponse {
   data: any[]
   total: number
+  total_valor?: number
   page: number
   limit: number
 }
@@ -348,6 +349,11 @@ export const financeiroApi = {
   historico: (meses = 6) => api.get<HistoricoPonto[]>(`/financeiro/historico?meses=${meses}`),
   createVenda: (data: { customer_id: string; service_id: string; professional_id?: string | null; valor: number; notes?: string; payment_method: string; data?: string }) =>
     api.post<any>('/financeiro/vendas', data),
+  // Módulo de Vendas: lista por range de datas (from/to = YYYY-MM-DD) com total.
+  vendasRange: (from: string, to: string, page = 1, limit = 50) =>
+    api.get<VendasResponse>(`/financeiro/vendas?from=${from}&to=${to}&page=${page}&limit=${limit}`),
+  deleteVenda: (id: string) => api.delete(`/financeiro/vendas/${id}`),
+  activityLog: () => api.get<any[]>('/financeiro/activity-log'),
 }
 
 export interface AppointmentListParams {

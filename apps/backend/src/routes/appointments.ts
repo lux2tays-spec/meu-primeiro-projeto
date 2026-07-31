@@ -15,11 +15,13 @@ const createSchema = z.object({
 })
 
 const updateSchema = z.object({
+  customer_id: z.string().uuid().optional(),
   professional_id: z.string().uuid().optional(),
   service_id: z.string().uuid().optional(),
   starts_at: z.string().datetime().optional(),
   notes: z.string().nullable().optional(),
   status: z.enum(['pending', 'confirmed', 'completed', 'cancelled']).optional(),
+  payment_method: z.enum(['pix', 'payment_link', 'credit_card', 'debit_card', 'cash']).nullable().optional(),
   // Valor editável por agendamento: grava um preço específico em price_snapshot,
   // sobrescrevendo o preço da tabela de serviços para ESTE atendimento. null limpa
   // o override (volta a usar o preço vigente do serviço). O financeiro usa
@@ -221,6 +223,13 @@ export const appointmentRoutes: FastifyPluginAsync = async (app) => {
       )
       if (!svc) return reply.status(404).send({ error: 'Serviço não encontrado' })
     }
+    if (body.customer_id) {
+      const { rows: [cust] } = await db.query(
+        'SELECT id FROM customers WHERE id = $1 AND tenant_id = $2',
+        [body.customer_id, tenant_id]
+      )
+      if (!cust) return reply.status(404).send({ error: 'Cliente não encontrado' })
+    }
 
     // If changing time/service, recompute ends_at and check conflicts
     let endsAt: string | undefined
@@ -258,12 +267,14 @@ export const appointmentRoutes: FastifyPluginAsync = async (app) => {
     let i = 1
     let serviceIdParamIdx: number | null = null
 
+    if (body.customer_id !== undefined)     { sets.push(`customer_id = $${i++}`); values.push(body.customer_id) }
     if (body.professional_id !== undefined) { sets.push(`professional_id = $${i++}`); values.push(body.professional_id) }
     if (body.service_id !== undefined)      { serviceIdParamIdx = i; sets.push(`service_id = $${i++}`); values.push(body.service_id) }
     if (body.starts_at !== undefined)       { sets.push(`starts_at = $${i++}`); values.push(body.starts_at) }
     if (endsAt !== undefined)               { sets.push(`ends_at = $${i++}`); values.push(endsAt) }
     if (body.notes !== undefined)           { sets.push(`notes = $${i++}`); values.push(body.notes) }
     if (body.status !== undefined)          { sets.push(`status = $${i++}`); values.push(body.status) }
+    if (body.payment_method !== undefined)  { sets.push(`payment_method = $${i++}`); values.push(body.payment_method) }
     // Valor editável: se veio um price_snapshot explícito, ele manda — grava o
     // override (ou null para limpar). Tem prioridade sobre a lógica de conclusão
     // abaixo, para não gerar dupla atribuição da mesma coluna no UPDATE.
