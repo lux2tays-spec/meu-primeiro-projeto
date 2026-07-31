@@ -243,14 +243,20 @@ async function dispatchPush(
     data: { ...(data ?? {}), link },
   }))
   // Token de acesso da Expo (Root Admin, opcional): envia autenticado quando presente.
+  // Se o token for inválido (401/403), reenvia SEM token — o envio anônimo é aceito
+  // pela Expo, então um token errado nunca derruba o push.
   const { expo_access_token } = await getPushConfig()
-  const headers: Record<string, string> = { 'Content-Type': 'application/json', Accept: 'application/json' }
-  if (expo_access_token) headers.Authorization = `Bearer ${expo_access_token}`
-  const res = await fetch('https://exp.host/--/api/v2/push/send', {
-    method: 'POST',
-    headers,
-    body: JSON.stringify(messages),
-  })
+  const payload = JSON.stringify(messages)
+  const send = (withToken: boolean) => {
+    const headers: Record<string, string> = { 'Content-Type': 'application/json', Accept: 'application/json' }
+    if (withToken && expo_access_token) headers.Authorization = `Bearer ${expo_access_token}`
+    return fetch('https://exp.host/--/api/v2/push/send', { method: 'POST', headers, body: payload })
+  }
+  let res = await send(!!expo_access_token)
+  if (!res.ok && expo_access_token && (res.status === 401 || res.status === 403)) {
+    console.warn('[notifications] Expo push 401/403 com token — reenviando sem token (token de acesso inválido?)')
+    res = await send(false)
+  }
   if (!res.ok) {
     console.error('[notifications] Expo push respondeu', res.status, await res.text().catch(() => ''))
   }

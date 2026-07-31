@@ -125,13 +125,38 @@ export const notificationRoutes: FastifyPluginAsync = async (app) => {
     if (tokens.length === 0) return reply.send({ ok: false, reason: 'no_token', detail: 'Nenhum token de push registrado para este usuário. Abra o app e aceite a permissão de notificações.' })
 
     const { expo_access_token } = await getPushConfig()
-    const headers: Record<string, string> = { 'Content-Type': 'application/json', Accept: 'application/json' }
-    if (expo_access_token) headers.Authorization = `Bearer ${expo_access_token}`
     const messages = tokens.map((to: string) => ({ to, sound: 'default', title: 'Teste de push 🔔', body: 'Se você recebeu isto, o push está funcionando!', data: { link: '/notifications' } }))
+    const body = JSON.stringify(messages)
+    const send = async (withToken: boolean) => {
+      const headers: Record<string, string> = { 'Content-Type': 'application/json', Accept: 'application/json' }
+      if (withToken && expo_access_token) headers.Authorization = `Bearer ${expo_access_token}`
+      const res = await fetch('https://exp.host/--/api/v2/push/send', { method: 'POST', headers, body })
+      const text = await res.text()
+      let json: any = null; try { json = JSON.parse(text) } catch { /* not json */ }
+      return { status: res.status, ok: res.ok, body: json ?? text.slice(0, 300) }
+    }
     try {
-      const res = await fetch('https://exp.host/--/api/v2/push/send', { method: 'POST', headers, body: JSON.stringify(messages) })
-      const json = await res.json().catch(() => null)
-      return reply.send({ ok: res.ok, status: res.status, expo: json, sent_to: tokens.length })
+      let result = await send(!!expo_access_token)
+      let fellBack = false
+      // Token inválido → reenvia sem token (o que a Expo aceita anônimo).
+      if (!result.ok && expo_access_token && (result.status === 401 || result.status === 403)) {
+        result = await send(false)
+        fellBack = true
+      }
+      // Sucesso HTTP mas com ticket de erro (ex.: credencial FCM) → sinaliza.
+      const ticketError = result.ok && Array.isArray(result.body?.data) && result.body.data.find((d: any) => d?.status === 'error')
+      return reply.send({
+        ok: result.ok && !ticketError,
+        status: result.status,
+        had_token: !!expo_access_token,
+        fell_back_no_token: fellBack,
+        ticket_error: ticketError ? (ticketError.details?.error ?? ticketError.message) : null,
+        expo: result.body,
+        detail: !result.ok ? `Expo retornou HTTP ${result.status}${expo_access_token ? ' (token de acesso pode estar inválido)' : ''}.`
+          : ticketError ? `Erro no envio: ${ticketError.details?.error ?? ticketError.message} (verifique a credencial FCM no EAS).`
+          : 'Enviado com sucesso.',
+        sent_to: tokens.length,
+      })
     } catch (e: any) {
       return reply.send({ ok: false, reason: 'send_failed', detail: e?.message })
     }

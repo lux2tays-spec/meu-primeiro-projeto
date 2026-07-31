@@ -1,4 +1,4 @@
-import { View, Text, ScrollView, StyleSheet, Switch, ActivityIndicator, TouchableOpacity } from 'react-native'
+import { View, Text, ScrollView, StyleSheet, Switch, ActivityIndicator, TouchableOpacity, Alert } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { notificationsApi, type NotificationPrefs } from '@/lib/api'
@@ -37,10 +37,20 @@ export default function NotificationSettingsScreen() {
   const test = useMutation({
     mutationFn: notificationsApi.testPush,
     onSuccess: (r: any) => {
-      if (r?.ok) toast.show('Push de teste enviado! Deve chegar em segundos.', 'success')
-      else toast.show(r?.detail ?? r?.reason ?? 'Falha ao enviar push de teste.', 'error')
+      if (r?.ok) {
+        toast.show('Push de teste enviado! Deve chegar em segundos.', 'success')
+      } else {
+        // Mostra o motivo real (HTTP/ticket da Expo) para diagnóstico.
+        const lines = [
+          r?.detail ?? r?.reason ?? 'Falha ao enviar push de teste.',
+          r?.status ? `HTTP: ${r.status}` : null,
+          r?.ticket_error ? `Erro Expo: ${r.ticket_error}` : null,
+          r?.expo ? `Resposta: ${typeof r.expo === 'string' ? r.expo : JSON.stringify(r.expo)}`.slice(0, 400) : null,
+        ].filter(Boolean)
+        Alert.alert('Não foi possível enviar o push', lines.join('\n\n'))
+      }
     },
-    onError: (e: any) => toast.show(e?.message ?? 'Falha no teste de push.', 'error'),
+    onError: (e: any) => Alert.alert('Falha no teste de push', e?.message ?? 'Erro desconhecido.'),
   })
 
   const save = useMutation({
