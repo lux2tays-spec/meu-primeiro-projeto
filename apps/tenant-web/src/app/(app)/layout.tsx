@@ -194,10 +194,6 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
               <p className="text-white text-xs font-medium truncate">{me?.name ?? payload?.role ?? 'user'}</p>
               <p className="text-gray-400 text-[11px] truncate">{me?.role ?? payload?.role ?? ''}</p>
             </div>
-            {/* Sino de notificações (desktop) — dropdown abre para cima */}
-            <div className="hidden lg:block">
-              <NotificationBell dark />
-            </div>
           </div>
           <button
             onClick={logout}
@@ -213,12 +209,12 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
 
       {/* Main */}
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
-        {/* Mobile header */}
-        <header className="lg:hidden bg-white border-b border-gray-100 px-4 h-14 flex items-center gap-3">
-          <button onClick={() => setSidebarOpen(true)} className="text-gray-500" aria-label="Abrir menu">
+        {/* Barra superior (todas as telas): menu no mobile + sino de notificações à direita */}
+        <header className="bg-white border-b border-gray-100 px-4 lg:px-8 h-14 flex items-center gap-3 shrink-0">
+          <button onClick={() => setSidebarOpen(true)} className="text-gray-500 lg:hidden" aria-label="Abrir menu">
             <Menu size={22} strokeWidth={1.75} />
           </button>
-          <span className="font-bold text-gray-900">{appName}</span>
+          <span className="font-bold text-gray-900 lg:hidden">{appName}</span>
           <div className="ml-auto">
             <NotificationBell />
           </div>

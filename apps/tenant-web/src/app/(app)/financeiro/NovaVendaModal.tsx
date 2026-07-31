@@ -26,6 +26,7 @@ export default function NovaVendaModal({ onClose, onSaved }: { onClose: () => vo
   const [valor, setValor] = useState('')
   const [notes, setNotes] = useState('')
   const [paymentMethod, setPaymentMethod] = useState('pix')
+  const [outroDesc, setOutroDesc] = useState('')
   const [error, setError] = useState('')
 
   const { data: services = [] } = useQuery({ queryKey: ['services'], queryFn: () => tenantApi.services() })
@@ -36,10 +37,14 @@ export default function NovaVendaModal({ onClose, onSaved }: { onClose: () => vo
     enabled: !creatingNew && search.length >= 2,
   })
 
+  const isOutro = serviceId === '__outro__'
+
   function pickService(id: string) {
     setServiceId(id)
+    if (id === '__outro__') { setValor(''); return } // serviço avulso: valor manual
+    // #9: ao trocar de serviço, o valor SEMPRE reflete o preço do novo serviço.
     const s = (services as any[]).find((x) => x.id === id)
-    if (s && !valor) setValor(String(Number(s.price)))
+    if (s) setValor(String(Number(s.price)))
   }
 
   const save = useMutation({
@@ -51,9 +56,11 @@ export default function NovaVendaModal({ onClose, onSaved }: { onClose: () => vo
       }
       if (!cid) throw new Error('Selecione ou cadastre um cliente.')
       if (!serviceId) throw new Error('Selecione o serviço.')
+      if (isOutro && !outroDesc.trim()) throw new Error('Descreva o serviço avulso.')
       return financeiroApi.createVenda({
         customer_id: cid,
-        service_id: serviceId,
+        service_id: isOutro ? undefined : serviceId,
+        custom_service: isOutro ? outroDesc.trim() : undefined,
         professional_id: professionalId || null,
         valor: Number(valor || 0),
         notes: notes.trim() || undefined,
@@ -64,7 +71,8 @@ export default function NovaVendaModal({ onClose, onSaved }: { onClose: () => vo
     onError: (e: any) => setError(friendlyMessage(e, 'Não foi possível registrar a venda.')),
   })
 
-  const canSave = (creatingNew ? (newCustomer.name.trim() && newCustomer.phone.trim()) : customerId) && serviceId && Number(valor) > 0 && !save.isPending
+  const canSave = (creatingNew ? (newCustomer.name.trim() && newCustomer.phone.trim()) : customerId)
+    && serviceId && (!isOutro || outroDesc.trim()) && Number(valor) > 0 && !save.isPending
 
   return (
     <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4" onClick={onClose}>
@@ -77,7 +85,7 @@ export default function NovaVendaModal({ onClose, onSaved }: { onClose: () => vo
         {/* Cliente */}
         <div>
           <div className="flex items-center justify-between mb-1">
-            <label className={labelCls}>Cliente</label>
+            <label className={labelCls}>Cliente <span className="text-red-500">*</span></label>
             <button onClick={() => { setCreatingNew(!creatingNew); setCustomerId(''); }} className="text-xs font-semibold text-primary hover:underline">
               {creatingNew ? 'Buscar existente' : '+ Novo cliente'}
             </button>
@@ -106,17 +114,26 @@ export default function NovaVendaModal({ onClose, onSaved }: { onClose: () => vo
 
         {/* Serviço */}
         <div>
-          <label className={labelCls}>Serviço</label>
+          <label className={labelCls}>Serviço <span className="text-red-500">*</span></label>
           <select value={serviceId} onChange={(e) => pickService(e.target.value)} className={inputCls}>
             <option value="">Selecione…</option>
             {(services as any[]).map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+            <option value="__outro__">Outro serviço (sem preço fixo)…</option>
           </select>
         </div>
+
+        {/* Descrição do serviço avulso (obrigatória quando "Outro serviço") */}
+        {isOutro && (
+          <div>
+            <label className={labelCls}>Descrição do serviço <span className="text-red-500">*</span></label>
+            <input className={inputCls} value={outroDesc} onChange={(e) => setOutroDesc(e.target.value)} placeholder="Ex.: Retoque de sobrancelha" />
+          </div>
+        )}
 
         {/* Valor + Profissional */}
         <div className="grid grid-cols-2 gap-3">
           <div>
-            <label className={labelCls}>Valor (R$)</label>
+            <label className={labelCls}>Valor (R$) <span className="text-red-500">*</span></label>
             <input type="number" min="0" step="0.01" className={inputCls} value={valor} onChange={(e) => setValor(e.target.value)} placeholder="0,00" />
           </div>
           <div>
@@ -130,7 +147,7 @@ export default function NovaVendaModal({ onClose, onSaved }: { onClose: () => vo
 
         {/* Forma de pagamento */}
         <div>
-          <label className={labelCls}>Forma de pagamento</label>
+          <label className={labelCls}>Forma de pagamento <span className="text-red-500">*</span></label>
           <div className="flex flex-wrap gap-2">
             {PAYMENT_METHODS.map((pm) => (
               <button key={pm.value} onClick={() => setPaymentMethod(pm.value)}

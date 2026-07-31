@@ -64,7 +64,7 @@ export default function NotificationBell({ dark = false }: { dark?: boolean }) {
       </button>
 
       {open && (
-        <div className="absolute right-0 bottom-full mb-2 lg:top-full lg:bottom-auto lg:mt-2 lg:mb-0 w-80 max-w-[calc(100vw-2rem)] bg-white rounded-2xl shadow-xl border border-gray-100 z-50 overflow-hidden">
+        <div className="absolute right-0 top-full mt-2 w-96 max-w-[calc(100vw-2rem)] bg-white rounded-2xl shadow-2xl border border-gray-200 z-50 overflow-hidden">
           <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100">
             <p className="font-bold text-gray-900 text-sm">Notificações</p>
             {unread > 0 && (

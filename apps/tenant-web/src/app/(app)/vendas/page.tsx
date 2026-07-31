@@ -4,6 +4,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { financeiroApi, appointmentsApi, tenantApi, getToken, friendlyMessage } from '@/lib/api'
 import { getTokenPayload } from '@/lib/auth'
 import Loading from '@/components/ui/Loading'
+import NovaVendaModal from '../financeiro/NovaVendaModal'
 
 const PM_LABEL: Record<string, string> = { pix: 'Pix', payment_link: 'Link', credit_card: 'Crédito', debit_card: 'Débito', cash: 'Dinheiro' }
 const PM_OPTIONS = Object.entries(PM_LABEL)
@@ -26,6 +27,7 @@ export default function VendasPage() {
   const [to, setTo] = useState(iso(today))
   const [page, setPage] = useState(1)
   const [editing, setEditing] = useState<any | null>(null)
+  const [novaVenda, setNovaVenda] = useState(false)
   useEffect(() => { setPage(1) }, [from, to])
 
   const { data, isLoading } = useQuery({
@@ -78,6 +80,10 @@ export default function VendasPage() {
     <div className="max-w-5xl space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h1 className="text-2xl font-bold text-gray-900">Vendas</h1>
+        <button onClick={() => setNovaVenda(true)}
+          className="h-9 px-4 rounded-xl bg-primary hover:bg-primary-dark text-white text-sm font-semibold transition-colors">
+          + Nova venda
+        </button>
       </div>
 
       {/* Período */}
@@ -126,7 +132,10 @@ export default function VendasPage() {
                       <p className="font-medium text-gray-900">{v.cliente_nome}</p>
                       {v.source === 'quick_sale' && <span className="text-[10px] text-gray-400">venda avulsa</span>}
                     </td>
-                    <td className="py-3 pr-4 text-gray-700">{v.servico_nome}</td>
+                    <td className="py-3 pr-4 text-gray-700">
+                      {v.servico_nome}
+                      {v.notes && <p className="text-[11px] text-gray-400 max-w-[200px] truncate">{v.notes}</p>}
+                    </td>
                     <td className="py-3 pr-4 text-gray-700">{v.profissional_nome ?? '—'}</td>
                     <td className="py-3 pr-4 text-gray-600">{v.payment_method ? PM_LABEL[v.payment_method] : '—'}</td>
                     <td className="py-3 pr-2 text-right font-semibold text-green-600">{fmtBRL(Number(v.valor))}</td>
@@ -153,10 +162,13 @@ export default function VendasPage() {
         )}
       </div>
 
-      {/* Log do proprietário */}
-      {(log as any[]).length > 0 && (
-        <div className={cardCls}>
-          <p className="text-sm font-semibold text-gray-900 mb-3">Log de atividades (exclusões e alterações)</p>
+      {/* Log de atividades da equipe (painel do proprietário) — sempre visível */}
+      <div className={cardCls}>
+        <p className="text-sm font-semibold text-gray-900 mb-1">Log de atividades da equipe</p>
+        <p className="text-xs text-gray-400 mb-3">Registro de exclusões e alterações de vendas feitas pela equipe.</p>
+        {(log as any[]).length === 0 ? (
+          <p className="text-gray-400 text-sm py-4 text-center">Nenhuma atividade registrada ainda.</p>
+        ) : (
           <div className="space-y-2 max-h-64 overflow-y-auto">
             {(log as any[]).map((l) => (
               <div key={l.id} className="flex items-center justify-between gap-3 text-sm border-b border-gray-50 pb-2">
@@ -165,13 +177,19 @@ export default function VendasPage() {
               </div>
             ))}
           </div>
-        </div>
-      )}
+        )}
+      </div>
 
       {editing && <EditVendaModal venda={editing} onClose={() => setEditing(null)} onSaved={() => {
         setEditing(null)
         qc.invalidateQueries({ queryKey: ['vendas-range'] })
         qc.invalidateQueries({ queryKey: ['fin-resumo'] })
+      }} />}
+      {novaVenda && <NovaVendaModal onClose={() => setNovaVenda(false)} onSaved={() => {
+        setNovaVenda(false)
+        qc.invalidateQueries({ queryKey: ['vendas-range'] })
+        qc.invalidateQueries({ queryKey: ['fin-resumo'] })
+        qc.invalidateQueries({ queryKey: ['fin-resumo-dashboard'] })
       }} />}
     </div>
   )

@@ -506,24 +506,45 @@ export const financeiroRoutes: FastifyPluginAsync = async (app) => {
     if (!isManager(role)) return reply.status(403).send({ error: 'Sem permissão' })
     const b = z.object({
       customer_id: z.string().uuid(),
-      service_id: z.string().uuid(),
+      service_id: z.string().uuid().optional(),
+      custom_service: z.string().min(1).max(120).optional(), // "Outro serviço" (avulso, sem preço fixo)
       professional_id: z.string().uuid().nullable().optional(),
       valor: z.number().nonnegative(),
       notes: z.string().optional(),
       payment_method: z.enum(['pix', 'payment_link', 'credit_card', 'debit_card', 'cash']),
       data: z.string().optional(), // YYYY-MM-DD (default: agora)
-    }).parse(request.body)
+    }).refine((d) => !!d.service_id || !!d.custom_service, { message: 'Informe o serviço ou uma descrição de serviço avulso.' })
+      .parse(request.body)
 
-    // Valida cliente e serviço do tenant; profissional (se informado) também.
-    const [cust, svc] = await Promise.all([
-      db.query('SELECT id FROM customers WHERE id = $1 AND tenant_id = $2', [b.customer_id, tenant_id]),
-      db.query('SELECT id FROM services WHERE id = $1 AND tenant_id = $2', [b.service_id, tenant_id]),
-    ])
+    const cust = await db.query('SELECT id FROM customers WHERE id = $1 AND tenant_id = $2', [b.customer_id, tenant_id])
     if (cust.rowCount === 0) return reply.status(404).send({ error: 'Cliente não encontrado' })
-    if (svc.rowCount === 0) return reply.status(404).send({ error: 'Serviço não encontrado' })
     if (b.professional_id) {
       const prof = await db.query('SELECT id FROM professionals WHERE id = $1 AND tenant_id = $2', [b.professional_id, tenant_id])
       if (prof.rowCount === 0) return reply.status(404).send({ error: 'Profissional não encontrado' })
+    }
+
+    // Resolve o serviço: um serviço listado, OU o placeholder "Serviço avulso" do
+    // tenant (criado sob demanda) quando é um "Outro serviço". A descrição do
+    // avulso vai para notes (visível na lista de vendas).
+    let serviceId = b.service_id
+    let notes = b.notes?.trim() || null
+    if (!serviceId) {
+      const found = await db.query(
+        `SELECT id FROM services WHERE tenant_id = $1 AND name = 'Serviço avulso' LIMIT 1`, [tenant_id]
+      )
+      serviceId = found.rows[0]?.id
+      if (!serviceId) {
+        const created = await db.query(
+          `INSERT INTO services (tenant_id, name, duration_minutes, price, active)
+           VALUES ($1, 'Serviço avulso', 0, 0, FALSE) RETURNING id`, [tenant_id]
+        )
+        serviceId = created.rows[0].id
+      }
+      // A descrição do serviço avulso encabeça as notes.
+      notes = notes ? `${b.custom_service} — ${notes}` : (b.custom_service ?? null)
+    } else {
+      const svc = await db.query('SELECT id FROM services WHERE id = $1 AND tenant_id = $2', [serviceId, tenant_id])
+      if (svc.rowCount === 0) return reply.status(404).send({ error: 'Serviço não encontrado' })
     }
 
     // Instante da venda. ends_at = starts_at → intervalo vazio: não conflita com
@@ -533,7 +554,7 @@ export const financeiroRoutes: FastifyPluginAsync = async (app) => {
       `INSERT INTO appointments
          (tenant_id, customer_id, professional_id, service_id, starts_at, ends_at, status, notes, created_by, price_snapshot, payment_method, source)
        VALUES ($1, $2, $3, $4, $5, $5, 'completed', $6, $7, $8, $9, 'quick_sale') RETURNING *`,
-      [tenant_id, b.customer_id, b.professional_id ?? null, b.service_id, startsAt.toISOString(), b.notes ?? null, user_id, b.valor, b.payment_method]
+      [tenant_id, b.customer_id, b.professional_id ?? null, serviceId, startsAt.toISOString(), notes, user_id, b.valor, b.payment_method]
     )
     return reply.status(201).send(venda)
   })
