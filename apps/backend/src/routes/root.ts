@@ -1711,6 +1711,41 @@ export const rootRoutes: FastifyPluginAsync = async (app) => {
     return reply.send({ deleted: true })
   })
 
+  // ── Formas de pagamento (parâmetros da plataforma) ──────────────────────────
+  app.get('/payment-methods', async (_request, reply) => {
+    const { rows } = await db.query('SELECT key, label, active, sort FROM payment_method_types ORDER BY sort, label')
+    return reply.send(rows)
+  })
+
+  app.post('/payment-methods', async (request, reply) => {
+    const b = z.object({ key: z.string().min(1).max(40).regex(/^[a-z0-9_]+$/), label: z.string().min(1).max(60), sort: z.number().int().optional() }).parse(request.body)
+    const { rows: [row] } = await db.query(
+      `INSERT INTO payment_method_types (key, label, sort) VALUES ($1, $2, $3)
+       ON CONFLICT (key) DO UPDATE SET label = EXCLUDED.label RETURNING *`,
+      [b.key, b.label, b.sort ?? 0]
+    )
+    await logAdminAction(auditFromRequest(request, 'payment_method.create', b.key, b.label))
+    return reply.status(201).send(row)
+  })
+
+  app.patch<{ Params: { key: string } }>('/payment-methods/:key', async (request, reply) => {
+    const b = z.object({ label: z.string().min(1).max(60).optional(), active: z.boolean().optional(), sort: z.number().int().optional() }).parse(request.body)
+    const sets: string[] = []; const vals: unknown[] = []; let i = 1
+    for (const [k, v] of Object.entries(b)) { sets.push(`${k} = $${i++}`); vals.push(v) }
+    if (sets.length === 0) return reply.status(400).send({ error: 'Nada para atualizar' })
+    vals.push(request.params.key)
+    const { rows: [row] } = await db.query(`UPDATE payment_method_types SET ${sets.join(', ')} WHERE key = $${i} RETURNING *`, vals)
+    if (!row) return reply.status(404).send({ error: 'Forma de pagamento não encontrada' })
+    await logAdminAction(auditFromRequest(request, 'payment_method.update', request.params.key, Object.keys(b).join(', ')))
+    return reply.send(row)
+  })
+
+  app.delete<{ Params: { key: string } }>('/payment-methods/:key', async (request, reply) => {
+    await db.query('DELETE FROM payment_method_types WHERE key = $1', [request.params.key])
+    await logAdminAction(auditFromRequest(request, 'payment_method.delete', request.params.key, ''))
+    return reply.send({ deleted: true })
+  })
+
   // ── Saúde financeira de um tenant (mês atual) para os relatórios do Root ────
   app.get<{ Params: { id: string } }>('/tenants/:id/financeiro', async (request, reply) => {
     const tenantId = request.params.id
@@ -1721,8 +1756,9 @@ export const rootRoutes: FastifyPluginAsync = async (app) => {
     const end = m === 12 ? `${y + 1}-01-01` : `${y}-${pad(m + 1)}-01`
     const { rows: [tot] } = await db.query(
       `SELECT COUNT(*) FILTER (WHERE a.status='completed')::int AS n,
-              COALESCE(SUM(COALESCE(a.price_snapshot, s.price)) FILTER (WHERE a.status='completed'),0)::float AS receita
+              COALESCE(SUM(ROUND(COALESCE(a.price_snapshot, s.price) * (1 - COALESCE(pf.pct,0)/100), 2)) FILTER (WHERE a.status='completed'),0)::float AS receita
        FROM appointments a JOIN services s ON s.id=a.service_id
+       LEFT JOIN tenant_payment_fees pf ON pf.tenant_id = a.tenant_id AND pf.method_key = a.payment_method
        WHERE a.tenant_id=$1 AND a.starts_at >= ($2::date::timestamp AT TIME ZONE 'America/Sao_Paulo')
          AND a.starts_at < ($3::date::timestamp AT TIME ZONE 'America/Sao_Paulo')`,
       [tenantId, start, end]

@@ -213,6 +213,11 @@ export const rootApi = {
   updateExpenseSubtype: (id: string, data: any) => api.patch<any>(`/root/expense-subtypes/${id}`, data),
   deleteExpenseSubtype: (id: string) => api.delete(`/root/expense-subtypes/${id}`),
   tenantFinanceiro: (id: string) => api.get<any>(`/root/tenants/${id}/financeiro`),
+  // Formas de pagamento (parâmetros da plataforma)
+  paymentMethods: () => api.get<any[]>('/root/payment-methods'),
+  createPaymentMethod: (data: { key: string; label: string; sort?: number }) => api.post<any>('/root/payment-methods', data),
+  updatePaymentMethod: (key: string, data: any) => api.patch<any>(`/root/payment-methods/${key}`, data),
+  deletePaymentMethod: (key: string) => api.delete(`/root/payment-methods/${key}`),
 
   // Business Type Templates
   businessTypeTemplates: () => api.get<any[]>('/root/business-type-templates'),

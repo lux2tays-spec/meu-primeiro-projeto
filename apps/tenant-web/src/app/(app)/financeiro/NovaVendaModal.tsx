@@ -3,12 +3,10 @@ import { useState } from 'react'
 import { useQuery, useMutation } from '@tanstack/react-query'
 import { financeiroApi, tenantApi, friendlyMessage } from '@/lib/api'
 
-const PAYMENT_METHODS: { value: string; label: string }[] = [
-  { value: 'pix', label: 'Pix' },
-  { value: 'payment_link', label: 'Link de Pagamento' },
-  { value: 'credit_card', label: 'Cartão Crédito' },
-  { value: 'debit_card', label: 'Cartão Débito' },
-  { value: 'cash', label: 'Dinheiro' },
+// Formas de pagamento vêm dinâmicas do backend (gerenciadas no Root Admin).
+const PM_FALLBACK: { key: string; label: string }[] = [
+  { key: 'pix', label: 'Pix' }, { key: 'payment_link', label: 'Link de Pagamento' },
+  { key: 'credit_card', label: 'Cartão Crédito' }, { key: 'debit_card', label: 'Cartão Débito' }, { key: 'cash', label: 'Dinheiro' },
 ]
 
 const inputCls = 'w-full h-10 px-3 rounded-xl border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary'
@@ -31,6 +29,8 @@ export default function NovaVendaModal({ onClose, onSaved }: { onClose: () => vo
 
   const { data: services = [] } = useQuery({ queryKey: ['services'], queryFn: () => tenantApi.services() })
   const { data: professionals = [] } = useQuery({ queryKey: ['professionals'], queryFn: tenantApi.professionals })
+  const { data: pmData = [] } = useQuery({ queryKey: ['payment-methods'], queryFn: financeiroApi.paymentMethods })
+  const methods = (pmData as any[]).length ? (pmData as any[]) : PM_FALLBACK
   const { data: customers = [] } = useQuery({
     queryKey: ['customers', search],
     queryFn: () => tenantApi.customers(search),
@@ -149,10 +149,10 @@ export default function NovaVendaModal({ onClose, onSaved }: { onClose: () => vo
         <div>
           <label className={labelCls}>Forma de pagamento <span className="text-red-500">*</span></label>
           <div className="flex flex-wrap gap-2">
-            {PAYMENT_METHODS.map((pm) => (
-              <button key={pm.value} onClick={() => setPaymentMethod(pm.value)}
+            {methods.map((pm) => (
+              <button key={pm.key} onClick={() => setPaymentMethod(pm.key)}
                 className={`px-3 py-1.5 rounded-lg text-sm font-medium border transition-colors ${
-                  paymentMethod === pm.value ? 'bg-primary text-white border-primary' : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'
+                  paymentMethod === pm.key ? 'bg-primary text-white border-primary' : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'
                 }`}>
                 {pm.label}
               </button>

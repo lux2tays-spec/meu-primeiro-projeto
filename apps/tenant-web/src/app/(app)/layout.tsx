@@ -11,7 +11,7 @@ import NotificationBell from '@/components/NotificationBell'
 import {
   LayoutDashboard, CalendarDays, Users, Wallet, MessageCircle, Bot, Tag,
   UserCog, Clock, CreditCard, Package, Share2, LifeBuoy, LogOut,
-  Menu, Lock, AlarmClock, Coins, UserCircle, CalendarCheck, Bell, ShoppingBag, type LucideIcon,
+  Menu, Lock, AlarmClock, Coins, UserCircle, CalendarCheck, Bell, ShoppingBag, Percent, type LucideIcon,
 } from 'lucide-react'
 
 // managerOnly: SAL-11 — papéis "staff" não veem entradas de gestão financeira.
@@ -29,6 +29,7 @@ const NAV: { href: string; icon: LucideIcon; label: string; managerOnly?: boolea
   { href: '/settings/hours',        icon: Clock,           label: 'Horários' },
   { href: '/settings/google-calendar', icon: CalendarCheck, label: 'Google Agenda' },
   { href: '/settings/payments',     icon: CreditCard,      label: 'Pagamentos' },
+  { href: '/settings/taxas',        icon: Percent,         label: 'Taxas', managerOnly: true },
   { href: '/settings/subscription', icon: Package,         label: 'Assinatura' },
   { href: '/settings/affiliate',    icon: Share2,          label: 'Afiliados' },
   { href: '/settings/perfil',       icon: UserCircle,      label: 'Meu Perfil' },

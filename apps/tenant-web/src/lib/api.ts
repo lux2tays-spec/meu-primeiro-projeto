@@ -354,6 +354,9 @@ export const financeiroApi = {
     api.get<VendasResponse>(`/financeiro/vendas?from=${from}&to=${to}&page=${page}&limit=${limit}`),
   deleteVenda: (id: string) => api.delete(`/financeiro/vendas/${id}`),
   activityLog: () => api.get<any[]>('/financeiro/activity-log'),
+  paymentMethods: () => api.get<{ key: string; label: string }[]>('/financeiro/payment-methods'),
+  paymentFees: () => api.get<{ method_key: string; pct: number }[]>('/financeiro/payment-fees'),
+  updatePaymentFees: (fees: { method_key: string; pct: number }[]) => api.put<{ ok: boolean }>('/financeiro/payment-fees', { fees }),
 }
 
 export interface AppointmentListParams {

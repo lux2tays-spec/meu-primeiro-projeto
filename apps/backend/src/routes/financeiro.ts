@@ -21,6 +21,12 @@ const paymentLinkSchema = z.object({
 const SP_MONTH_START = `($2::date::timestamp AT TIME ZONE 'America/Sao_Paulo')`
 const SP_MONTH_END = `($3::date::timestamp AT TIME ZONE 'America/Sao_Paulo')`
 
+// #4: valor LÍQUIDO da venda = bruto × (1 − taxa%/100), onde a taxa é a
+// configurada pelo tenant para a forma de pagamento da venda (tenant_payment_fees).
+// A receita exibida (vendas + financeiro) já vem líquida. Sem taxa/sem método → bruto.
+const FEES_JOIN = `LEFT JOIN tenant_payment_fees pf ON pf.tenant_id = a.tenant_id AND pf.method_key = a.payment_method`
+const NET_VALOR = `ROUND(COALESCE(a.price_snapshot, s.price) * (1 - COALESCE(pf.pct, 0) / 100), 2)`
+
 function monthBoundsSP(month?: string, year?: string): { y: number; m: number; start: string; end: string } {
   // "Agora" também no fuso de São Paulo, para o mês default correto na virada.
   const spNow = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/Sao_Paulo' }))
@@ -56,12 +62,13 @@ export const financeiroRoutes: FastifyPluginAsync = async (app) => {
       db.query(
         `SELECT
            COUNT(*) FILTER (WHERE a.status = 'completed') AS total_vendas,
-           COALESCE(SUM(COALESCE(a.price_snapshot, s.price)) FILTER (WHERE a.status = 'completed'), 0) AS receita_total,
+           COALESCE(SUM(${NET_VALOR}) FILTER (WHERE a.status = 'completed'), 0) AS receita_total,
            COUNT(*) FILTER (WHERE a.status = 'pending' OR a.status = 'confirmed') AS agendamentos_abertos,
            COUNT(*) FILTER (WHERE a.status = 'cancelled') AS agendamentos_cancelados,
            COUNT(*) AS total_agendamentos
          FROM appointments a
          JOIN services s ON s.id = a.service_id
+         ${FEES_JOIN}
          WHERE a.tenant_id = $1 AND a.starts_at >= ${SP_MONTH_START} AND a.starts_at < ${SP_MONTH_END}`,
         params
       ),
@@ -71,9 +78,10 @@ export const financeiroRoutes: FastifyPluginAsync = async (app) => {
         `SELECT COALESCE(p.id::text, 'none') AS professional_id,
                 COALESCE(p.name, 'Sem profissional') AS professional_nome,
                 COUNT(*)::int AS vendas,
-                COALESCE(SUM(COALESCE(a.price_snapshot, s.price)), 0)::float AS receita
+                COALESCE(SUM(${NET_VALOR}), 0)::float AS receita
          FROM appointments a
          JOIN services s ON s.id = a.service_id
+         ${FEES_JOIN}
          LEFT JOIN professionals p ON p.id = a.professional_id
          WHERE a.tenant_id = $1 AND a.status = 'completed'
            AND a.starts_at >= ${SP_MONTH_START} AND a.starts_at < ${SP_MONTH_END}
@@ -84,9 +92,10 @@ export const financeiroRoutes: FastifyPluginAsync = async (app) => {
       db.query(
         `SELECT s.id AS service_id, s.name AS servico_nome,
                 COUNT(*)::int AS vendas,
-                COALESCE(SUM(COALESCE(a.price_snapshot, s.price)), 0)::float AS receita
+                COALESCE(SUM(${NET_VALOR}), 0)::float AS receita
          FROM appointments a
          JOIN services s ON s.id = a.service_id
+         ${FEES_JOIN}
          WHERE a.tenant_id = $1 AND a.status = 'completed'
            AND a.starts_at >= ${SP_MONTH_START} AND a.starts_at < ${SP_MONTH_END}
          GROUP BY s.id, s.name
@@ -173,11 +182,13 @@ export const financeiroRoutes: FastifyPluginAsync = async (app) => {
            c.name  AS cliente_nome,
            c.phone AS cliente_telefone,
            s.name  AS servico_nome,
-           COALESCE(a.price_snapshot, s.price) AS valor, -- SAL-14: preço congelado na conclusão
+           COALESCE(a.price_snapshot, s.price) AS valor_bruto,
+           ${NET_VALOR} AS valor, -- líquido (após taxa do método), já pronto para exibir
            p.name  AS profissional_nome
          FROM appointments a
          JOIN customers    c ON c.id = a.customer_id
          JOIN services     s ON s.id = a.service_id
+         ${FEES_JOIN}
          LEFT JOIN professionals p ON p.id = a.professional_id -- vendas avulsas podem não ter profissional
          WHERE a.tenant_id = $1 AND a.status = 'completed'
            AND a.starts_at >= ${SP_MONTH_START} AND a.starts_at < ${SP_MONTH_END}
@@ -187,8 +198,8 @@ export const financeiroRoutes: FastifyPluginAsync = async (app) => {
       ),
       db.query(
         `SELECT COUNT(*)::int AS total,
-                COALESCE(SUM(COALESCE(a.price_snapshot, s.price)), 0)::float AS total_valor
-         FROM appointments a JOIN services s ON s.id = a.service_id
+                COALESCE(SUM(${NET_VALOR}), 0)::float AS total_valor
+         FROM appointments a JOIN services s ON s.id = a.service_id ${FEES_JOIN}
          WHERE a.tenant_id = $1 AND a.status = 'completed'
            AND a.starts_at >= ${SP_MONTH_START} AND a.starts_at < ${SP_MONTH_END}`,
         [tenant_id, start, end]
@@ -213,8 +224,8 @@ export const financeiroRoutes: FastifyPluginAsync = async (app) => {
     const { rows: [venda] } = await db.query(
       `SELECT a.id, a.source, a.customer_id, a.service_id,
               c.name AS cliente_nome, s.name AS servico_nome,
-              COALESCE(a.price_snapshot, s.price) AS valor
-       FROM appointments a JOIN customers c ON c.id=a.customer_id JOIN services s ON s.id=a.service_id
+              ${NET_VALOR} AS valor
+       FROM appointments a JOIN customers c ON c.id=a.customer_id JOIN services s ON s.id=a.service_id ${FEES_JOIN}
        WHERE a.id = $1 AND a.tenant_id = $2 AND a.status = 'completed'`,
       [request.params.id, tenant_id]
     )
@@ -252,6 +263,35 @@ export const financeiroRoutes: FastifyPluginAsync = async (app) => {
       [tenant_id]
     )
     return reply.send(rows)
+  })
+
+  // ── Formas de pagamento (tipos ativos) + taxas por método (por tenant) ──────
+  app.get('/payment-methods', async (request, reply) => {
+    const { role } = request.user
+    if (!isManager(role)) return reply.status(403).send({ error: 'Sem permissão' })
+    const { rows } = await db.query(`SELECT key, label FROM payment_method_types WHERE active = TRUE ORDER BY sort, label`)
+    return reply.send(rows)
+  })
+
+  app.get('/payment-fees', async (request, reply) => {
+    const { tenant_id, role } = request.user
+    if (!isManager(role)) return reply.status(403).send({ error: 'Sem permissão' })
+    const { rows } = await db.query(`SELECT method_key, pct FROM tenant_payment_fees WHERE tenant_id = $1`, [tenant_id])
+    return reply.send(rows)
+  })
+
+  app.put('/payment-fees', async (request, reply) => {
+    const { tenant_id, role } = request.user
+    if (!isManager(role)) return reply.status(403).send({ error: 'Sem permissão' })
+    const b = z.object({ fees: z.array(z.object({ method_key: z.string(), pct: z.number().min(0).max(100) })) }).parse(request.body)
+    for (const f of b.fees) {
+      await db.query(
+        `INSERT INTO tenant_payment_fees (tenant_id, method_key, pct) VALUES ($1, $2, $3)
+         ON CONFLICT (tenant_id, method_key) DO UPDATE SET pct = EXCLUDED.pct, updated_at = NOW()`,
+        [tenant_id, f.method_key, f.pct]
+      )
+    }
+    return reply.send({ ok: true })
   })
 
   // ── Links de pagamento ────────────────────────────────────────────────────
@@ -373,8 +413,8 @@ export const financeiroRoutes: FastifyPluginAsync = async (app) => {
     const { month, year } = request.query as { month?: string; year?: string }
     const { y, m, start, end } = monthBoundsSP(month, year)
     const { rows: [rv] } = await db.query(
-      `SELECT COALESCE(SUM(COALESCE(a.price_snapshot, s.price)), 0)::float AS r
-       FROM appointments a JOIN services s ON s.id = a.service_id
+      `SELECT COALESCE(SUM(${NET_VALOR}), 0)::float AS r
+       FROM appointments a JOIN services s ON s.id = a.service_id ${FEES_JOIN}
        WHERE a.tenant_id = $1 AND a.status = 'completed'
          AND a.starts_at >= ${SP_MONTH_START} AND a.starts_at < ${SP_MONTH_END}`,
       [tenant_id, start, end]
@@ -511,10 +551,13 @@ export const financeiroRoutes: FastifyPluginAsync = async (app) => {
       professional_id: z.string().uuid().nullable().optional(),
       valor: z.number().nonnegative(),
       notes: z.string().optional(),
-      payment_method: z.enum(['pix', 'payment_link', 'credit_card', 'debit_card', 'cash']),
+      payment_method: z.string().min(1), // validado contra payment_method_types ativos
       data: z.string().optional(), // YYYY-MM-DD (default: agora)
     }).refine((d) => !!d.service_id || !!d.custom_service, { message: 'Informe o serviço ou uma descrição de serviço avulso.' })
       .parse(request.body)
+
+    const pmOk = await db.query(`SELECT 1 FROM payment_method_types WHERE key = $1 AND active = TRUE`, [b.payment_method])
+    if (pmOk.rowCount === 0) return reply.status(400).send({ error: 'Forma de pagamento inválida' })
 
     const cust = await db.query('SELECT id FROM customers WHERE id = $1 AND tenant_id = $2', [b.customer_id, tenant_id])
     if (cust.rowCount === 0) return reply.status(404).send({ error: 'Cliente não encontrado' })
@@ -576,8 +619,8 @@ export const financeiroRoutes: FastifyPluginAsync = async (app) => {
       const end = m === 12 ? `${y + 1}-01-01` : `${y}-${pad(m + 1)}-01`
       const { rows: [tot] } = await db.query(
         `SELECT COUNT(*) FILTER (WHERE a.status='completed')::int AS n,
-                COALESCE(SUM(COALESCE(a.price_snapshot, s.price)) FILTER (WHERE a.status='completed'),0)::float AS receita
-         FROM appointments a JOIN services s ON s.id=a.service_id
+                COALESCE(SUM(${NET_VALOR}) FILTER (WHERE a.status='completed'),0)::float AS receita
+         FROM appointments a JOIN services s ON s.id=a.service_id ${FEES_JOIN}
          WHERE a.tenant_id=$1 AND a.starts_at >= ($2::date::timestamp AT TIME ZONE 'America/Sao_Paulo')
            AND a.starts_at < ($3::date::timestamp AT TIME ZONE 'America/Sao_Paulo')`,
         [tenant_id, start, end]

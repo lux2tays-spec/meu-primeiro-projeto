@@ -21,7 +21,7 @@ const updateSchema = z.object({
   starts_at: z.string().datetime().optional(),
   notes: z.string().nullable().optional(),
   status: z.enum(['pending', 'confirmed', 'completed', 'cancelled']).optional(),
-  payment_method: z.enum(['pix', 'payment_link', 'credit_card', 'debit_card', 'cash']).nullable().optional(),
+  payment_method: z.string().min(1).nullable().optional(),
   // Valor editável por agendamento: grava um preço específico em price_snapshot,
   // sobrescrevendo o preço da tabela de serviços para ESTE atendimento. null limpa
   // o override (volta a usar o preço vigente do serviço). O financeiro usa

@@ -137,7 +137,7 @@ export default function VendasPage() {
                       {v.notes && <p className="text-[11px] text-gray-400 max-w-[200px] truncate">{v.notes}</p>}
                     </td>
                     <td className="py-3 pr-4 text-gray-700">{v.profissional_nome ?? '—'}</td>
-                    <td className="py-3 pr-4 text-gray-600">{v.payment_method ? PM_LABEL[v.payment_method] : '—'}</td>
+                    <td className="py-3 pr-4 text-gray-600">{v.payment_method ? (PM_LABEL[v.payment_method] ?? v.payment_method) : '—'}</td>
                     <td className="py-3 pr-2 text-right font-semibold text-green-600">{fmtBRL(Number(v.valor))}</td>
                     <td className="py-3 text-right whitespace-nowrap">
                       <button onClick={() => setEditing(v)} className="text-xs text-primary font-semibold hover:underline mr-3">Editar</button>

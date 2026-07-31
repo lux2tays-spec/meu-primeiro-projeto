@@ -38,8 +38,12 @@ export default function FinanceiroParamsPage() {
     <div className="p-8 space-y-8 max-w-4xl">
       <div>
         <h1 className="text-2xl font-bold text-gray-900">Financeiro — Parâmetros</h1>
-        <p className="text-gray-500 text-sm mt-1">Tipos e subtipos de despesa disponíveis para os negócios no módulo financeiro.</p>
+        <p className="text-gray-500 text-sm mt-1">Formas de pagamento e subtipos de despesa disponíveis para os negócios.</p>
       </div>
+
+      <PaymentMethodsSection />
+
+      <h2 className="text-lg font-bold text-gray-900 pt-4 border-t border-gray-200">Subtipos de despesa</h2>
 
       {/* Form */}
       <section className="bg-white rounded-xl border border-gray-200 p-6 space-y-4">
@@ -100,5 +104,48 @@ export default function FinanceiroParamsPage() {
         </section>
       ))}
     </div>
+  )
+}
+
+// Formas de pagamento (parâmetros da plataforma) — Root pode incluir/editar/excluir.
+function PaymentMethodsSection() {
+  const qc = useQueryClient()
+  const { data: methods = [] } = useQuery({ queryKey: ['payment-methods'], queryFn: rootApi.paymentMethods })
+  const [form, setForm] = useState({ key: '', label: '' })
+  const invalidate = () => qc.invalidateQueries({ queryKey: ['payment-methods'] })
+  const create = useMutation({ mutationFn: () => rootApi.createPaymentMethod(form), onSuccess: () => { invalidate(); setForm({ key: '', label: '' }) } })
+  const toggle = useMutation({ mutationFn: (m: any) => rootApi.updatePaymentMethod(m.key, { active: !m.active }), onSuccess: invalidate })
+  const del = useMutation({ mutationFn: (k: string) => rootApi.deletePaymentMethod(k), onSuccess: invalidate })
+  const inputCls = 'h-9 px-3 rounded-lg border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500'
+
+  return (
+    <section className="space-y-3">
+      <h2 className="text-lg font-bold text-gray-900">Formas de pagamento</h2>
+      <div className="bg-white rounded-xl border border-gray-200 divide-y divide-gray-100">
+        {(methods as any[]).map((m) => (
+          <div key={m.key} className={`flex items-center gap-3 px-4 py-3 ${m.active ? '' : 'opacity-50'}`}>
+            <span className="text-sm font-medium text-gray-900">{m.label}</span>
+            <span className="text-xs text-gray-400">{m.key}</span>
+            <span className="ml-auto flex items-center gap-3 text-xs">
+              <button onClick={() => toggle.mutate(m)} className="text-gray-400 hover:text-gray-700">{m.active ? 'Desativar' : 'Ativar'}</button>
+              <button onClick={() => { if (confirm(`Excluir "${m.label}"?`)) del.mutate(m.key) }} className="text-red-500 hover:underline">Excluir</button>
+            </span>
+          </div>
+        ))}
+        {(methods as any[]).length === 0 && <p className="text-sm text-gray-400 p-4">Nenhuma forma de pagamento.</p>}
+      </div>
+      <div className="flex flex-wrap gap-3 items-end bg-white rounded-xl border border-gray-200 p-4">
+        <div>
+          <label className="block text-xs font-semibold text-gray-600 mb-1">Chave (a-z, _)</label>
+          <input value={form.key} onChange={(e) => setForm({ ...form, key: e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, '') })} className={inputCls} placeholder="ex.: boleto" />
+        </div>
+        <div>
+          <label className="block text-xs font-semibold text-gray-600 mb-1">Nome</label>
+          <input value={form.label} onChange={(e) => setForm({ ...form, label: e.target.value })} className={inputCls} placeholder="ex.: Boleto" />
+        </div>
+        <button onClick={() => create.mutate()} disabled={!form.key || !form.label.trim() || create.isPending}
+          className="h-9 px-4 rounded-lg bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white text-sm font-semibold">Adicionar</button>
+      </div>
+    </section>
   )
 }

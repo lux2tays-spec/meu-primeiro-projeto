@@ -161,8 +161,9 @@ export async function computeFinanceExtras(
   let ticketBase = ticketMedio
   if (!ticketBase) {
     const { rows } = await db.query(
-      `SELECT COALESCE(AVG(COALESCE(a.price_snapshot, s.price)), 0)::float AS t
+      `SELECT COALESCE(AVG(ROUND(COALESCE(a.price_snapshot, s.price) * (1 - COALESCE(pf.pct,0)/100), 2)), 0)::float AS t
        FROM appointments a JOIN services s ON s.id = a.service_id
+       LEFT JOIN tenant_payment_fees pf ON pf.tenant_id = a.tenant_id AND pf.method_key = a.payment_method
        WHERE a.tenant_id = $1 AND a.status = 'completed' AND a.starts_at >= NOW() - INTERVAL '30 days'`,
       [tenantId]
     )
