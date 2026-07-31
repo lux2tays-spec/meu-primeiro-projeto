@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity, RefreshControl,
-  Modal, TextInput, ActivityIndicator, Linking, KeyboardAvoidingView, Platform,
+  Modal, TextInput, ActivityIndicator, Linking, KeyboardAvoidingView, Platform, PanResponder,
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { Ionicons } from '@expo/vector-icons'
@@ -137,6 +137,22 @@ export default function CalendarScreen() {
   const stripDates = useMemo(
     () => Array.from({ length: 15 }, (_, i) => addDays(stripBase, i - 7)),
     [stripBase]
+  )
+
+  // Deslizar o dedo para os lados sobre a lista troca de semana (−7 / +7 dias).
+  // Só captura o gesto quando é claramente horizontal, para não atrapalhar o
+  // scroll vertical dos agendamentos.
+  const shiftWeek = (dir: 1 | -1) => setSelected((prev) => { const n = addDays(prev, dir * 7); setStripBase(n); return n })
+  const swipe = useMemo(
+    () =>
+      PanResponder.create({
+        onMoveShouldSetPanResponder: (_e, g) => Math.abs(g.dx) > 24 && Math.abs(g.dx) > Math.abs(g.dy) * 1.5,
+        onPanResponderRelease: (_e, g) => {
+          if (g.dx <= -40) shiftWeek(1) // arrastou p/ esquerda → próxima semana
+          else if (g.dx >= 40) shiftWeek(-1) // arrastou p/ direita → semana anterior
+        },
+      }),
+    []
   )
 
   // Search + filters
@@ -529,6 +545,7 @@ export default function CalendarScreen() {
 
       {/* Appointments for selected day */}
       <ScrollView
+        {...swipe.panHandlers}
         contentContainerStyle={styles.list}
         refreshControl={<RefreshControl refreshing={isRefetching} onRefresh={refetch} tintColor={colors.primary} />}
       >

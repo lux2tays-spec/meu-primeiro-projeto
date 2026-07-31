@@ -1,4 +1,4 @@
-import { View, Text, StyleSheet, FlatList, TouchableOpacity, Modal, ScrollView, Alert, Switch, TextInput } from 'react-native'
+import { View, Text, StyleSheet, FlatList, TouchableOpacity, Modal, ScrollView, Alert, Switch, TextInput, KeyboardAvoidingView, Platform } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useState } from 'react'
 import { Ionicons } from '@expo/vector-icons'
@@ -314,6 +314,11 @@ export default function ServicesScreen() {
             </TouchableOpacity>
           </View>
 
+          <KeyboardAvoidingView
+            style={{ flex: 1 }}
+            behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+            keyboardVerticalOffset={Platform.OS === 'ios' ? 8 : 0}
+          >
           <ScrollView contentContainerStyle={s.modalContent} keyboardShouldPersistTaps="handled">
             <Input
               label="Nome do serviço *"
@@ -458,6 +463,7 @@ export default function ServicesScreen() {
               loading={isPending}
             />
           </ScrollView>
+          </KeyboardAvoidingView>
         </SafeAreaView>
       </Modal>
     </SafeAreaView>
@@ -500,7 +506,7 @@ const s = StyleSheet.create({
     padding: spacing.lg,
   },
   modalTitle: { fontSize: font.xl, fontWeight: '700', color: colors.text },
-  modalContent: { padding: spacing.lg, gap: spacing.md },
+  modalContent: { padding: spacing.lg, gap: spacing.md, paddingBottom: spacing.xxl },
   // Professional selection
   proSection: { gap: spacing.sm },
   proSectionLabel: { fontSize: font.sm, fontWeight: '600', color: colors.textSecondary },

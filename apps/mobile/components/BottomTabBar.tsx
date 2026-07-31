@@ -3,6 +3,7 @@ import { View, Text, TouchableOpacity, Modal, StyleSheet } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { Ionicons } from '@expo/vector-icons'
 import { router } from 'expo-router'
+import { StackActions } from '@react-navigation/native'
 import type { BottomTabBarProps } from '@react-navigation/bottom-tabs'
 import { useAuthStore } from '@/lib/store'
 import { NovaVendaSheet } from '@/components/financeiro/NovaVendaSheet'
@@ -37,7 +38,16 @@ export function BottomTabBar({ state, navigation }: BottomTabBarProps) {
   function go(name: string) {
     // Só navega se a rota existe no navigator (todas registradas no _layout).
     const target = state.routes.find((r) => r.name === name)
-    if (target) navigation.navigate(name as never)
+    if (!target) return
+    // Re-tocar a aba já ativa volta a pilha aninhada para a raiz — ex.: sair de
+    // Config › Painel de Afiliado de volta para Config (senão o navigate vira
+    // no-op e o usuário fica "preso" sem botão de voltar).
+    if (activeName === name) {
+      const nestedKey = (target as any).state?.key
+      if (nestedKey) navigation.dispatch({ ...StackActions.popToTop(), target: nestedKey })
+      return
+    }
+    navigation.navigate(name as never)
   }
 
   const filt = (list: TabDef[]) => list.filter((t) => !t.managerOnly || isManager)

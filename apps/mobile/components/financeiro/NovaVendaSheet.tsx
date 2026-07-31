@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { View, Text, Modal, ScrollView, TextInput, TouchableOpacity, StyleSheet, KeyboardAvoidingView, Platform } from 'react-native'
-import { SafeAreaView } from 'react-native-safe-area-context'
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { Ionicons } from '@expo/vector-icons'
 import { useQuery, useMutation } from '@tanstack/react-query'
 import { financeiroApi, tenantApi, customersApi } from '@/lib/api'
@@ -14,6 +14,7 @@ const PAYMENTS = [
 ]
 
 export function NovaVendaSheet({ visible, onClose, onSaved }: { visible: boolean; onClose: () => void; onSaved: () => void }) {
+  const insets = useSafeAreaInsets()
   const [search, setSearch] = useState('')
   const [customerId, setCustomerId] = useState('')
   const [newMode, setNewMode] = useState(false)
@@ -71,7 +72,7 @@ export function NovaVendaSheet({ visible, onClose, onSaved }: { visible: boolean
           <TouchableOpacity onPress={onClose}><Ionicons name="close" size={24} color={colors.text} /></TouchableOpacity>
         </View>
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
-        <ScrollView contentContainerStyle={s.body} keyboardShouldPersistTaps="handled">
+        <ScrollView contentContainerStyle={[s.body, { paddingBottom: insets.bottom + spacing.xl }]} keyboardShouldPersistTaps="handled">
           {/* Cliente */}
           <View style={s.rowBetween}>
             <Text style={s.label}>Cliente <Text style={s.req}>*</Text></Text>

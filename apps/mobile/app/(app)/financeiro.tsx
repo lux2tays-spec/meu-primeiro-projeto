@@ -29,7 +29,9 @@ function fmtDate(iso: string) {
 
 /** Extrai o nome de um item de ranking do resumo, seja qual for o campo usado pelo backend. */
 function rankName(item: any): string {
-  return item?.name ?? item?.professional_name ?? item?.service_name ?? item?.nome ?? '—'
+  // O backend devolve professional_nome / servico_nome (com sufixo _nome).
+  return item?.name ?? item?.professional_name ?? item?.professional_nome
+    ?? item?.service_name ?? item?.servico_nome ?? item?.nome ?? '—'
 }
 
 /** Extrai o valor monetário de um item de ranking. */
@@ -41,7 +43,7 @@ function rankAmount(item: any): number {
 
 /** Extrai a quantidade (vendas/atendimentos) de um item de ranking, se houver. */
 function rankCount(item: any): number | null {
-  const v = item?.count ?? item?.quantidade ?? item?.qtd ?? item?.total_vendas ?? null
+  const v = item?.count ?? item?.quantidade ?? item?.qtd ?? item?.vendas ?? item?.total_vendas ?? null
   if (v == null) return null
   const n = Number(v)
   return Number.isFinite(n) ? n : null
@@ -224,28 +226,28 @@ export default function FinanceiroScreen() {
             {/* KPIs */}
             <View style={s.kpiRow}>
               <View style={[s.kpi, { backgroundColor: '#ECFDF5' }]}>
-                <Text style={s.kpiLabel}>Receita</Text>
-                <Text style={[s.kpiValue, { color: colors.success }]}>{fmtBRL(resumo?.receita_total ?? 0)}</Text>
+                <Text style={s.kpiLabel} numberOfLines={1}>Receita</Text>
+                <Text style={[s.kpiValue, { color: colors.success }]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.6}>{fmtBRL(resumo?.receita_total ?? 0)}</Text>
               </View>
               <View style={[s.kpi, { backgroundColor: colors.primaryLight }]}>
-                <Text style={s.kpiLabel}>Vendas</Text>
-                <Text style={[s.kpiValue, { color: colors.primary }]}>{resumo?.total_vendas ?? 0}</Text>
+                <Text style={s.kpiLabel} numberOfLines={1}>Vendas</Text>
+                <Text style={[s.kpiValue, { color: colors.primary }]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.6}>{resumo?.total_vendas ?? 0}</Text>
               </View>
               <View style={[s.kpi, { backgroundColor: '#FFF7ED' }]}>
-                <Text style={s.kpiLabel}>Em aberto</Text>
-                <Text style={[s.kpiValue, { color: colors.warning }]}>{resumo?.agendamentos_abertos ?? 0}</Text>
+                <Text style={s.kpiLabel} numberOfLines={1}>Em aberto</Text>
+                <Text style={[s.kpiValue, { color: colors.warning }]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.6}>{resumo?.agendamentos_abertos ?? 0}</Text>
               </View>
             </View>
 
             {/* KPIs novos: ticket médio + taxa de cancelamento */}
             <View style={s.kpiRow}>
               <View style={[s.kpi, { backgroundColor: '#EEF2FF' }]}>
-                <Text style={s.kpiLabel}>Ticket médio</Text>
-                <Text style={[s.kpiValue, { color: colors.info }]}>{fmtBRL(resumo?.ticket_medio ?? 0)}</Text>
+                <Text style={s.kpiLabel} numberOfLines={1}>Ticket médio</Text>
+                <Text style={[s.kpiValue, { color: colors.info }]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.6}>{fmtBRL(resumo?.ticket_medio ?? 0)}</Text>
               </View>
               <View style={[s.kpi, { backgroundColor: '#FEF2F2' }]}>
-                <Text style={s.kpiLabel}>Cancelamentos</Text>
-                <Text style={[s.kpiValue, { color: colors.danger }]}>
+                <Text style={s.kpiLabel} numberOfLines={1}>Cancelamentos</Text>
+                <Text style={[s.kpiValue, { color: colors.danger }]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.6}>
                   {Number(resumo?.taxa_cancelamento ?? 0).toLocaleString('pt-BR', { maximumFractionDigits: 1 })}%
                 </Text>
                 <Text style={s.kpiSub}>
@@ -257,13 +259,13 @@ export default function FinanceiroScreen() {
             {/* KPIs financeiros: despesas + lucro */}
             <View style={s.kpiRow}>
               <View style={[s.kpi, { backgroundColor: '#FEF2F2' }]}>
-                <Text style={s.kpiLabel}>Despesas</Text>
-                <Text style={[s.kpiValue, { color: colors.danger }]}>{fmtBRL(resumo?.despesas_total ?? 0)}</Text>
-                <Text style={s.kpiSub}>Fixas {fmtBRL(resumo?.despesas_fixas ?? 0)}</Text>
+                <Text style={s.kpiLabel} numberOfLines={1}>Despesas</Text>
+                <Text style={[s.kpiValue, { color: colors.danger }]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.6}>{fmtBRL(resumo?.despesas_total ?? 0)}</Text>
+                <Text style={s.kpiSub} numberOfLines={1}>Fixas {fmtBRL(resumo?.despesas_fixas ?? 0)}</Text>
               </View>
               <View style={[s.kpi, { backgroundColor: '#ECFDF5' }]}>
-                <Text style={s.kpiLabel}>Lucro</Text>
-                <Text style={[s.kpiValue, { color: (resumo?.lucro ?? 0) >= (resumo?.meta_lucro ?? 0) && (resumo?.meta_lucro ?? 0) > 0 ? colors.success : colors.text }]}>
+                <Text style={s.kpiLabel} numberOfLines={1}>Lucro</Text>
+                <Text style={[s.kpiValue, { color: (resumo?.lucro ?? 0) >= (resumo?.meta_lucro ?? 0) && (resumo?.meta_lucro ?? 0) > 0 ? colors.success : colors.text }]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.6}>
                   {fmtBRL(resumo?.lucro ?? 0)}
                 </Text>
                 <Text style={s.kpiSub}>Meta {fmtBRL(resumo?.meta_lucro ?? 0)}{(resumo?.meta_lucro ?? 0) > 0 ? ` · ${resumo?.progresso_meta ?? 0}%` : ''}</Text>

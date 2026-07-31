@@ -17,9 +17,9 @@ export function StatCard({ label, value, icon, color = colors.primary, subtitle 
       <View style={[styles.iconBox, { backgroundColor: color + '18' }]}>
         <Ionicons name={icon} size={22} color={color} />
       </View>
-      <Text style={styles.value}>{value}</Text>
-      <Text style={styles.label}>{label}</Text>
-      {subtitle && <Text style={styles.subtitle}>{subtitle}</Text>}
+      <Text style={styles.value} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>{value}</Text>
+      <Text style={styles.label} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>{label}</Text>
+      {subtitle && <Text style={styles.subtitle} numberOfLines={1}>{subtitle}</Text>}
     </Card>
   )
 }

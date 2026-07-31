@@ -42,16 +42,16 @@ export default function AffiliateScreen() {
         {/* Stats */}
         <View style={styles.statsRow}>
           <Card style={styles.statCard}>
-            <Text style={styles.statValue}>{affiliate?.total_referrals ?? 0}</Text>
-            <Text style={styles.statLabel}>Indicações</Text>
+            <Text style={styles.statValue} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.6}>{affiliate?.total_referrals ?? 0}</Text>
+            <Text style={styles.statLabel} numberOfLines={1}>Indicações</Text>
           </Card>
           <Card style={styles.statCard}>
-            <Text style={[styles.statValue, { color: colors.warning }]}>R$ {pending}</Text>
-            <Text style={styles.statLabel}>A receber</Text>
+            <Text style={[styles.statValue, { color: colors.warning }]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.6}>R$ {pending}</Text>
+            <Text style={styles.statLabel} numberOfLines={1}>A receber</Text>
           </Card>
           <Card style={styles.statCard}>
-            <Text style={[styles.statValue, { color: colors.success }]}>R$ {paid}</Text>
-            <Text style={styles.statLabel}>Recebido</Text>
+            <Text style={[styles.statValue, { color: colors.success }]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.6}>R$ {paid}</Text>
+            <Text style={styles.statLabel} numberOfLines={1}>Recebido</Text>
           </Card>
         </View>
 
