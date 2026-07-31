@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { View, Text, Modal, ScrollView, TextInput, TouchableOpacity, Switch, StyleSheet } from 'react-native'
+import { View, Text, Modal, ScrollView, TextInput, TouchableOpacity, Switch, StyleSheet, KeyboardAvoidingView, Platform } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { Ionicons } from '@expo/vector-icons'
 import { useQuery, useMutation } from '@tanstack/react-query'
@@ -25,6 +25,7 @@ export function NovoLancamentoSheet({ visible, onClose, onSaved, currentMeta }: 
           <Text style={s.title}>{mode === 'menu' ? 'Novo lançamento' : mode === 'despesa' ? 'Nova despesa' : mode === 'receita' ? 'Nova receita' : 'Meta de lucro'}</Text>
           <TouchableOpacity onPress={close}><Ionicons name="close" size={24} color={colors.text} /></TouchableOpacity>
         </View>
+        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
         <ScrollView contentContainerStyle={s.body} keyboardShouldPersistTaps="handled">
           {mode === 'menu' && (
             <>
@@ -37,6 +38,7 @@ export function NovoLancamentoSheet({ visible, onClose, onSaved, currentMeta }: 
           {mode === 'receita' && <ReceitaForm onSaved={onSaved} />}
           {mode === 'meta' && <MetaForm onSaved={onSaved} currentMeta={currentMeta} />}
         </ScrollView>
+        </KeyboardAvoidingView>
       </SafeAreaView>
     </Modal>
   )

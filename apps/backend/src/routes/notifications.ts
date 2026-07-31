@@ -109,6 +109,34 @@ export const notificationRoutes: FastifyPluginAsync = async (app) => {
     return reply.send({ eas_project_id })
   })
 
+  // Diagnóstico: o usuário logado tem token de push registrado?
+  app.get('/push-status', async (request, reply) => {
+    const { user_id } = request.user
+    const { rows } = await db.query('SELECT token, platform, updated_at FROM push_tokens WHERE user_id = $1', [user_id])
+    return reply.send({ registered: rows.length > 0, count: rows.length, tokens: rows.map((r: any) => ({ platform: r.platform, tail: String(r.token).slice(-8), updated_at: r.updated_at })) })
+  })
+
+  // Diagnóstico: envia um push de teste ao próprio usuário e retorna a resposta
+  // crua da Expo (para ver por que não chega — ex.: DeviceNotRegistered, erro FCM).
+  app.post('/test-push', async (request, reply) => {
+    const { user_id } = request.user
+    const { rows } = await db.query('SELECT token FROM push_tokens WHERE user_id = $1', [user_id])
+    const tokens = rows.map((r: any) => r.token).filter((t: string) => /^Expo(nent)?PushToken\[/.test(t))
+    if (tokens.length === 0) return reply.send({ ok: false, reason: 'no_token', detail: 'Nenhum token de push registrado para este usuário. Abra o app e aceite a permissão de notificações.' })
+
+    const { expo_access_token } = await getPushConfig()
+    const headers: Record<string, string> = { 'Content-Type': 'application/json', Accept: 'application/json' }
+    if (expo_access_token) headers.Authorization = `Bearer ${expo_access_token}`
+    const messages = tokens.map((to: string) => ({ to, sound: 'default', title: 'Teste de push 🔔', body: 'Se você recebeu isto, o push está funcionando!', data: { link: '/notifications' } }))
+    try {
+      const res = await fetch('https://exp.host/--/api/v2/push/send', { method: 'POST', headers, body: JSON.stringify(messages) })
+      const json = await res.json().catch(() => null)
+      return reply.send({ ok: res.ok, status: res.status, expo: json, sent_to: tokens.length })
+    } catch (e: any) {
+      return reply.send({ ok: false, reason: 'send_failed', detail: e?.message })
+    }
+  })
+
   // ── Registro / remoção de push token (Expo) ─────────────────────────────────
   app.post('/push-token', async (request, reply) => {
     const { user_id } = request.user

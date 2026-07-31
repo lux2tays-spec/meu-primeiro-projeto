@@ -1,7 +1,9 @@
-import { View, Text, ScrollView, StyleSheet, Switch, ActivityIndicator } from 'react-native'
+import { View, Text, ScrollView, StyleSheet, Switch, ActivityIndicator, TouchableOpacity } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { notificationsApi, type NotificationPrefs } from '@/lib/api'
+import { registerForPushNotifications } from '@/lib/push'
+import { useToast } from '@/lib/toast'
 import { colors, font, spacing, radius } from '@/lib/theme'
 
 const CHANNELS: { key: keyof NotificationPrefs; label: string; hint: string }[] = [
@@ -22,8 +24,24 @@ const EVENTS: { key: keyof NotificationPrefs; label: string; hint: string }[] = 
 
 export default function NotificationSettingsScreen() {
   const qc = useQueryClient()
+  const toast = useToast()
   const { data, isLoading } = useQuery({ queryKey: ['notification-prefs'], queryFn: notificationsApi.preferences })
   const prefs = data
+
+  // Diagnóstico de push
+  const { data: pushStatus, refetch: refetchStatus } = useQuery({ queryKey: ['push-status'], queryFn: notificationsApi.pushStatus })
+  const reactivate = useMutation({
+    mutationFn: async () => { await registerForPushNotifications() },
+    onSuccess: async () => { await refetchStatus(); toast.show('Tentativa de registro concluída.', 'info') },
+  })
+  const test = useMutation({
+    mutationFn: notificationsApi.testPush,
+    onSuccess: (r: any) => {
+      if (r?.ok) toast.show('Push de teste enviado! Deve chegar em segundos.', 'success')
+      else toast.show(r?.detail ?? r?.reason ?? 'Falha ao enviar push de teste.', 'error')
+    },
+    onError: (e: any) => toast.show(e?.message ?? 'Falha no teste de push.', 'error'),
+  })
 
   const save = useMutation({
     mutationFn: (next: Partial<NotificationPrefs>) => notificationsApi.updatePreferences(next),
@@ -55,6 +73,30 @@ export default function NotificationSettingsScreen() {
   return (
     <SafeAreaView style={styles.container} edges={['bottom']}>
       <ScrollView contentContainerStyle={styles.content}>
+        {/* Diagnóstico de push */}
+        <Text style={styles.sectionLabel}>Push (diagnóstico)</Text>
+        <View style={styles.card}>
+          <View style={styles.diagRow}>
+            <Text style={styles.rowLabel}>Status do push</Text>
+            <Text style={[styles.diagBadge, { color: pushStatus?.registered ? colors.success : colors.danger }]}>
+              {pushStatus?.registered ? 'Registrado ✓' : 'Não registrado'}
+            </Text>
+          </View>
+          <Text style={styles.rowHint}>
+            {pushStatus?.registered
+              ? 'Seu aparelho está registrado para receber push. Use "Enviar teste" para confirmar a entrega.'
+              : 'Nenhum token registrado. Toque em "Reativar push" e aceite a permissão de notificações.'}
+          </Text>
+          <View style={styles.diagBtns}>
+            <TouchableOpacity style={styles.diagBtnOutline} onPress={() => reactivate.mutate()} disabled={reactivate.isPending}>
+              <Text style={styles.diagBtnOutlineText}>{reactivate.isPending ? '...' : 'Reativar push'}</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.diagBtnFilled} onPress={() => test.mutate()} disabled={test.isPending}>
+              <Text style={styles.diagBtnFilledText}>{test.isPending ? 'Enviando...' : 'Enviar teste'}</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+
         <Text style={styles.sectionLabel}>Canais de entrega</Text>
         <View style={styles.card}>
           {CHANNELS.map(({ key, label, hint }, i) => (
@@ -100,5 +142,12 @@ const styles = StyleSheet.create({
   row: { flexDirection: 'row', alignItems: 'center', paddingVertical: spacing.md },
   rowBorder: { borderBottomWidth: 1, borderBottomColor: colors.border },
   rowLabel: { fontSize: font.md, fontWeight: '600', color: colors.text },
-  rowHint: { fontSize: font.sm, color: colors.textSecondary, marginTop: 2 },
+  rowHint: { fontSize: font.sm, color: colors.textSecondary, marginTop: 2, paddingVertical: spacing.sm },
+  diagRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingTop: spacing.md },
+  diagBadge: { fontSize: font.sm, fontWeight: '700' },
+  diagBtns: { flexDirection: 'row', gap: spacing.sm, paddingBottom: spacing.md },
+  diagBtnOutline: { flex: 1, alignItems: 'center', paddingVertical: spacing.sm, borderRadius: radius.md, borderWidth: 1.5, borderColor: colors.primary },
+  diagBtnOutlineText: { color: colors.primary, fontWeight: '700', fontSize: font.sm },
+  diagBtnFilled: { flex: 1, alignItems: 'center', paddingVertical: spacing.sm, borderRadius: radius.md, backgroundColor: colors.primary },
+  diagBtnFilledText: { color: '#fff', fontWeight: '700', fontSize: font.sm },
 })

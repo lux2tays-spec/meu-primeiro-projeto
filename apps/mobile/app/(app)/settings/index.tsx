@@ -174,11 +174,13 @@ export default function SettingsScreen() {
           <SettingsRow icon="notifications-outline" label="Notificações" subtitle="Escolha como e sobre o que ser avisado" onPress={() => router.push('/(app)/settings/notifications' as any)} />
           <View style={styles.divider} />
           <SettingsRow icon="log-out-outline" iconColor={colors.danger} label="Sair" showChevron={false} onPress={handleLogout} />
-          <View style={styles.divider} />
-          <SettingsRow icon="trash-outline" iconColor={colors.danger} label="Excluir conta" subtitle="Apagar permanentemente sua conta e dados" showChevron={false} onPress={handleDeleteAccount} />
         </Card>
 
         <Text style={styles.version}>{`${appName} v1.0.0`}</Text>
+        {/* Excluir conta: discreto no rodapé (exigência das lojas de ter exclusão no app). */}
+        <TouchableOpacity onPress={handleDeleteAccount} style={{ alignSelf: 'center', paddingVertical: spacing.md }}>
+          <Text style={styles.deleteLink}>Excluir minha conta</Text>
+        </TouchableOpacity>
       </ScrollView>
     </SafeAreaView>
   )
@@ -208,5 +210,6 @@ const styles = StyleSheet.create({
   section: { fontSize: font.sm, fontWeight: '700', color: colors.textSecondary, textTransform: 'uppercase', letterSpacing: 0.8 },
   group: { gap: 0 },
   divider: { height: 1, backgroundColor: colors.border, marginHorizontal: -spacing.md },
-  version: { textAlign: 'center', color: colors.textDisabled, fontSize: font.sm, paddingBottom: spacing.xl },
+  version: { textAlign: 'center', color: colors.textDisabled, fontSize: font.sm },
+  deleteLink: { color: colors.textDisabled, fontSize: font.sm, textDecorationLine: 'underline' },
 })

@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { View, Text, Modal, ScrollView, TextInput, TouchableOpacity, StyleSheet } from 'react-native'
+import { View, Text, Modal, ScrollView, TextInput, TouchableOpacity, StyleSheet, KeyboardAvoidingView, Platform } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { Ionicons } from '@expo/vector-icons'
 import { useQuery, useMutation } from '@tanstack/react-query'
@@ -24,6 +24,8 @@ export function NovaVendaSheet({ visible, onClose, onSaved }: { visible: boolean
   const [valor, setValor] = useState('')
   const [notes, setNotes] = useState('')
   const [pm, setPm] = useState('pix')
+  const [outroDesc, setOutroDesc] = useState('')
+  const isOutro = serviceId === '__outro__'
 
   const { data: services = [] } = useQuery({ queryKey: ['services'], queryFn: () => tenantApi.services() })
   const { data: professionals = [] } = useQuery({ queryKey: ['professionals'], queryFn: tenantApi.professionals })
@@ -31,8 +33,10 @@ export function NovaVendaSheet({ visible, onClose, onSaved }: { visible: boolean
 
   function pickService(id: string) {
     setServiceId(id)
+    if (id === '__outro__') { setValor(''); return }
+    // #9: ao trocar de serviço, o valor SEMPRE reflete o preço do novo serviço.
     const s = (services as any[]).find((x) => x.id === id)
-    if (s && !valor) setValor(String(Number(s.price)))
+    if (s) setValor(String(Number(s.price)))
   }
 
   const save = useMutation({
@@ -44,9 +48,16 @@ export function NovaVendaSheet({ visible, onClose, onSaved }: { visible: boolean
       }
       if (!cid) throw new Error('Selecione ou cadastre um cliente.')
       if (!serviceId) throw new Error('Selecione o serviço.')
+      if (isOutro && !outroDesc.trim()) throw new Error('Descreva o serviço avulso.')
       const valorNum = Number(String(valor).replace(',', '.') || 0)
       if (!(valorNum > 0)) throw new Error('Informe um valor maior que zero.')
-      return financeiroApi.createVenda({ customer_id: cid, service_id: serviceId, professional_id: professionalId || null, valor: valorNum, notes: notes.trim() || undefined, payment_method: pm })
+      return financeiroApi.createVenda({
+        customer_id: cid,
+        service_id: isOutro ? undefined : serviceId,
+        custom_service: isOutro ? outroDesc.trim() : undefined,
+        professional_id: professionalId || null,
+        valor: valorNum, notes: notes.trim() || undefined, payment_method: pm,
+      })
     },
     onSuccess: () => { useToast.getState().show('Venda registrada!', 'success'); onSaved() },
     onError: (e: any) => useToast.getState().show(e?.message ?? 'Não foi possível registrar a venda.', 'error'),
@@ -59,10 +70,11 @@ export function NovaVendaSheet({ visible, onClose, onSaved }: { visible: boolean
           <Text style={s.title}>Nova venda</Text>
           <TouchableOpacity onPress={onClose}><Ionicons name="close" size={24} color={colors.text} /></TouchableOpacity>
         </View>
+        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
         <ScrollView contentContainerStyle={s.body} keyboardShouldPersistTaps="handled">
           {/* Cliente */}
           <View style={s.rowBetween}>
-            <Text style={s.label}>Cliente</Text>
+            <Text style={s.label}>Cliente <Text style={s.req}>*</Text></Text>
             <TouchableOpacity onPress={() => { setNewMode(!newMode); setCustomerId('') }}>
               <Text style={s.link}>{newMode ? 'Buscar existente' : '+ Novo cliente'}</Text>
             </TouchableOpacity>
@@ -84,17 +96,27 @@ export function NovaVendaSheet({ visible, onClose, onSaved }: { visible: boolean
           )}
 
           {/* Serviço */}
-          <Text style={s.label}>Serviço</Text>
+          <Text style={s.label}>Serviço <Text style={s.req}>*</Text></Text>
           <View style={s.chipsWrap}>
             {(services as any[]).map((sv) => (
               <TouchableOpacity key={sv.id} onPress={() => pickService(sv.id)} style={[s.selChip, serviceId === sv.id && s.selChipActive]}>
                 <Text style={[s.selChipText, serviceId === sv.id && s.selChipTextActive]}>{sv.name}</Text>
               </TouchableOpacity>
             ))}
+            <TouchableOpacity onPress={() => pickService('__outro__')} style={[s.selChip, isOutro && s.selChipActive]}>
+              <Text style={[s.selChipText, isOutro && s.selChipTextActive]}>Outro serviço</Text>
+            </TouchableOpacity>
           </View>
 
+          {isOutro && (
+            <>
+              <Text style={s.label}>Descrição do serviço <Text style={s.req}>*</Text></Text>
+              <TextInput style={s.input} value={outroDesc} onChangeText={setOutroDesc} placeholder="Ex.: Retoque de sobrancelha" placeholderTextColor={colors.textDisabled} />
+            </>
+          )}
+
           {/* Valor */}
-          <Text style={s.label}>Valor (R$)</Text>
+          <Text style={s.label}>Valor (R$) <Text style={s.req}>*</Text></Text>
           <TextInput style={s.input} value={valor} onChangeText={(t) => setValor(t.replace(/[^0-9,\.]/g, ''))} keyboardType="decimal-pad" placeholder="0,00" placeholderTextColor={colors.textDisabled} />
 
           {/* Profissional opcional */}
@@ -111,7 +133,7 @@ export function NovaVendaSheet({ visible, onClose, onSaved }: { visible: boolean
           </View>
 
           {/* Forma de pagamento */}
-          <Text style={s.label}>Forma de pagamento</Text>
+          <Text style={s.label}>Forma de pagamento <Text style={s.req}>*</Text></Text>
           <View style={s.chipsWrap}>
             {PAYMENTS.map((p) => (
               <TouchableOpacity key={p.v} onPress={() => setPm(p.v)} style={[s.selChip, pm === p.v && s.selChipActive]}>
@@ -127,6 +149,7 @@ export function NovaVendaSheet({ visible, onClose, onSaved }: { visible: boolean
           <View style={{ height: spacing.md }} />
           <Button label="Registrar venda" onPress={() => save.mutate()} loading={save.isPending} />
         </ScrollView>
+        </KeyboardAvoidingView>
       </SafeAreaView>
     </Modal>
   )
@@ -138,6 +161,7 @@ const s = StyleSheet.create({
   title: { fontSize: font.lg, fontWeight: '700', color: colors.text },
   body: { padding: spacing.lg, gap: spacing.sm },
   label: { fontSize: font.sm, fontWeight: '600', color: colors.textSecondary, marginTop: spacing.sm },
+  req: { color: colors.danger, fontWeight: '700' },
   rowBetween: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: spacing.sm },
   link: { fontSize: font.sm, fontWeight: '700', color: colors.primary },
   input: { borderWidth: 1.5, borderColor: colors.border, borderRadius: radius.md, backgroundColor: colors.surface, paddingHorizontal: spacing.md, paddingVertical: spacing.sm, fontSize: font.md, color: colors.text },

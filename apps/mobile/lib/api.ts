@@ -324,6 +324,8 @@ export const notificationsApi = {
   deletePushToken: (token: string) =>
     request<any>('/notifications/push-token', { method: 'DELETE', body: JSON.stringify({ token }) }),
   pushConfig: () => api.get<{ eas_project_id: string }>('/notifications/push-config'),
+  pushStatus: () => api.get<{ registered: boolean; count: number; tokens: any[] }>('/notifications/push-status'),
+  testPush: () => api.post<any>('/notifications/test-push', {}),
 }
 
 // Working hours
@@ -390,8 +392,12 @@ export const financeiroApi = {
   setMetaLucro: (meta: number) => api.patch<any>('/financeiro/meta-lucro', { meta }),
   expenseSubtypes: () => api.get<any[]>('/financeiro/expense-subtypes'),
   historico: (meses = 6) => api.get<any[]>(`/financeiro/historico?meses=${meses}`),
-  createVenda: (data: { customer_id: string; service_id: string; professional_id?: string | null; valor: number; notes?: string; payment_method: string; data?: string }) =>
+  createVenda: (data: { customer_id: string; service_id?: string; custom_service?: string; professional_id?: string | null; valor: number; notes?: string; payment_method: string; data?: string }) =>
     api.post<any>('/financeiro/vendas', data),
+  vendasRange: (from: string, to: string, page = 1, limit = 50) =>
+    api.get<{ data: any[]; total: number; total_valor?: number; page: number; limit: number }>(`/financeiro/vendas?from=${from}&to=${to}&page=${page}&limit=${limit}`),
+  deleteVenda: (id: string) => api.delete<any>(`/financeiro/vendas/${id}`),
+  activityLog: () => api.get<any[]>('/financeiro/activity-log'),
 }
 
 // Comissões
