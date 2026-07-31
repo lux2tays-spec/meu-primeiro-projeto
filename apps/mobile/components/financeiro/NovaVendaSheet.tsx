@@ -20,25 +20,40 @@ export function NovaVendaSheet({ visible, onClose, onSaved }: { visible: boolean
   const [newMode, setNewMode] = useState(false)
   const [newName, setNewName] = useState('')
   const [newPhone, setNewPhone] = useState('')
-  const [serviceId, setServiceId] = useState('')
+  const [selectedIds, setSelectedIds] = useState<string[]>([])
+  const [isOutro, setIsOutro] = useState(false)
+  const [serviceSearch, setServiceSearch] = useState('')
   const [professionalId, setProfessionalId] = useState('')
   const [valor, setValor] = useState('')
   const [notes, setNotes] = useState('')
   const [pm, setPm] = useState('pix')
   const [outroDesc, setOutroDesc] = useState('')
-  const isOutro = serviceId === '__outro__'
 
   const { data: services = [] } = useQuery({ queryKey: ['services'], queryFn: () => tenantApi.services() })
   const { data: professionals = [] } = useQuery({ queryKey: ['professionals'], queryFn: tenantApi.professionals })
   const { data: customers = [] } = useQuery({ queryKey: ['customers', search], queryFn: () => customersApi.list(search), enabled: !newMode && search.length >= 2 })
 
-  function pickService(id: string) {
-    setServiceId(id)
-    if (id === '__outro__') { setValor(''); return }
-    // #9: ao trocar de serviço, o valor SEMPRE reflete o preço do novo serviço.
-    const s = (services as any[]).find((x) => x.id === id)
-    if (s) setValor(String(Number(s.price)))
+  const sumFor = (ids: string[]) =>
+    (services as any[]).filter((x) => ids.includes(x.id)).reduce((acc, x) => acc + (Number(x.price) || 0), 0)
+
+  // Marca/desmarca um serviço do catálogo. O valor SEMPRE re-soma os preços dos
+  // serviços marcados (mas continua editável à mão depois).
+  function toggleService(id: string) {
+    setIsOutro(false)
+    setSelectedIds((prev) => {
+      const next = prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
+      setValor(next.length ? String(sumFor(next)) : '')
+      return next
+    })
   }
+
+  function chooseOutro() {
+    setIsOutro(true); setSelectedIds([]); setValor('')
+  }
+
+  const filteredServices = (services as any[]).filter((sv) =>
+    sv.name.toLowerCase().includes(serviceSearch.trim().toLowerCase())
+  )
 
   const save = useMutation({
     mutationFn: async () => {
@@ -48,19 +63,25 @@ export function NovaVendaSheet({ visible, onClose, onSaved }: { visible: boolean
         cid = c.id
       }
       if (!cid) throw new Error('Selecione ou cadastre um cliente.')
-      if (!serviceId) throw new Error('Selecione o serviço.')
       if (isOutro && !outroDesc.trim()) throw new Error('Descreva o serviço avulso.')
+      if (!isOutro && selectedIds.length === 0) throw new Error('Selecione ao menos um serviço.')
       const valorNum = Number(String(valor).replace(',', '.') || 0)
       if (!(valorNum > 0)) throw new Error('Informe um valor maior que zero.')
       return financeiroApi.createVenda({
         customer_id: cid,
-        service_id: isOutro ? undefined : serviceId,
+        service_ids: isOutro ? undefined : selectedIds,
         custom_service: isOutro ? outroDesc.trim() : undefined,
         professional_id: professionalId || null,
         valor: valorNum, notes: notes.trim() || undefined, payment_method: pm,
       })
     },
-    onSuccess: () => { useToast.getState().show('Venda registrada!', 'success'); onSaved() },
+    onSuccess: () => {
+      useToast.getState().show('Venda registrada!', 'success')
+      // Limpa a seleção para a próxima venda não herdar serviços/valor.
+      setSelectedIds([]); setIsOutro(false); setServiceSearch(''); setValor(''); setOutroDesc(''); setNotes('')
+      setSearch(''); setCustomerId(''); setNewMode(false); setProfessionalId('')
+      onSaved()
+    },
     onError: (e: any) => useToast.getState().show(e?.message ?? 'Não foi possível registrar a venda.', 'error'),
   })
 
@@ -96,18 +117,36 @@ export function NovaVendaSheet({ visible, onClose, onSaved }: { visible: boolean
             </>
           )}
 
-          {/* Serviço */}
-          <Text style={s.label}>Serviço <Text style={s.req}>*</Text></Text>
+          {/* Serviços (múltipla seleção + busca) */}
+          <Text style={s.label}>Serviços <Text style={s.req}>*</Text></Text>
+          <TextInput
+            style={s.input}
+            placeholder="Buscar serviço…"
+            value={serviceSearch}
+            onChangeText={setServiceSearch}
+            placeholderTextColor={colors.textDisabled}
+          />
           <View style={s.chipsWrap}>
-            {(services as any[]).map((sv) => (
-              <TouchableOpacity key={sv.id} onPress={() => pickService(sv.id)} style={[s.selChip, serviceId === sv.id && s.selChipActive]}>
-                <Text style={[s.selChipText, serviceId === sv.id && s.selChipTextActive]}>{sv.name}</Text>
-              </TouchableOpacity>
-            ))}
-            <TouchableOpacity onPress={() => pickService('__outro__')} style={[s.selChip, isOutro && s.selChipActive]}>
+            {filteredServices.map((sv) => {
+              const on = selectedIds.includes(sv.id)
+              return (
+                <TouchableOpacity key={sv.id} onPress={() => toggleService(sv.id)} style={[s.selChip, on && s.selChipActive]}>
+                  <Text style={[s.selChipText, on && s.selChipTextActive]}>
+                    {on ? '✓ ' : ''}{sv.name}{Number(sv.price) > 0 ? ` · R$ ${Number(sv.price).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}` : ''}
+                  </Text>
+                </TouchableOpacity>
+              )
+            })}
+            {filteredServices.length === 0 && serviceSearch.length > 0 && (
+              <Text style={s.optionSub}>Nenhum serviço encontrado.</Text>
+            )}
+            <TouchableOpacity onPress={chooseOutro} style={[s.selChip, isOutro && s.selChipActive]}>
               <Text style={[s.selChipText, isOutro && s.selChipTextActive]}>Outro serviço</Text>
             </TouchableOpacity>
           </View>
+          {selectedIds.length > 1 && (
+            <Text style={s.optionSub}>{selectedIds.length} serviços — o valor soma automaticamente (você pode ajustar).</Text>
+          )}
 
           {isOutro && (
             <>

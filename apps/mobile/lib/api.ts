@@ -392,7 +392,7 @@ export const financeiroApi = {
   setMetaLucro: (meta: number) => api.patch<any>('/financeiro/meta-lucro', { meta }),
   expenseSubtypes: () => api.get<any[]>('/financeiro/expense-subtypes'),
   historico: (meses = 6) => api.get<any[]>(`/financeiro/historico?meses=${meses}`),
-  createVenda: (data: { customer_id: string; service_id?: string; custom_service?: string; professional_id?: string | null; valor: number; notes?: string; payment_method: string; data?: string }) =>
+  createVenda: (data: { customer_id: string; service_id?: string; service_ids?: string[]; custom_service?: string; professional_id?: string | null; valor: number; notes?: string; payment_method: string; data?: string }) =>
     api.post<any>('/financeiro/vendas', data),
   vendasRange: (from: string, to: string, page = 1, limit = 50) =>
     api.get<{ data: any[]; total: number; total_valor?: number; page: number; limit: number }>(`/financeiro/vendas?from=${from}&to=${to}&page=${page}&limit=${limit}`),

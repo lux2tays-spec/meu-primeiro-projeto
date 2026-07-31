@@ -90,15 +90,22 @@ export const financeiroRoutes: FastifyPluginAsync = async (app) => {
         params
       ),
       db.query(
-        `SELECT s.id AS service_id, s.name AS servico_nome,
+        // Vendas com vários serviços gravam itens em appointment_services; cada
+        // item conta +1 e recebe sua fatia do valor. Vendas de 1 serviço e
+        // agendamentos da agenda não têm itens → caem no service_id do próprio
+        // agendamento (COALESCE). A taxa da forma de pagamento é aplicada por item.
+        `SELECT COALESCE(asvc.service_id, a.service_id) AS service_id,
+                COALESCE(MAX(asvc.service_name), MAX(s0.name)) AS servico_nome,
                 COUNT(*)::int AS vendas,
-                COALESCE(SUM(${NET_VALOR}), 0)::float AS receita
+                COALESCE(SUM(ROUND(COALESCE(asvc.price_snapshot, a.price_snapshot, s0.price)
+                  * (1 - COALESCE(pf.pct, 0) / 100), 2)), 0)::float AS receita
          FROM appointments a
-         JOIN services s ON s.id = a.service_id
-         ${FEES_JOIN}
+         LEFT JOIN appointment_services asvc ON asvc.appointment_id = a.id
+         LEFT JOIN services s0 ON s0.id = COALESCE(asvc.service_id, a.service_id)
+         LEFT JOIN tenant_payment_fees pf ON pf.tenant_id = a.tenant_id AND pf.method_key = a.payment_method
          WHERE a.tenant_id = $1 AND a.status = 'completed'
            AND a.starts_at >= ${SP_MONTH_START} AND a.starts_at < ${SP_MONTH_END}
-         GROUP BY s.id, s.name
+         GROUP BY COALESCE(asvc.service_id, a.service_id)
          ORDER BY vendas DESC, receita DESC
          LIMIT 10`,
         params
@@ -546,15 +553,17 @@ export const financeiroRoutes: FastifyPluginAsync = async (app) => {
     if (!isManager(role)) return reply.status(403).send({ error: 'Sem permissão' })
     const b = z.object({
       customer_id: z.string().uuid(),
-      service_id: z.string().uuid().optional(),
+      service_id: z.string().uuid().optional(),            // legado: 1 serviço
+      service_ids: z.array(z.string().uuid()).optional(),  // vários serviços (catálogo)
       custom_service: z.string().min(1).max(120).optional(), // "Outro serviço" (avulso, sem preço fixo)
       professional_id: z.string().uuid().nullable().optional(),
       valor: z.number().nonnegative(),
       notes: z.string().optional(),
       payment_method: z.string().min(1), // validado contra payment_method_types ativos
       data: z.string().optional(), // YYYY-MM-DD (default: agora)
-    }).refine((d) => !!d.service_id || !!d.custom_service, { message: 'Informe o serviço ou uma descrição de serviço avulso.' })
-      .parse(request.body)
+    }).refine((d) => (d.service_ids?.length ?? 0) > 0 || !!d.service_id || !!d.custom_service, {
+      message: 'Informe ao menos um serviço ou uma descrição de serviço avulso.',
+    }).parse(request.body)
 
     const pmOk = await db.query(`SELECT 1 FROM payment_method_types WHERE key = $1 AND active = TRUE`, [b.payment_method])
     if (pmOk.rowCount === 0) return reply.status(400).send({ error: 'Forma de pagamento inválida' })
@@ -566,12 +575,31 @@ export const financeiroRoutes: FastifyPluginAsync = async (app) => {
       if (prof.rowCount === 0) return reply.status(404).send({ error: 'Profissional não encontrado' })
     }
 
-    // Resolve o serviço: um serviço listado, OU o placeholder "Serviço avulso" do
-    // tenant (criado sob demanda) quando é um "Outro serviço". A descrição do
-    // avulso vai para notes (visível na lista de vendas).
-    let serviceId = b.service_id
+    // Lista final de serviços do catálogo (dedup, preserva ordem). service_ids
+    // tem prioridade; senão cai no service_id legado.
+    const catalogIds = (b.service_ids?.length ? b.service_ids : (b.service_id ? [b.service_id] : []))
+      .filter((v, i, a) => a.indexOf(v) === i)
+
+    // Resolve o serviço primário do agendamento + itens da venda.
+    let serviceId: string | undefined
     let notes = b.notes?.trim() || null
-    if (!serviceId) {
+    // [service_id, nome, preço] de cada serviço do catálogo escolhido.
+    let items: { id: string; name: string; price: number }[] = []
+
+    if (catalogIds.length > 0) {
+      const svc = await db.query(
+        `SELECT id, name, price FROM services WHERE tenant_id = $1 AND id = ANY($2::uuid[])`,
+        [tenant_id, catalogIds]
+      )
+      if (svc.rowCount !== catalogIds.length) return reply.status(404).send({ error: 'Serviço não encontrado' })
+      // Mantém a ordem enviada pelo cliente.
+      items = catalogIds.map((id) => {
+        const r = svc.rows.find((x: any) => x.id === id)
+        return { id, name: r.name, price: Number(r.price) || 0 }
+      })
+      serviceId = items[0].id
+    } else {
+      // "Outro serviço" (avulso): placeholder do tenant + descrição nas notes.
       const found = await db.query(
         `SELECT id FROM services WHERE tenant_id = $1 AND name = 'Serviço avulso' LIMIT 1`, [tenant_id]
       )
@@ -583,11 +611,7 @@ export const financeiroRoutes: FastifyPluginAsync = async (app) => {
         )
         serviceId = created.rows[0].id
       }
-      // A descrição do serviço avulso encabeça as notes.
       notes = notes ? `${b.custom_service} — ${notes}` : (b.custom_service ?? null)
-    } else {
-      const svc = await db.query('SELECT id FROM services WHERE id = $1 AND tenant_id = $2', [serviceId, tenant_id])
-      if (svc.rowCount === 0) return reply.status(404).send({ error: 'Serviço não encontrado' })
     }
 
     // Instante da venda. ends_at = starts_at → intervalo vazio: não conflita com
@@ -599,6 +623,26 @@ export const financeiroRoutes: FastifyPluginAsync = async (app) => {
        VALUES ($1, $2, $3, $4, $5, $5, 'completed', $6, $7, $8, $9, 'quick_sale') RETURNING *`,
       [tenant_id, b.customer_id, b.professional_id ?? null, serviceId, startsAt.toISOString(), notes, user_id, b.valor, b.payment_method]
     )
+
+    // Só grava itens quando são 2+ serviços do catálogo. Rateia o valor TOTAL da
+    // venda proporcionalmente ao preço de cada serviço (em centavos, sem drift).
+    if (items.length >= 2) {
+      const totalCents = Math.round(b.valor * 100)
+      const sumPrices = items.reduce((acc, it) => acc + it.price, 0)
+      const shares = items.map((it) =>
+        sumPrices > 0 ? Math.round((totalCents * it.price) / sumPrices) : Math.round(totalCents / items.length)
+      )
+      // Ajusta a última fatia para o somatório bater exatamente com o total.
+      const drift = totalCents - shares.reduce((a, s) => a + s, 0)
+      shares[shares.length - 1] += drift
+      for (let i = 0; i < items.length; i++) {
+        await db.query(
+          `INSERT INTO appointment_services (appointment_id, service_id, service_name, price_snapshot)
+           VALUES ($1, $2, $3, $4)`,
+          [venda.id, items[i].id, items[i].name, shares[i] / 100]
+        )
+      }
+    }
     return reply.status(201).send(venda)
   })
 

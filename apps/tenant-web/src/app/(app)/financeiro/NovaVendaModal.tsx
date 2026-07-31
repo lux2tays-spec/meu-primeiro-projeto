@@ -19,7 +19,9 @@ export default function NovaVendaModal({ onClose, onSaved }: { onClose: () => vo
   const [newCustomer, setNewCustomer] = useState({ name: '', phone: '' })
   const [creatingNew, setCreatingNew] = useState(false)
   const [search, setSearch] = useState('')
-  const [serviceId, setServiceId] = useState('')
+  const [selectedIds, setSelectedIds] = useState<string[]>([])
+  const [isOutro, setIsOutro] = useState(false)
+  const [serviceSearch, setServiceSearch] = useState('')
   const [professionalId, setProfessionalId] = useState('')
   const [valor, setValor] = useState('')
   const [notes, setNotes] = useState('')
@@ -37,15 +39,23 @@ export default function NovaVendaModal({ onClose, onSaved }: { onClose: () => vo
     enabled: !creatingNew && search.length >= 2,
   })
 
-  const isOutro = serviceId === '__outro__'
+  const sumFor = (ids: string[]) =>
+    (services as any[]).filter((x) => ids.includes(x.id)).reduce((acc, x) => acc + (Number(x.price) || 0), 0)
 
-  function pickService(id: string) {
-    setServiceId(id)
-    if (id === '__outro__') { setValor(''); return } // serviço avulso: valor manual
-    // #9: ao trocar de serviço, o valor SEMPRE reflete o preço do novo serviço.
-    const s = (services as any[]).find((x) => x.id === id)
-    if (s) setValor(String(Number(s.price)))
+  // Marca/desmarca um serviço; o valor sempre re-soma (e continua editável).
+  function toggleService(id: string) {
+    setIsOutro(false)
+    setSelectedIds((prev) => {
+      const next = prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
+      setValor(next.length ? String(sumFor(next)) : '')
+      return next
+    })
   }
+  function chooseOutro() { setIsOutro(true); setSelectedIds([]); setValor('') }
+
+  const filteredServices = (services as any[]).filter((s) =>
+    s.name.toLowerCase().includes(serviceSearch.trim().toLowerCase())
+  )
 
   const save = useMutation({
     mutationFn: async () => {
@@ -55,11 +65,11 @@ export default function NovaVendaModal({ onClose, onSaved }: { onClose: () => vo
         cid = c.id
       }
       if (!cid) throw new Error('Selecione ou cadastre um cliente.')
-      if (!serviceId) throw new Error('Selecione o serviço.')
       if (isOutro && !outroDesc.trim()) throw new Error('Descreva o serviço avulso.')
+      if (!isOutro && selectedIds.length === 0) throw new Error('Selecione ao menos um serviço.')
       return financeiroApi.createVenda({
         customer_id: cid,
-        service_id: isOutro ? undefined : serviceId,
+        service_ids: isOutro ? undefined : selectedIds,
         custom_service: isOutro ? outroDesc.trim() : undefined,
         professional_id: professionalId || null,
         valor: Number(valor || 0),
@@ -72,7 +82,7 @@ export default function NovaVendaModal({ onClose, onSaved }: { onClose: () => vo
   })
 
   const canSave = (creatingNew ? (newCustomer.name.trim() && newCustomer.phone.trim()) : customerId)
-    && serviceId && (!isOutro || outroDesc.trim()) && Number(valor) > 0 && !save.isPending
+    && (isOutro ? outroDesc.trim() : selectedIds.length > 0) && Number(valor) > 0 && !save.isPending
 
   return (
     <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4" onClick={onClose}>
@@ -112,14 +122,31 @@ export default function NovaVendaModal({ onClose, onSaved }: { onClose: () => vo
           )}
         </div>
 
-        {/* Serviço */}
+        {/* Serviços (múltipla seleção + busca) */}
         <div>
-          <label className={labelCls}>Serviço <span className="text-red-500">*</span></label>
-          <select value={serviceId} onChange={(e) => pickService(e.target.value)} className={inputCls}>
-            <option value="">Selecione…</option>
-            {(services as any[]).map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
-            <option value="__outro__">Outro serviço (sem preço fixo)…</option>
-          </select>
+          <label className={labelCls}>Serviços <span className="text-red-500">*</span></label>
+          <input className={inputCls} placeholder="Buscar serviço…" value={serviceSearch} onChange={(e) => setServiceSearch(e.target.value)} />
+          <div className="mt-2 border border-gray-100 rounded-xl max-h-44 overflow-y-auto divide-y divide-gray-50">
+            {filteredServices.map((s) => {
+              const on = selectedIds.includes(s.id)
+              return (
+                <button key={s.id} type="button" onClick={() => toggleService(s.id)}
+                  className={`w-full text-left px-3 py-2 text-sm flex items-center justify-between hover:bg-gray-50 ${on ? 'bg-primary/5' : ''}`}>
+                  <span className="flex items-center gap-2">
+                    <span className={`w-4 h-4 rounded border flex items-center justify-center text-[10px] ${on ? 'bg-primary border-primary text-white' : 'border-gray-300'}`}>{on ? '✓' : ''}</span>
+                    {s.name}
+                  </span>
+                  {Number(s.price) > 0 && <span className="text-gray-400 text-xs">R$ {Number(s.price).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>}
+                </button>
+              )
+            })}
+            {filteredServices.length === 0 && <p className="px-3 py-2 text-xs text-gray-400">Nenhum serviço encontrado.</p>}
+          </div>
+          <button type="button" onClick={chooseOutro}
+            className={`mt-2 px-3 py-1.5 rounded-lg text-sm font-medium border transition-colors ${isOutro ? 'bg-primary text-white border-primary' : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'}`}>
+            Outro serviço (sem preço fixo)
+          </button>
+          {selectedIds.length > 1 && <p className="text-xs text-gray-500 mt-1">{selectedIds.length} serviços — o valor soma automaticamente (pode ajustar).</p>}
         </div>
 
         {/* Descrição do serviço avulso (obrigatória quando "Outro serviço") */}
