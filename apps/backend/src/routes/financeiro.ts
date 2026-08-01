@@ -263,7 +263,8 @@ export const financeiroRoutes: FastifyPluginAsync = async (app) => {
   // ── Log de atividades do tenant (proprietário) ──────────────────────────────
   app.get('/activity-log', async (request, reply) => {
     const { tenant_id, role } = request.user
-    if (!['owner', 'admin', 'root'].includes(role)) return reply.status(403).send({ error: 'Sem permissão' })
+    // Log da equipe é visível apenas para o PROPRIETÁRIO (owner) — e root (plataforma).
+    if (!['owner', 'root'].includes(role)) return reply.status(403).send({ error: 'Sem permissão' })
     const { rows } = await db.query(
       `SELECT id, actor_name, action, target, summary, data, created_at
        FROM tenant_activity_log WHERE tenant_id = $1 ORDER BY created_at DESC LIMIT 100`,

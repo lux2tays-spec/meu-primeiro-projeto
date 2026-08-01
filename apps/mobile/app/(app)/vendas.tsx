@@ -4,6 +4,7 @@ import { SafeAreaView } from 'react-native-safe-area-context'
 import { Ionicons } from '@expo/vector-icons'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { financeiroApi } from '@/lib/api'
+import { useAuthStore } from '@/lib/store'
 import { NovaVendaSheet } from '@/components/financeiro/NovaVendaSheet'
 import { EditVendaSheet } from '@/components/financeiro/EditVendaSheet'
 import { useToast } from '@/lib/toast'
@@ -20,6 +21,10 @@ export default function VendasScreen() {
   const [preset, setPreset] = useState<'hoje' | '7' | 'mes' | 'mespassado'>('mes')
   const [novaVenda, setNovaVenda] = useState(false)
   const [editing, setEditing] = useState<any | null>(null)
+  // Log da equipe: só o proprietário vê, e começa oculto (toggle).
+  const role = useAuthStore((s) => s.role)
+  const isOwner = role === 'owner' || role === 'root'
+  const [showLog, setShowLog] = useState(false)
 
   const { from, to } = (() => {
     const t = new Date()
@@ -37,7 +42,7 @@ export default function VendasScreen() {
     queryKey: ['vendas-range', from, to],
     queryFn: () => financeiroApi.vendasRange(from, to, 1, 100),
   })
-  const { data: log = [] } = useQuery({ queryKey: ['activity-log'], queryFn: financeiroApi.activityLog })
+  const { data: log = [] } = useQuery({ queryKey: ['activity-log'], queryFn: financeiroApi.activityLog, enabled: isOwner && showLog })
 
   const vendas = data?.data ?? []
   const totalValor = data?.total_valor ?? 0
@@ -116,20 +121,29 @@ export default function VendasScreen() {
           ))
         )}
 
-        {/* Log da equipe */}
-        <Text style={s.sectionTitle}>Log de atividades da equipe</Text>
-        <View style={s.logCard}>
-          {(log as any[]).length === 0 ? (
-            <Text style={s.empty}>Nenhuma atividade registrada ainda.</Text>
-          ) : (
-            (log as any[]).map((l) => (
-              <View key={l.id} style={s.logRow}>
-                <Text style={s.logSummary}>{l.summary}</Text>
-                <Text style={s.logMeta}>{l.actor_name ? `${l.actor_name} · ` : ''}{new Date(l.created_at).toLocaleDateString('pt-BR')}</Text>
+        {/* Log da equipe — apenas proprietário, com botão ocultar/exibir */}
+        {isOwner && (
+          <>
+            <TouchableOpacity style={s.logToggle} onPress={() => setShowLog((v) => !v)} accessibilityRole="button">
+              <Text style={[s.sectionTitle, { marginTop: 0 }]}>Log de atividades da equipe</Text>
+              <Ionicons name={showLog ? 'chevron-up' : 'chevron-down'} size={18} color={colors.textSecondary} />
+            </TouchableOpacity>
+            {showLog && (
+              <View style={s.logCard}>
+                {(log as any[]).length === 0 ? (
+                  <Text style={s.empty}>Nenhuma atividade registrada ainda.</Text>
+                ) : (
+                  (log as any[]).map((l) => (
+                    <View key={l.id} style={s.logRow}>
+                      <Text style={s.logSummary}>{l.summary}</Text>
+                      <Text style={s.logMeta}>{l.actor_name ? `${l.actor_name} · ` : ''}{new Date(l.created_at).toLocaleDateString('pt-BR')}</Text>
+                    </View>
+                  ))
+                )}
               </View>
-            ))
-          )}
-        </View>
+            )}
+          </>
+        )}
       </ScrollView>
 
       <NovaVendaSheet visible={novaVenda} onClose={() => setNovaVenda(false)} onSaved={() => { setNovaVenda(false); afterChange() }} />
@@ -162,6 +176,7 @@ const s = StyleSheet.create({
   editLink: { fontSize: font.sm, fontWeight: '700', color: colors.primary },
   delLink: { fontSize: font.sm, fontWeight: '700', color: colors.danger },
   sectionTitle: { fontSize: font.md, fontWeight: '700', color: colors.text, marginTop: spacing.md },
+  logToggle: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: spacing.lg, marginBottom: spacing.xs },
   logCard: { backgroundColor: colors.surface, borderRadius: radius.lg, padding: spacing.md, gap: spacing.sm },
   logRow: { borderBottomWidth: 1, borderBottomColor: colors.border, paddingBottom: spacing.sm },
   logSummary: { fontSize: font.sm, color: colors.text },

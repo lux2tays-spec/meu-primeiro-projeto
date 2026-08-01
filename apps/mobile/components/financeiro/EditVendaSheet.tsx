@@ -42,7 +42,7 @@ export function EditVendaSheet({ venda, onClose, onSaved }: { venda: any; onClos
           <Text style={s.title}>Editar venda</Text>
           <TouchableOpacity onPress={onClose}><Ionicons name="close" size={24} color={colors.text} /></TouchableOpacity>
         </View>
-        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
+        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1 }}>
           <ScrollView contentContainerStyle={s.body} keyboardShouldPersistTaps="handled">
             <Text style={s.hint}>Cliente: {venda.cliente_nome}</Text>
             <Text style={s.label}>Serviço</Text>

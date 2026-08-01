@@ -21,6 +21,9 @@ export default function VendasPage() {
   const [role, setRole] = useState<string | null>(null)
   useEffect(() => { setRole(getTokenPayload(getToken())?.role ?? null) }, [])
   const isManager = role === null || ['owner', 'admin', 'root'].includes(role)
+  // Log da equipe: só o proprietário (owner/root) vê, e começa oculto (toggle).
+  const isOwner = role === 'owner' || role === 'root'
+  const [showLog, setShowLog] = useState(false)
 
   const today = new Date()
   const [from, setFrom] = useState(iso(new Date(today.getFullYear(), today.getMonth(), 1)))
@@ -35,7 +38,7 @@ export default function VendasPage() {
     queryFn: () => financeiroApi.vendasRange(from, to, page, 50),
     enabled: isManager && role !== null,
   })
-  const { data: log = [] } = useQuery({ queryKey: ['activity-log'], queryFn: financeiroApi.activityLog, enabled: isManager && role !== null })
+  const { data: log = [] } = useQuery({ queryKey: ['activity-log'], queryFn: financeiroApi.activityLog, enabled: isOwner && showLog })
 
   const vendas = data?.data ?? []
   const total = data?.total ?? 0
@@ -162,23 +165,32 @@ export default function VendasPage() {
         )}
       </div>
 
-      {/* Log de atividades da equipe (painel do proprietário) — sempre visível */}
-      <div className={cardCls}>
-        <p className="text-sm font-semibold text-gray-900 mb-1">Log de atividades da equipe</p>
-        <p className="text-xs text-gray-400 mb-3">Registro de exclusões e alterações de vendas feitas pela equipe.</p>
-        {(log as any[]).length === 0 ? (
-          <p className="text-gray-400 text-sm py-4 text-center">Nenhuma atividade registrada ainda.</p>
-        ) : (
-          <div className="space-y-2 max-h-64 overflow-y-auto">
-            {(log as any[]).map((l) => (
-              <div key={l.id} className="flex items-center justify-between gap-3 text-sm border-b border-gray-50 pb-2">
-                <span className="text-gray-700">{l.summary}</span>
-                <span className="text-xs text-gray-400 shrink-0">{l.actor_name ? `${l.actor_name} · ` : ''}{new Date(l.created_at).toLocaleString('pt-BR')}</span>
+      {/* Log de atividades da equipe — apenas proprietário, com ocultar/exibir */}
+      {isOwner && (
+        <div className={cardCls}>
+          <button onClick={() => setShowLog((v) => !v)} className="w-full flex items-center justify-between text-left">
+            <span>
+              <span className="block text-sm font-semibold text-gray-900">Log de atividades da equipe</span>
+              <span className="block text-xs text-gray-400">Registro de exclusões e alterações de vendas feitas pela equipe.</span>
+            </span>
+            <span className="text-sm font-semibold text-primary shrink-0 ml-3">{showLog ? 'Ocultar' : 'Exibir'}</span>
+          </button>
+          {showLog && (
+            (log as any[]).length === 0 ? (
+              <p className="text-gray-400 text-sm py-4 text-center">Nenhuma atividade registrada ainda.</p>
+            ) : (
+              <div className="space-y-2 max-h-64 overflow-y-auto mt-3">
+                {(log as any[]).map((l) => (
+                  <div key={l.id} className="flex items-center justify-between gap-3 text-sm border-b border-gray-50 pb-2">
+                    <span className="text-gray-700">{l.summary}</span>
+                    <span className="text-xs text-gray-400 shrink-0">{l.actor_name ? `${l.actor_name} · ` : ''}{new Date(l.created_at).toLocaleString('pt-BR')}</span>
+                  </div>
+                ))}
               </div>
-            ))}
-          </div>
-        )}
-      </div>
+            )
+          )}
+        </div>
+      )}
 
       {editing && <EditVendaModal venda={editing} onClose={() => setEditing(null)} onSaved={() => {
         setEditing(null)

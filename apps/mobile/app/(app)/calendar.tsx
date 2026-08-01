@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from 'react'
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity, RefreshControl,
-  Modal, TextInput, ActivityIndicator, Linking, KeyboardAvoidingView, Platform, PanResponder,
+  Modal, TextInput, ActivityIndicator, Linking, KeyboardAvoidingView, Platform,
 } from 'react-native'
+import { GestureDetector, Gesture } from 'react-native-gesture-handler'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { Ionicons } from '@expo/vector-icons'
 import { router } from 'expo-router'
@@ -140,18 +141,19 @@ export default function CalendarScreen() {
   )
 
   // Deslizar o dedo para os lados sobre a lista troca de semana (−7 / +7 dias).
-  // Só captura o gesto quando é claramente horizontal, para não atrapalhar o
-  // scroll vertical dos agendamentos.
+  // gesture-handler coexiste com o ScrollView vertical: só ativa em movimento
+  // horizontal (activeOffsetX) e falha se for vertical (failOffsetY).
   const shiftWeek = (dir: 1 | -1) => setSelected((prev) => { const n = addDays(prev, dir * 7); setStripBase(n); return n })
   const swipe = useMemo(
     () =>
-      PanResponder.create({
-        onMoveShouldSetPanResponder: (_e, g) => Math.abs(g.dx) > 24 && Math.abs(g.dx) > Math.abs(g.dy) * 1.5,
-        onPanResponderRelease: (_e, g) => {
-          if (g.dx <= -40) shiftWeek(1) // arrastou p/ esquerda → próxima semana
-          else if (g.dx >= 40) shiftWeek(-1) // arrastou p/ direita → semana anterior
-        },
-      }),
+      Gesture.Pan()
+        .activeOffsetX([-20, 20])
+        .failOffsetY([-16, 16])
+        .runOnJS(true)
+        .onEnd((e) => {
+          if (e.translationX <= -40) shiftWeek(1) // arrastou p/ esquerda → próxima semana
+          else if (e.translationX >= 40) shiftWeek(-1) // arrastou p/ direita → semana anterior
+        }),
     []
   )
 
@@ -543,9 +545,9 @@ export default function CalendarScreen() {
         </View>
       </View>
 
-      {/* Appointments for selected day */}
+      {/* Appointments for selected day (deslize p/ os lados troca a semana) */}
+      <GestureDetector gesture={swipe}>
       <ScrollView
-        {...swipe.panHandlers}
         contentContainerStyle={styles.list}
         refreshControl={<RefreshControl refreshing={isRefetching} onRefresh={refetch} tintColor={colors.primary} />}
       >
@@ -589,6 +591,7 @@ export default function CalendarScreen() {
           <Ionicons name="add" size={28} color="#fff" />
         </TouchableOpacity>
       </ScrollView>
+      </GestureDetector>
 
       {/* ── Filter picker modal ── */}
       <Modal visible={!!pickerFor} transparent animationType="fade" onRequestClose={() => setPickerFor(null)}>
@@ -627,7 +630,7 @@ export default function CalendarScreen() {
 
       {/* ── Edit modal ── */}
       <Modal visible={!!editing} transparent animationType="slide" onRequestClose={() => setEditing(null)}>
-        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.modalWrap}>
+        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={styles.modalWrap}>
           <View style={styles.editSheet}>
             {editing && (
               <>
@@ -810,7 +813,7 @@ export default function CalendarScreen() {
 
       {/* ── Bulk reschedule modal (owner/admin) ── */}
       <Modal visible={bulkOpen} transparent animationType="slide" onRequestClose={() => setBulkOpen(false)}>
-        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.modalWrap}>
+        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={styles.modalWrap}>
           <View style={styles.editSheet}>
             <View style={styles.editHeader}>
               <Text style={styles.sheetTitle}>Remarcação em massa</Text>

@@ -16,7 +16,7 @@ const labelCls = 'block text-xs font-medium text-gray-600 mb-1'
 // sem ocupar horário na agenda.
 export default function NovaVendaModal({ onClose, onSaved }: { onClose: () => void; onSaved: () => void }) {
   const [customerId, setCustomerId] = useState('')
-  const [newCustomer, setNewCustomer] = useState({ name: '', phone: '' })
+  const [newCustomer, setNewCustomer] = useState({ name: '', last_name: '', phone: '' })
   const [creatingNew, setCreatingNew] = useState(false)
   const [search, setSearch] = useState('')
   const [selectedIds, setSelectedIds] = useState<string[]>([])
@@ -61,7 +61,7 @@ export default function NovaVendaModal({ onClose, onSaved }: { onClose: () => vo
     mutationFn: async () => {
       let cid = customerId
       if (creatingNew) {
-        const c = await tenantApi.addCustomer({ name: newCustomer.name.trim(), phone: newCustomer.phone.trim() })
+        const c = await tenantApi.addCustomer({ name: newCustomer.name.trim(), last_name: newCustomer.last_name.trim() || undefined, phone: newCustomer.phone.trim() })
         cid = c.id
       }
       if (!cid) throw new Error('Selecione ou cadastre um cliente.')
@@ -101,8 +101,11 @@ export default function NovaVendaModal({ onClose, onSaved }: { onClose: () => vo
             </button>
           </div>
           {creatingNew ? (
-            <div className="grid grid-cols-2 gap-2">
-              <input className={inputCls} placeholder="Nome" value={newCustomer.name} onChange={(e) => setNewCustomer((c) => ({ ...c, name: e.target.value }))} />
+            <div className="space-y-2">
+              <div className="grid grid-cols-2 gap-2">
+                <input className={inputCls} placeholder="Nome" value={newCustomer.name} onChange={(e) => setNewCustomer((c) => ({ ...c, name: e.target.value }))} />
+                <input className={inputCls} placeholder="Sobrenome" value={newCustomer.last_name} onChange={(e) => setNewCustomer((c) => ({ ...c, last_name: e.target.value }))} />
+              </div>
               <input className={inputCls} placeholder="WhatsApp" value={newCustomer.phone} onChange={(e) => setNewCustomer((c) => ({ ...c, phone: e.target.value }))} />
             </div>
           ) : (
@@ -111,9 +114,9 @@ export default function NovaVendaModal({ onClose, onSaved }: { onClose: () => vo
               {search.length >= 2 && (customers as any[]).length > 0 && (
                 <div className="mt-1 border border-gray-100 rounded-xl max-h-40 overflow-y-auto">
                   {(customers as any[]).map((c) => (
-                    <button key={c.id} onClick={() => { setCustomerId(c.id); setSearch(c.name) }}
+                    <button key={c.id} onClick={() => { setCustomerId(c.id); setSearch([c.name, c.last_name].filter(Boolean).join(' ')) }}
                       className={`w-full text-left px-3 py-2 text-sm hover:bg-gray-50 ${customerId === c.id ? 'bg-primary/5 font-semibold' : ''}`}>
-                      {c.name} <span className="text-gray-400 text-xs">{c.phone}</span>
+                      {[c.name, c.last_name].filter(Boolean).join(' ')} <span className="text-gray-400 text-xs">{c.phone}</span>
                     </button>
                   ))}
                 </div>

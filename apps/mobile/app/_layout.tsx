@@ -1,5 +1,6 @@
 import { useEffect } from 'react'
 import { Platform, View } from 'react-native'
+import { GestureHandlerRootView } from 'react-native-gesture-handler'
 import { Stack } from 'expo-router'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import * as SplashScreen from 'expo-splash-screen'
@@ -36,20 +37,22 @@ export default function RootLayout() {
   }, [isLoaded])
 
   return (
-    <QueryClientProvider client={queryClient}>
-      <ErrorBoundary>
-        <ThemeProvider>
-          <View style={{ flex: 1 }}>
-            <StatusBar style="dark" />
-            <Stack screenOptions={{ headerShown: false }}>
-              <Stack.Screen name="(auth)" />
-              <Stack.Screen name="(app)" />
-              <Stack.Screen name="onboarding" />
-            </Stack>
-            <Toast />
-          </View>
-        </ThemeProvider>
-      </ErrorBoundary>
-    </QueryClientProvider>
+    <GestureHandlerRootView style={{ flex: 1 }}>
+      <QueryClientProvider client={queryClient}>
+        <ErrorBoundary>
+          <ThemeProvider>
+            <View style={{ flex: 1 }}>
+              <StatusBar style="dark" />
+              <Stack screenOptions={{ headerShown: false }}>
+                <Stack.Screen name="(auth)" />
+                <Stack.Screen name="(app)" />
+                <Stack.Screen name="onboarding" />
+              </Stack>
+              <Toast />
+            </View>
+          </ThemeProvider>
+        </ErrorBoundary>
+      </QueryClientProvider>
+    </GestureHandlerRootView>
   )
 }

@@ -1,9 +1,9 @@
 import { useState } from 'react'
-import { View, Text, Modal, ScrollView, TextInput, TouchableOpacity, StyleSheet, KeyboardAvoidingView, Platform } from 'react-native'
+import { View, Text, Modal, ScrollView, FlatList, TextInput, TouchableOpacity, StyleSheet, KeyboardAvoidingView, Platform } from 'react-native'
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { Ionicons } from '@expo/vector-icons'
 import { useQuery, useMutation } from '@tanstack/react-query'
-import { financeiroApi, tenantApi, customersApi } from '@/lib/api'
+import { financeiroApi, tenantApi, customersApi, customerFullName } from '@/lib/api'
 import { Button } from '@/components/ui/Button'
 import { useToast } from '@/lib/toast'
 import { colors, font, spacing, radius } from '@/lib/theme'
@@ -17,12 +17,15 @@ export function NovaVendaSheet({ visible, onClose, onSaved }: { visible: boolean
   const insets = useSafeAreaInsets()
   const [search, setSearch] = useState('')
   const [customerId, setCustomerId] = useState('')
+  const [selectedCustomer, setSelectedCustomer] = useState<any | null>(null)
   const [newMode, setNewMode] = useState(false)
   const [newName, setNewName] = useState('')
+  const [newLastName, setNewLastName] = useState('')
   const [newPhone, setNewPhone] = useState('')
   const [selectedIds, setSelectedIds] = useState<string[]>([])
   const [isOutro, setIsOutro] = useState(false)
   const [serviceSearch, setServiceSearch] = useState('')
+  const [servicePickerOpen, setServicePickerOpen] = useState(false)
   const [professionalId, setProfessionalId] = useState('')
   const [valor, setValor] = useState('')
   const [notes, setNotes] = useState('')
@@ -54,12 +57,17 @@ export function NovaVendaSheet({ visible, onClose, onSaved }: { visible: boolean
   const filteredServices = (services as any[]).filter((sv) =>
     sv.name.toLowerCase().includes(serviceSearch.trim().toLowerCase())
   )
+  const selectedLabel = (services as any[])
+    .filter((sv) => selectedIds.includes(sv.id))
+    .map((sv) => sv.name)
+    .join(', ')
 
   const save = useMutation({
     mutationFn: async () => {
       let cid = customerId
       if (newMode) {
-        const c = await customersApi.create({ name: newName.trim(), phone: newPhone.trim() })
+        if (!newName.trim()) throw new Error('Informe o nome do cliente.')
+        const c = await customersApi.create({ name: newName.trim(), last_name: newLastName.trim() || undefined, phone: newPhone.trim() })
         cid = c.id
       }
       if (!cid) throw new Error('Selecione ou cadastre um cliente.')
@@ -79,7 +87,7 @@ export function NovaVendaSheet({ visible, onClose, onSaved }: { visible: boolean
       useToast.getState().show('Venda registrada!', 'success')
       // Limpa a seleção para a próxima venda não herdar serviços/valor.
       setSelectedIds([]); setIsOutro(false); setServiceSearch(''); setValor(''); setOutroDesc(''); setNotes('')
-      setSearch(''); setCustomerId(''); setNewMode(false); setProfessionalId('')
+      setSearch(''); setCustomerId(''); setSelectedCustomer(null); setNewMode(false); setNewName(''); setNewLastName(''); setNewPhone(''); setProfessionalId('')
       onSaved()
     },
     onError: (e: any) => useToast.getState().show(e?.message ?? 'Não foi possível registrar a venda.', 'error'),
@@ -92,7 +100,7 @@ export function NovaVendaSheet({ visible, onClose, onSaved }: { visible: boolean
           <Text style={s.title}>Nova venda</Text>
           <TouchableOpacity onPress={onClose}><Ionicons name="close" size={24} color={colors.text} /></TouchableOpacity>
         </View>
-        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
+        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1 }}>
         <ScrollView contentContainerStyle={[s.body, { paddingBottom: insets.bottom + spacing.xl }]} keyboardShouldPersistTaps="handled">
           {/* Cliente */}
           <View style={s.rowBetween}>
@@ -102,48 +110,46 @@ export function NovaVendaSheet({ visible, onClose, onSaved }: { visible: boolean
             </TouchableOpacity>
           </View>
           {newMode ? (
-            <View style={{ flexDirection: 'row', gap: spacing.sm }}>
-              <TextInput style={[s.input, { flex: 1 }]} placeholder="Nome" value={newName} onChangeText={setNewName} placeholderTextColor={colors.textDisabled} />
-              <TextInput style={[s.input, { flex: 1 }]} placeholder="WhatsApp" value={newPhone} onChangeText={setNewPhone} keyboardType="phone-pad" placeholderTextColor={colors.textDisabled} />
+            <View style={{ gap: spacing.sm }}>
+              <View style={{ flexDirection: 'row', gap: spacing.sm }}>
+                <TextInput style={[s.input, { flex: 1 }]} placeholder="Nome" value={newName} onChangeText={setNewName} placeholderTextColor={colors.textDisabled} />
+                <TextInput style={[s.input, { flex: 1 }]} placeholder="Sobrenome" value={newLastName} onChangeText={setNewLastName} placeholderTextColor={colors.textDisabled} />
+              </View>
+              <TextInput style={s.input} placeholder="WhatsApp" value={newPhone} onChangeText={setNewPhone} keyboardType="phone-pad" placeholderTextColor={colors.textDisabled} />
+            </View>
+          ) : customerId ? (
+            // Cliente selecionado: cartão de confirmação (evita re-selecionar).
+            <View style={s.selectedCard}>
+              <View style={{ flex: 1 }}>
+                <Text style={s.selectedName}>{customerFullName(selectedCustomer) || 'Cliente selecionado'}</Text>
+                {selectedCustomer?.phone ? <Text style={s.optionSub}>{selectedCustomer.phone}</Text> : null}
+              </View>
+              <TouchableOpacity onPress={() => { setCustomerId(''); setSelectedCustomer(null); setSearch('') }}>
+                <Text style={s.link}>Trocar</Text>
+              </TouchableOpacity>
             </View>
           ) : (
             <>
-              <TextInput style={s.input} placeholder="Buscar por nome ou telefone…" value={search} onChangeText={(t) => { setSearch(t); setCustomerId('') }} placeholderTextColor={colors.textDisabled} />
+              <TextInput style={s.input} placeholder="Buscar por nome ou telefone…" value={search} onChangeText={setSearch} placeholderTextColor={colors.textDisabled} />
               {search.length >= 2 && (customers as any[]).map((c) => (
-                <TouchableOpacity key={c.id} onPress={() => { setCustomerId(c.id); setSearch(c.name) }} style={[s.option, customerId === c.id && s.optionActive]}>
-                  <Text style={s.optionText}>{c.name} <Text style={s.optionSub}>{c.phone}</Text></Text>
+                <TouchableOpacity key={c.id} onPress={() => { setCustomerId(c.id); setSelectedCustomer(c) }} style={s.option}>
+                  <Text style={s.optionText}>{customerFullName(c)} <Text style={s.optionSub}>{c.phone}</Text></Text>
                 </TouchableOpacity>
               ))}
+              {search.length >= 2 && (customers as any[]).length === 0 && (
+                <Text style={[s.optionSub, { marginTop: 4 }]}>Nenhum cliente encontrado.</Text>
+              )}
             </>
           )}
 
-          {/* Serviços (múltipla seleção + busca) */}
+          {/* Serviços — dropdown (abre modal com busca e múltipla seleção) */}
           <Text style={s.label}>Serviços <Text style={s.req}>*</Text></Text>
-          <TextInput
-            style={s.input}
-            placeholder="Buscar serviço…"
-            value={serviceSearch}
-            onChangeText={setServiceSearch}
-            placeholderTextColor={colors.textDisabled}
-          />
-          <View style={s.chipsWrap}>
-            {filteredServices.map((sv) => {
-              const on = selectedIds.includes(sv.id)
-              return (
-                <TouchableOpacity key={sv.id} onPress={() => toggleService(sv.id)} style={[s.selChip, on && s.selChipActive]}>
-                  <Text style={[s.selChipText, on && s.selChipTextActive]}>
-                    {on ? '✓ ' : ''}{sv.name}{Number(sv.price) > 0 ? ` · R$ ${Number(sv.price).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}` : ''}
-                  </Text>
-                </TouchableOpacity>
-              )
-            })}
-            {filteredServices.length === 0 && serviceSearch.length > 0 && (
-              <Text style={s.optionSub}>Nenhum serviço encontrado.</Text>
-            )}
-            <TouchableOpacity onPress={chooseOutro} style={[s.selChip, isOutro && s.selChipActive]}>
-              <Text style={[s.selChipText, isOutro && s.selChipTextActive]}>Outro serviço</Text>
-            </TouchableOpacity>
-          </View>
+          <TouchableOpacity style={s.selectField} onPress={() => { setServiceSearch(''); setServicePickerOpen(true) }}>
+            <Text style={[s.selectFieldText, (isOutro || selectedIds.length > 0) ? null : { color: colors.textDisabled }]} numberOfLines={1}>
+              {isOutro ? 'Outro serviço (avulso)' : selectedIds.length === 0 ? 'Toque para selecionar serviços' : selectedLabel}
+            </Text>
+            <Ionicons name="chevron-down" size={18} color={colors.textSecondary} />
+          </TouchableOpacity>
           {selectedIds.length > 1 && (
             <Text style={s.optionSub}>{selectedIds.length} serviços — o valor soma automaticamente (você pode ajustar).</Text>
           )}
@@ -191,6 +197,51 @@ export function NovaVendaSheet({ visible, onClose, onSaved }: { visible: boolean
         </ScrollView>
         </KeyboardAvoidingView>
       </SafeAreaView>
+
+      {/* Seletor de serviços (dropdown) — busca + lista rolável + múltipla seleção */}
+      <Modal visible={servicePickerOpen} animationType="slide" presentationStyle="pageSheet" onRequestClose={() => setServicePickerOpen(false)}>
+        <SafeAreaView style={s.container} edges={['top']}>
+          <View style={s.header}>
+            <Text style={s.title}>Selecionar serviços</Text>
+            <TouchableOpacity onPress={() => setServicePickerOpen(false)}><Text style={s.link}>Pronto</Text></TouchableOpacity>
+          </View>
+          <View style={{ paddingHorizontal: spacing.lg, paddingTop: spacing.md }}>
+            <TextInput
+              style={s.input}
+              placeholder="Buscar serviço…"
+              value={serviceSearch}
+              onChangeText={setServiceSearch}
+              placeholderTextColor={colors.textDisabled}
+              autoFocus
+            />
+          </View>
+          <FlatList
+            data={filteredServices}
+            keyExtractor={(it: any) => it.id}
+            keyboardShouldPersistTaps="handled"
+            contentContainerStyle={{ paddingHorizontal: spacing.lg, paddingTop: spacing.sm, paddingBottom: insets.bottom + spacing.xl }}
+            ListHeaderComponent={
+              <TouchableOpacity style={s.pickRow} onPress={() => { chooseOutro(); setServicePickerOpen(false) }}>
+                <View style={[s.check, isOutro && s.checkOn]}>{isOutro && <Ionicons name="checkmark" size={14} color="#fff" />}</View>
+                <Text style={[s.pickName, { fontWeight: '600' }]}>Outro serviço (sem preço fixo)</Text>
+              </TouchableOpacity>
+            }
+            renderItem={({ item }: any) => {
+              const on = selectedIds.includes(item.id)
+              return (
+                <TouchableOpacity style={s.pickRow} onPress={() => toggleService(item.id)}>
+                  <View style={[s.check, on && s.checkOn]}>{on && <Ionicons name="checkmark" size={14} color="#fff" />}</View>
+                  <Text style={s.pickName} numberOfLines={1}>{item.name}</Text>
+                  {Number(item.price) > 0 && (
+                    <Text style={s.pickPrice}>R$ {Number(item.price).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</Text>
+                  )}
+                </TouchableOpacity>
+              )
+            }}
+            ListEmptyComponent={<Text style={[s.optionSub, { paddingVertical: spacing.md }]}>Nenhum serviço encontrado.</Text>}
+          />
+        </SafeAreaView>
+      </Modal>
     </Modal>
   )
 }
@@ -209,6 +260,17 @@ const s = StyleSheet.create({
   optionActive: { backgroundColor: colors.primaryLight },
   optionText: { fontSize: font.md, color: colors.text },
   optionSub: { fontSize: font.sm, color: colors.textSecondary },
+  selectedCard: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, backgroundColor: colors.primaryLight, borderRadius: radius.md, paddingHorizontal: spacing.md, paddingVertical: spacing.sm + 2 },
+  selectedName: { fontSize: font.md, fontWeight: '700', color: colors.text },
+  // Campo "dropdown" que abre o seletor de serviços
+  selectField: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', borderWidth: 1.5, borderColor: colors.border, borderRadius: radius.md, backgroundColor: colors.surface, paddingHorizontal: spacing.md, paddingVertical: spacing.sm + 2 },
+  selectFieldText: { flex: 1, fontSize: font.md, color: colors.text, paddingRight: spacing.sm },
+  // Linhas do seletor de serviços
+  pickRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, paddingVertical: spacing.md, borderBottomWidth: 1, borderBottomColor: colors.border },
+  check: { width: 22, height: 22, borderRadius: 6, borderWidth: 1.5, borderColor: colors.border, alignItems: 'center', justifyContent: 'center' },
+  checkOn: { backgroundColor: colors.primary, borderColor: colors.primary },
+  pickName: { flex: 1, fontSize: font.md, color: colors.text },
+  pickPrice: { fontSize: font.sm, color: colors.textSecondary },
   chipsWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
   selChip: { paddingHorizontal: spacing.md, paddingVertical: spacing.sm, borderRadius: radius.full, borderWidth: 1.5, borderColor: colors.border, backgroundColor: colors.surface },
   selChipActive: { backgroundColor: colors.primary, borderColor: colors.primary },

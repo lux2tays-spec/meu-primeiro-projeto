@@ -25,7 +25,7 @@ export function NovoLancamentoSheet({ visible, onClose, onSaved, currentMeta }: 
           <Text style={s.title}>{mode === 'menu' ? 'Novo lançamento' : mode === 'despesa' ? 'Nova despesa' : mode === 'receita' ? 'Nova receita' : 'Meta de lucro'}</Text>
           <TouchableOpacity onPress={close}><Ionicons name="close" size={24} color={colors.text} /></TouchableOpacity>
         </View>
-        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
+        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1 }}>
         <ScrollView contentContainerStyle={s.body} keyboardShouldPersistTaps="handled">
           {mode === 'menu' && (
             <>
