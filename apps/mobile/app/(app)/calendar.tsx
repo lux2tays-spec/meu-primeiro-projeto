@@ -135,12 +135,13 @@ export default function CalendarScreen() {
   // Seletor de mês/dia: permite pular direto para qualquer data (inclusive
   // trocando de mês), em vez de avançar semana a semana.
   const [datePickerOpen, setDatePickerOpen] = useState(false)
-  const stripDates = useMemo(
-    () => Array.from({ length: 15 }, (_, i) => addDays(stripBase, i - 7)),
-    [stripBase]
-  )
+  // Faixa = a SEMANA (dom→sáb) que contém stripBase. Deslizar para os lados
+  // troca de semana (o dia selecionado acompanha, mantendo o mesmo dia da semana).
+  const stripDates = useMemo(() => {
+    const start = addDays(stripBase, -stripBase.getDay()) // domingo da semana
+    return Array.from({ length: 7 }, (_, i) => addDays(start, i))
+  }, [stripBase])
 
-  // Deslizar o dedo para os lados sobre a lista troca de semana (−7 / +7 dias).
   // gesture-handler coexiste com o ScrollView vertical: só ativa em movimento
   // horizontal (activeOffsetX) e falha se for vertical (failOffsetY).
   const shiftWeek = (dir: 1 | -1) => setSelected((prev) => { const n = addDays(prev, dir * 7); setStripBase(n); return n })
@@ -432,7 +433,7 @@ export default function CalendarScreen() {
     <SafeAreaView style={styles.container} edges={['top']}>
       {/* Month header */}
       <View style={styles.monthRow}>
-        <TouchableOpacity onPress={() => setStripBase(addDays(stripBase, -7))} hitSlop={8}>
+        <TouchableOpacity onPress={() => shiftWeek(-1)} hitSlop={8}>
           <Ionicons name="chevron-back" size={22} color={colors.primary} />
         </TouchableOpacity>
         <TouchableOpacity
@@ -456,19 +457,18 @@ export default function CalendarScreen() {
               <Ionicons name="megaphone-outline" size={20} color={colors.danger} />
             </TouchableOpacity>
           )}
-          <TouchableOpacity onPress={() => setStripBase(addDays(stripBase, 7))} hitSlop={8}>
+          <TouchableOpacity onPress={() => shiftWeek(1)} hitSlop={8}>
             <Ionicons name="chevron-forward" size={22} color={colors.primary} />
           </TouchableOpacity>
         </View>
       </View>
 
-      {/* Day strip (horizontal) */}
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        contentContainerStyle={styles.weekStrip}
-        contentOffset={{ x: 7 * 56 - spacing.lg, y: 0 }}
-      >
+      {/* Semana + filtros + lista: deslizar para os lados troca de semana.
+          gesture-handler coexiste com o scroll vertical da lista. */}
+      <GestureDetector gesture={swipe}>
+      <View style={{ flex: 1 }}>
+      {/* Faixa da semana (7 dias fixos) */}
+      <View style={styles.weekStrip}>
         {stripDates.map((d) => {
           const iso = toISO(d)
           const isSelected = iso === dateStr
@@ -501,7 +501,7 @@ export default function CalendarScreen() {
             </TouchableOpacity>
           )
         })}
-      </ScrollView>
+      </View>
 
       {/* Search + filters */}
       <View style={styles.filtersBlock}>
@@ -545,8 +545,7 @@ export default function CalendarScreen() {
         </View>
       </View>
 
-      {/* Appointments for selected day (deslize p/ os lados troca a semana) */}
-      <GestureDetector gesture={swipe}>
+      {/* Appointments for selected day */}
       <ScrollView
         contentContainerStyle={styles.list}
         refreshControl={<RefreshControl refreshing={isRefetching} onRefresh={refetch} tintColor={colors.primary} />}
@@ -591,6 +590,7 @@ export default function CalendarScreen() {
           <Ionicons name="add" size={28} color="#fff" />
         </TouchableOpacity>
       </ScrollView>
+      </View>
       </GestureDetector>
 
       {/* ── Filter picker modal ── */}
@@ -1220,12 +1220,13 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   weekStrip: {
+    flexDirection: 'row',
     paddingHorizontal: spacing.md,
     paddingBottom: spacing.sm,
-    gap: spacing.sm,
+    gap: spacing.xs,
   },
   dayBtn: {
-    width: 48,
+    flex: 1,
     alignItems: 'center',
     paddingVertical: spacing.sm,
     borderRadius: radius.md,
