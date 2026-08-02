@@ -1,15 +1,25 @@
 import Link from 'next/link'
+import { getLegal, LegalText } from '@/components/LegalDoc'
 
 export const metadata = {
   title: 'Política de Privacidade — AiConfirma',
   description: 'Como o AiConfirma coleta, usa, compartilha e protege dados pessoais, conforme a LGPD.',
 }
 
+// #9: se o Root Admin cadastrou o texto, mostramos ele; senão, o estático abaixo.
+export default async function PrivacidadePage() {
+  const legal = await getLegal()
+  if (legal?.privacy?.trim()) {
+    return <LegalText title="Política de Privacidade" text={legal.privacy} updatedAt={legal.privacy_updated_at} />
+  }
+  return <StaticPrivacidade />
+}
+
 // NOTA: preencha os campos entre colchetes com os dados reais da empresa
 // controladora ([RAZÃO SOCIAL], [CNPJ], e-mail do encarregado) antes de publicar.
 // Recomenda-se revisão jurídica. Última atualização: 11 de julho de 2026.
 
-export default function PrivacidadePage() {
+function StaticPrivacidade() {
   return (
     <main className="mx-auto max-w-3xl px-6 py-12 text-gray-800">
       <Link href="/" className="text-sm text-primary hover:underline">← Voltar</Link>

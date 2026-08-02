@@ -34,7 +34,7 @@ const STATUS_COLOR: Record<string, string> = {
 function NewCustomerModal({ onClose, initialName = '' }: { onClose: () => void; initialName?: string }) {
   const qc = useQueryClient()
   // Prefill Nome with whatever the user typed in the search box (#7).
-  const [form, setForm] = useState({ name: initialName, last_name: '', phone: '', email: '' })
+  const [form, setForm] = useState({ name: initialName, last_name: '', phone: '', email: '', birth_date: '' })
   const [error, setError] = useState('')
   // UI-8: ESC fecha + focus trap básico
   const dialogRef = useModalA11y<HTMLDivElement>(onClose)
@@ -46,6 +46,7 @@ function NewCustomerModal({ onClose, initialName = '' }: { onClose: () => void; 
         last_name: form.last_name.trim() || undefined,
         phone: form.phone.trim(),
         email: form.email.trim() || undefined,
+        birth_date: form.birth_date || undefined,
       }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['customers'] })
@@ -109,6 +110,15 @@ function NewCustomerModal({ onClose, initialName = '' }: { onClose: () => void; 
             placeholder="email@exemplo.com"
           />
         </div>
+        <div>
+          <label className="block text-xs font-medium text-gray-600 mb-1">Aniversário (opcional)</label>
+          <input
+            type="date"
+            value={form.birth_date}
+            onChange={e => setForm(f => ({ ...f, birth_date: e.target.value }))}
+            className="w-full h-10 px-3 rounded-xl border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+          />
+        </div>
 
         {error && <p className="text-red-500 text-xs">{error}</p>}
 
@@ -138,19 +148,24 @@ function CustomerDrawer({ customerId, canDelete, onClose }: { customerId: string
   })
 
   const [editing, setEditing] = useState(false)
-  const [form, setForm] = useState({ name: '', last_name: '', email: '' })
+  const [form, setForm] = useState({ name: '', last_name: '', email: '', birth_date: '' })
   const [error, setError] = useState('')
   const [deleteError, setDeleteError] = useState('')
   const [success, setSuccess] = useState(false)
 
   function openEdit() {
-    setForm({ name: customer?.name ?? '', last_name: customer?.last_name ?? '', email: customer?.email ?? '' })
+    setForm({
+      name: customer?.name ?? '',
+      last_name: customer?.last_name ?? '',
+      email: customer?.email ?? '',
+      birth_date: customer?.birth_date ? String(customer.birth_date).slice(0, 10) : '',
+    })
     setEditing(true)
     setError('')
   }
 
   const updateMutation = useMutation({
-    mutationFn: (data: { name?: string; last_name?: string; email?: string }) => tenantApi.updateCustomer(customerId, data),
+    mutationFn: (data: { name?: string; last_name?: string; email?: string; birth_date?: string }) => tenantApi.updateCustomer(customerId, data),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['customer', customerId] })
       qc.invalidateQueries({ queryKey: ['customers'] })
@@ -290,10 +305,19 @@ function CustomerDrawer({ customerId, canDelete, onClose }: { customerId: string
                       placeholder="email@exemplo.com"
                     />
                   </div>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-600 mb-1">Aniversário</label>
+                    <input
+                      type="date"
+                      value={form.birth_date}
+                      onChange={e => setForm(f => ({ ...f, birth_date: e.target.value }))}
+                      className="w-full h-10 px-3 rounded-xl border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+                    />
+                  </div>
                   {error && <p className="text-red-500 text-xs">{error}</p>}
                   <div className="flex gap-2">
                     <button
-                      onClick={() => updateMutation.mutate({ name: form.name.trim() || undefined, last_name: form.last_name.trim(), email: form.email.trim() || undefined })}
+                      onClick={() => updateMutation.mutate({ name: form.name.trim() || undefined, last_name: form.last_name.trim(), email: form.email.trim() || undefined, birth_date: form.birth_date || '' })}
                       disabled={updateMutation.isPending}
                       className="flex-1 h-9 bg-primary text-white text-sm font-semibold rounded-xl disabled:opacity-50"
                     >

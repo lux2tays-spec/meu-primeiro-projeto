@@ -34,6 +34,22 @@ export const brandingRoutes: FastifyPluginAsync = async (app) => {
     return reply.send(plans)
   })
 
+  // Documentos legais (Política de Privacidade / Termos de Uso) — o texto é
+  // colado no Root Admin e servido aqui para as páginas /privacidade e /termos.
+  app.get('/legal', async (_request, reply) => {
+    const { rows } = await db.query(
+      `SELECT key, value, updated_at FROM platform_settings WHERE key IN ('legal_privacy', 'legal_terms')`
+    )
+    const byKey = Object.fromEntries((rows as any[]).map((r) => [r.key, r]))
+    reply.header('Cache-Control', 'public, max-age=60')
+    return reply.send({
+      privacy: byKey['legal_privacy']?.value?.text ?? '',
+      privacy_updated_at: byKey['legal_privacy']?.updated_at ?? null,
+      terms: byKey['legal_terms']?.value?.text ?? '',
+      terms_updated_at: byKey['legal_terms']?.updated_at ?? null,
+    })
+  })
+
   // Aggregate branding (name, tagline, colors, asset URLs).
   app.get('/branding', async (_request, reply) => {
     const brand = await getBrandConfig()

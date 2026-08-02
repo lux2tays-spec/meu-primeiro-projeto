@@ -158,6 +158,17 @@ export default function DashboardPage() {
               <p className="text-[11px] text-gray-400 mt-0.5">Despesas {resumo ? fmtBRL(resumo.despesas_total) : '—'}</p>
             </div>
           </div>
+
+          {/* #5 — agendamentos captados pelo bot ("clientes que você poderia perder") */}
+          <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wide mt-6 mb-3">Clientes que você poderia perder</h2>
+          <div className="bg-primary/5 border border-primary/20 rounded-2xl p-5 flex items-center gap-4">
+            <div className="w-12 h-12 rounded-xl bg-white flex items-center justify-center text-2xl shrink-0">✨</div>
+            <div className="flex-1">
+              <p className="text-2xl font-bold text-primary-dark">{resumo?.agendamentos_bot ?? 0} agendamento{(resumo?.agendamentos_bot ?? 0) === 1 ? '' : 's'}</p>
+              <p className="text-sm text-gray-600 mt-0.5">captados pelo assistente de IA neste mês — que poderiam ter ido embora sem resposta.</p>
+            </div>
+            <p className="text-2xl font-bold text-green-600 shrink-0">{fmtBRL(resumo?.receita_bot ?? 0)}</p>
+          </div>
         </div>
       )}
 

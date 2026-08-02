@@ -1,14 +1,24 @@
 import Link from 'next/link'
+import { getLegal, LegalText } from '@/components/LegalDoc'
 
 export const metadata = {
   title: 'Termos de Uso — AiConfirma',
   description: 'Termos e condições de uso da plataforma AiConfirma.',
 }
 
+// #9: se o Root Admin cadastrou o texto, mostramos ele; senão, o estático abaixo.
+export default async function TermosPage() {
+  const legal = await getLegal()
+  if (legal?.terms?.trim()) {
+    return <LegalText title="Termos de Uso" text={legal.terms} updatedAt={legal.terms_updated_at} />
+  }
+  return <StaticTermos />
+}
+
 // NOTA: preencha [RAZÃO SOCIAL]/[CNPJ] e revise juridicamente antes de publicar.
 // Última atualização: 11 de julho de 2026.
 
-export default function TermosPage() {
+function StaticTermos() {
   return (
     <main className="mx-auto max-w-3xl px-6 py-12 text-gray-800">
       <Link href="/" className="text-sm text-primary hover:underline">← Voltar</Link>

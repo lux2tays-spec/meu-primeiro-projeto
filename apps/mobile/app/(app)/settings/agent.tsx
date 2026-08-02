@@ -42,6 +42,9 @@ const BLANK = {
   allow_payment_talk: 'inherit' as 'inherit' | 'on' | 'off',
   reminder_return_template: '',
   reminder_appointment_template: '',
+  birthday_reminder_enabled: false,
+  birthday_reminder_days_before: 0,
+  birthday_reminder_message: '',
   catalog_files: [] as { name: string; url: string }[],
   language: 'pt-BR',
   handoff_enabled: true,
@@ -111,6 +114,9 @@ export default function AgentScreen() {
       allow_payment_talk:   config.allow_payment_talk == null ? 'inherit' : (config.allow_payment_talk ? 'on' : 'off'),
       reminder_return_template:      config.reminder_return_template ?? '',
       reminder_appointment_template: config.reminder_appointment_template ?? '',
+      birthday_reminder_enabled:     config.birthday_reminder_enabled ?? false,
+      birthday_reminder_days_before: config.birthday_reminder_days_before ?? 0,
+      birthday_reminder_message:     config.birthday_reminder_message ?? '',
       catalog_files:        config.catalog_files ?? [],
       language:             config.language ?? 'pt-BR',
       handoff_enabled:              config.handoff_enabled ?? true,
@@ -136,6 +142,7 @@ export default function AgentScreen() {
       allow_payment_talk: triState(f.allow_payment_talk),
       reminder_return_template: f.reminder_return_template.trim() || null,
       reminder_appointment_template: f.reminder_appointment_template.trim() || null,
+      birthday_reminder_message: f.birthday_reminder_message.trim() || null,
     }
   }
 
@@ -378,6 +385,45 @@ export default function AgentScreen() {
                     />
                   </View>
                 </View>
+              )}
+            </View>
+
+            {/* ── Lembrete de aniversário (prospecção) ── */}
+            <View style={s.remindersSection}>
+              <View style={s.remindersHeader}>
+                <View style={{ flex: 1 }}>
+                  <Text style={s.label}>Lembrete de aniversário</Text>
+                  <Text style={s.hint}>
+                    O bot envia uma mensagem de parabéns no WhatsApp e convida a agendar — ótimo para trazer o cliente de volta.
+                  </Text>
+                </View>
+                <Switch
+                  value={form.birthday_reminder_enabled}
+                  onValueChange={(v) => set('birthday_reminder_enabled', v)}
+                  trackColor={{ true: colors.primary, false: colors.border }}
+                  thumbColor="#fff"
+                />
+              </View>
+
+              {form.birthday_reminder_enabled && (
+                <>
+                  <Label hint="0 = no próprio dia do aniversário. Ex.: 3 = envia 3 dias antes.">Enviar quantos dias antes</Label>
+                  <Input
+                    value={String(form.birthday_reminder_days_before)}
+                    onChangeText={(v) => set('birthday_reminder_days_before', Math.max(0, Math.min(60, parseInt(v, 10) || 0)))}
+                    keyboardType="number-pad"
+                    placeholder="0"
+                  />
+                  <Label hint="Use {cliente} e {negocio}. Deixe vazio para o texto padrão.">Mensagem</Label>
+                  <Input
+                    value={form.birthday_reminder_message}
+                    onChangeText={(v) => set('birthday_reminder_message', v)}
+                    placeholder="Olá {cliente}! 🎉 A equipe do {negocio} deseja um feliz aniversário! Que tal comemorar com a gente? Responda para agendar. 🎁"
+                    multiline
+                    numberOfLines={4}
+                    style={s.textarea}
+                  />
+                </>
               )}
             </View>
 

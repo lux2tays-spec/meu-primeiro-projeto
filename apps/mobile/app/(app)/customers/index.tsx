@@ -23,6 +23,25 @@ import { colors, font, spacing, radius } from '@/lib/theme'
 import { useAuthStore } from '@/lib/store'
 import { Card } from '@/components/ui/Card'
 
+// Aniversário (opcional): máscara DD/MM/AAAA <-> ISO YYYY-MM-DD.
+function maskBirth(v: string) {
+  const d = v.replace(/\D/g, '').slice(0, 8)
+  if (d.length <= 2) return d
+  if (d.length <= 4) return `${d.slice(0, 2)}/${d.slice(2)}`
+  return `${d.slice(0, 2)}/${d.slice(2, 4)}/${d.slice(4)}`
+}
+function birthToISO(v: string): string | undefined {
+  const d = v.replace(/\D/g, '')
+  if (d.length !== 8) return undefined
+  const dd = d.slice(0, 2), mm = d.slice(2, 4), yyyy = d.slice(4)
+  if (Number(dd) < 1 || Number(dd) > 31 || Number(mm) < 1 || Number(mm) > 12) return undefined
+  return `${yyyy}-${mm}-${dd}`
+}
+function isoToBirth(iso?: string | null): string {
+  const m = iso ? String(iso).slice(0, 10).match(/^(\d{4})-(\d{2})-(\d{2})$/) : null
+  return m ? `${m[3]}/${m[2]}/${m[1]}` : ''
+}
+
 const STATUS_LABEL: Record<string, string> = {
   pending: 'Pendente',
   confirmed: 'Confirmado',
@@ -195,6 +214,7 @@ function AddCustomerModal({
   const [lastName, setLastName] = useState('')
   const [phone, setPhone] = useState('')
   const [email, setEmail] = useState('')
+  const [birth, setBirth] = useState('')
 
   // #7 — when the modal opens, carry the text the user already typed (search)
   // into the Nome field instead of starting blank.
@@ -204,6 +224,7 @@ function AddCustomerModal({
       setLastName('')
       setPhone('')
       setEmail('')
+      setBirth('')
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visible])
@@ -215,6 +236,7 @@ function AddCustomerModal({
         last_name: lastName.trim() || undefined,
         phone: phone.trim(),
         email: email.trim() || undefined,
+        birth_date: birthToISO(birth),
       }),
     onSuccess: () => {
       onCreated()
@@ -277,6 +299,17 @@ function AddCustomerModal({
             autoCapitalize="none"
           />
 
+          <Text style={styles.fieldLabel}>Aniversário (opcional)</Text>
+          <TextInput
+            style={styles.fieldInput}
+            placeholder="DD/MM/AAAA"
+            placeholderTextColor={colors.textDisabled}
+            value={birth}
+            onChangeText={(v) => setBirth(maskBirth(v))}
+            keyboardType="number-pad"
+            maxLength={10}
+          />
+
           <TouchableOpacity
             style={[styles.primaryBtn, !canSubmit && styles.primaryBtnDisabled]}
             disabled={!canSubmit}
@@ -312,6 +345,7 @@ function CustomerDetailModal({
   const [editLastName, setEditLastName] = useState('')
   const [editPhone, setEditPhone] = useState('')
   const [editEmail, setEditEmail] = useState('')
+  const [editBirth, setEditBirth] = useState('')
 
   const { data, isLoading } = useQuery({
     queryKey: ['customer', customerId],
@@ -331,6 +365,7 @@ function CustomerDetailModal({
         last_name: editLastName.trim() || undefined,
         phone: editPhone.replace(/\D/g, '') || undefined,
         email: editEmail.trim() || undefined,
+        birth_date: editBirth.trim() ? birthToISO(editBirth) : '',
       }),
     onSuccess: () => {
       setEditing(false)
@@ -375,6 +410,7 @@ function CustomerDetailModal({
     setEditLastName(data?.last_name ?? '')
     setEditPhone(data?.phone ?? '')
     setEditEmail(data?.email ?? '')
+    setEditBirth(isoToBirth(data?.birth_date))
     setEditing(true)
   }
 
@@ -440,6 +476,10 @@ function CustomerDetailModal({
               <TextInput style={styles.fieldInput} value={editEmail} onChangeText={setEditEmail}
                 placeholder="email@exemplo.com" placeholderTextColor={colors.textDisabled}
                 autoCapitalize="none" keyboardType="email-address" />
+              <Text style={styles.fieldLabel}>Aniversário</Text>
+              <TextInput style={styles.fieldInput} value={editBirth} onChangeText={(v) => setEditBirth(maskBirth(v))}
+                placeholder="DD/MM/AAAA" placeholderTextColor={colors.textDisabled}
+                keyboardType="number-pad" maxLength={10} />
               <TouchableOpacity
                 style={[
                   styles.primaryBtn,

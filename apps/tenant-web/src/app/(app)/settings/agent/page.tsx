@@ -24,6 +24,9 @@ const BLANK = {
   allow_payment_talk: 'inherit' as 'inherit' | 'on' | 'off',
   reminder_return_template: '',
   reminder_appointment_template: '',
+  birthday_reminder_enabled: false,
+  birthday_reminder_days_before: 0,
+  birthday_reminder_message: '',
   catalog_files: [] as { name: string; url: string }[],
   language: 'pt-BR',
   handoff_enabled: true,
@@ -80,6 +83,9 @@ export default function AgentPage() {
       allow_payment_talk:   config.allow_payment_talk == null ? 'inherit' : (config.allow_payment_talk ? 'on' : 'off'),
       reminder_return_template:      config.reminder_return_template ?? '',
       reminder_appointment_template: config.reminder_appointment_template ?? '',
+      birthday_reminder_enabled:     config.birthday_reminder_enabled ?? false,
+      birthday_reminder_days_before: config.birthday_reminder_days_before ?? 0,
+      birthday_reminder_message:     config.birthday_reminder_message ?? '',
       catalog_files:        config.catalog_files ?? [],
       language:             config.language ?? 'pt-BR',
       handoff_enabled:              config.handoff_enabled ?? true,
@@ -106,6 +112,7 @@ export default function AgentPage() {
       allow_payment_talk: triState(f.allow_payment_talk),
       reminder_return_template: f.reminder_return_template.trim() || null,
       reminder_appointment_template: f.reminder_appointment_template.trim() || null,
+      birthday_reminder_message: f.birthday_reminder_message.trim() || null,
     }
   }
 
@@ -331,6 +338,51 @@ export default function AgentPage() {
                       value={form.reminder2_minutes}
                       onChange={(e) => set('reminder2_minutes', Math.max(0, Math.floor(Number(e.target.value) || 0)))}
                       className={inputCls}
+                    />
+                  </Field>
+                </div>
+              )}
+            </div>
+
+            {/* ── Lembrete de aniversário (prospecção) ── */}
+            <div className="border-t border-gray-100 pt-5 space-y-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-semibold text-gray-900">Lembrete de aniversário</p>
+                  <p className="text-xs text-gray-400 mt-0.5">
+                    O bot envia parabéns no WhatsApp e convida a agendar — ótimo para trazer o cliente de volta.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={form.birthday_reminder_enabled}
+                  onClick={() => set('birthday_reminder_enabled', !form.birthday_reminder_enabled)}
+                  className={`relative w-11 h-6 rounded-full transition-colors shrink-0 ${form.birthday_reminder_enabled ? 'bg-primary' : 'bg-gray-200'}`}
+                >
+                  <span className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${form.birthday_reminder_enabled ? 'translate-x-5' : ''}`} />
+                </button>
+              </div>
+
+              {form.birthday_reminder_enabled && (
+                <div className="space-y-4">
+                  <Field label="Enviar quantos dias antes" hint="0 = no próprio dia. Ex.: 3 = três dias antes.">
+                    <input
+                      type="number"
+                      min={0}
+                      max={60}
+                      value={form.birthday_reminder_days_before}
+                      onChange={(e) => set('birthday_reminder_days_before', Math.max(0, Math.min(60, Math.floor(Number(e.target.value) || 0))))}
+                      className={inputCls}
+                    />
+                  </Field>
+                  <Field label="Mensagem" hint="Use {cliente} e {negocio}. Deixe vazio para o texto padrão.">
+                    <textarea
+                      rows={4}
+                      value={form.birthday_reminder_message}
+                      onChange={(e) => set('birthday_reminder_message', e.target.value)}
+                      placeholder="Olá {cliente}! 🎉 A equipe do {negocio} deseja um feliz aniversário! Que tal comemorar com a gente? Responda para agendar. 🎁"
+                      className={`${inputCls} h-auto py-2 resize-none`}
                     />
                   </Field>
                 </div>

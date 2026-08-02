@@ -1,6 +1,7 @@
 import { FastifyPluginAsync } from 'fastify'
 import fp from 'fastify-plugin'
 import { getTokenVersion } from '../lib/tokenVersion'
+import { db } from '../lib/db'
 
 const authPlugin = fp(async (app) => {
   app.decorate('authenticate', async (request: any, reply: any) => {
@@ -19,6 +20,16 @@ const authPlugin = fp(async (app) => {
     const currentVersion = await getTokenVersion(request.user.user_id)
     if (currentVersion === null || tokenVersion !== currentVersion) {
       return reply.status(401).send({ error: 'Sessão invalidada. Faça login novamente.' })
+    }
+
+    // #11: rastreia o último uso do tenant (throttle 10 min, fire-and-forget —
+    // nunca bloqueia nem falha a request).
+    if (request.user?.tenant_id) {
+      db.query(
+        `UPDATE tenants SET last_seen_at = NOW()
+         WHERE id = $1 AND (last_seen_at IS NULL OR last_seen_at < NOW() - INTERVAL '10 minutes')`,
+        [request.user.tenant_id]
+      ).catch(() => { /* best-effort */ })
     }
   })
 

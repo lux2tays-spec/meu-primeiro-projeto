@@ -9,7 +9,7 @@ import { Badge } from '@/components/ui/Badge'
 import { NotificationBell } from '@/components/NotificationBell'
 import { tenantApi, appointmentsApi, financeiroApi } from '@/lib/api'
 import { useAuthStore } from '@/lib/store'
-import { colors, font, spacing } from '@/lib/theme'
+import { colors, font, spacing, radius } from '@/lib/theme'
 
 const fmtBRL = (v: number) => Number(v ?? 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL', maximumFractionDigits: 0 })
 
@@ -159,6 +159,17 @@ export default function DashboardScreen() {
               <StatCard label="Meta de Vendas" value={resumo && resumo.meta_lucro > 0 ? fmtBRL(resumo.meta_vendas) : '—'} icon="flag-outline" color={colors.primary}
                 subtitle={resumo && resumo.meta_lucro > 0 ? (resumo.vendas_faltantes > 0 ? `Faltam ${resumo.vendas_faltantes}` : 'Batida! 🎉') : 'Defina no Financeiro'} />
             </View>
+
+            {/* #5 — agendamentos captados pelo bot ("clientes que você poderia perder") */}
+            <Text style={styles.sectionTitle}>Clientes que você poderia perder</Text>
+            <View style={styles.botCard}>
+              <View style={styles.botIcon}><Ionicons name="sparkles" size={22} color={colors.primary} /></View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.botValue}>{resumo?.agendamentos_bot ?? 0} agendamento{(resumo?.agendamentos_bot ?? 0) === 1 ? '' : 's'}</Text>
+                <Text style={styles.botSub}>captados pelo assistente de IA neste mês — que poderiam ter ido embora sem resposta.</Text>
+              </View>
+              <Text style={styles.botMoney}>{fmtBRL(resumo?.receita_bot ?? 0)}</Text>
+            </View>
           </>
         )}
 
@@ -229,6 +240,11 @@ const styles = StyleSheet.create({
   trialText: { color: colors.warning, fontSize: font.sm, fontWeight: '500' },
   sectionTitle: { fontSize: font.lg, fontWeight: '700', color: colors.text },
   statsRow: { flexDirection: 'row', gap: spacing.md },
+  botCard: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, backgroundColor: colors.primaryLight, borderRadius: radius.lg, padding: spacing.md },
+  botIcon: { width: 44, height: 44, borderRadius: 12, backgroundColor: '#fff', alignItems: 'center', justifyContent: 'center' },
+  botValue: { fontSize: font.lg, fontWeight: '800', color: colors.primaryDark },
+  botSub: { fontSize: font.sm, color: colors.primaryDark, marginTop: 2, opacity: 0.85 },
+  botMoney: { fontSize: font.lg, fontWeight: '800', color: colors.success },
   list: { gap: spacing.sm },
   empty: { color: colors.textSecondary, fontSize: font.md, textAlign: 'center', paddingVertical: spacing.xl },
   fab: {

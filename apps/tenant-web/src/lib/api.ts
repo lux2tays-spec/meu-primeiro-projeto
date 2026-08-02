@@ -174,9 +174,9 @@ export const tenantApi = {
     return api.get<{ data: any[]; total: number; page: number; limit: number }>(`/tenant/customers?${qs.toString()}`)
   },
   customer: (id: string) => api.get<any>(`/tenant/customers/${id}`),
-  updateCustomer: (id: string, data: { name?: string; last_name?: string; email?: string; phone?: string }) =>
+  updateCustomer: (id: string, data: { name?: string; last_name?: string; email?: string; phone?: string; birth_date?: string }) =>
     api.put<any>(`/tenant/customers/${id}`, data),
-  addCustomer: (data: { name: string; last_name?: string; phone: string; email?: string }) =>
+  addCustomer: (data: { name: string; last_name?: string; phone: string; email?: string; birth_date?: string }) =>
     api.post<any>('/tenant/customers', data),
   deleteCustomer: (id: string) => api.delete<{ deleted: boolean }>(`/tenant/customers/${id}`),
   hours: (professionalId?: string) =>
@@ -249,6 +249,8 @@ export interface FinanceiroResumo {
   total_vendas: number
   receita_total: number
   agendamentos_abertos: number
+  agendamentos_bot: number
+  receita_bot: number
   // SAL-8 — novos KPIs
   ticket_medio: number
   agendamentos_cancelados: number

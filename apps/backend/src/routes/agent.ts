@@ -36,6 +36,10 @@ const updateSchema = z.object({
   allow_payment_talk:   z.boolean().nullable().optional(),
   reminder_return_template:      z.string().max(2000).nullable().optional(),
   reminder_appointment_template: z.string().max(2000).nullable().optional(),
+  // #3 — lembrete de aniversário (prospecção do bot).
+  birthday_reminder_enabled:     z.boolean().optional(),
+  birthday_reminder_days_before: z.number().int().min(0).max(60).optional(),
+  birthday_reminder_message:     z.string().max(2000).nullable().optional(),
 }).merge(handoffUpdateSchema)
 
 export const agentRoutes: FastifyPluginAsync = async (app) => {

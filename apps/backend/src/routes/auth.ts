@@ -311,6 +311,12 @@ export const authRoutes: FastifyPluginAsync = async (app) => {
       [user.id]
     )
 
+    // #11: registra o último login do tenant (fire-and-forget).
+    if (userRole?.tenant_id) {
+      db.query('UPDATE tenants SET last_login_at = NOW(), last_seen_at = NOW() WHERE id = $1', [userRole.tenant_id])
+        .catch(() => { /* best-effort */ })
+    }
+
     const token = app.jwt.sign(
       { user_id: user.id, tenant_id: userRole?.tenant_id ?? null, role: userRole?.role ?? 'staff', tv: user.token_version ?? 0 },
       { expiresIn: '7d' }

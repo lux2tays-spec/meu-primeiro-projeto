@@ -3,7 +3,7 @@ import { useState, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { rootApi } from '@/lib/api'
 
-type Tab = 'brand' | 'appearance' | 'email' | 'ai' | 'plans'
+type Tab = 'brand' | 'appearance' | 'email' | 'ai' | 'plans' | 'legal'
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3000'
 
@@ -30,7 +30,7 @@ export default function SettingsPage() {
 
       {/* Tabs */}
       <div className="flex gap-1 bg-gray-100 rounded-xl p-1 w-fit">
-        {([['brand', '🏷️ Marca'], ['appearance', '🎨 Aparência'], ['email', '📧 E-mails'], ['plans', '📦 Planos']] as [Tab, string][]).map(([key, label]) => (
+        {([['brand', '🏷️ Marca'], ['appearance', '🎨 Aparência'], ['email', '📧 E-mails'], ['plans', '📦 Planos'], ['legal', '📄 Legal']] as [Tab, string][]).map(([key, label]) => (
           <button key={key} onClick={() => setTab(key)}
             className={`px-5 py-2 rounded-lg text-sm font-medium transition-colors ${tab === key ? 'bg-white shadow-sm text-gray-900' : 'text-gray-500 hover:text-gray-700'}`}>
             {label}
@@ -42,6 +42,7 @@ export default function SettingsPage() {
       {tab === 'appearance' && <AppearanceTab />}
       {tab === 'email' && <EmailTab />}
       {tab === 'plans' && <PlansTab />}
+      {tab === 'legal' && <LegalTab />}
     </div>
   )
 }
@@ -626,6 +627,62 @@ function SF({ label, value, onChange, placeholder, type = 'text' }: any) {
       <label className="block text-sm font-medium text-gray-700 mb-1">{label}</label>
       <input type={type} value={value ?? ''} onChange={(e) => onChange(e.target.value)} placeholder={placeholder}
         className="w-full h-10 px-3 rounded-xl border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary" />
+    </div>
+  )
+}
+
+// #9: Política de Privacidade e Termos de Uso — o texto colado aqui passa a ser
+// exibido nas páginas públicas /privacidade e /termos (fallback ao estático).
+function LegalTab() {
+  const qc = useQueryClient()
+  const [success, setSuccess] = useState('')
+  const showSuccess = (msg: string) => { setSuccess(msg); setTimeout(() => setSuccess(''), 3000) }
+  const { data: settings } = useQuery({ queryKey: ['root-settings'], queryFn: rootApi.settings })
+  const [privacy, setPrivacy] = useState<string | null>(null)
+  const [terms, setTerms] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (settings) {
+      if (privacy === null) setPrivacy(settings.legal_privacy?.text ?? '')
+      if (terms === null) setTerms(settings.legal_terms?.text ?? '')
+    }
+  }, [settings]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const save = useMutation({
+    mutationFn: async () => {
+      await rootApi.updateSettings('legal_privacy', { text: privacy ?? '' })
+      await rootApi.updateSettings('legal_terms', { text: terms ?? '' })
+    },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['root-settings'] }); showSuccess('Documentos legais salvos!') },
+  })
+
+  return (
+    <div className="max-w-3xl space-y-6">
+      {success && <div className="bg-green-50 text-green-700 rounded-xl px-4 py-3 text-sm">{success}</div>}
+      <p className="text-sm text-gray-500">
+        Cole abaixo o texto completo da Política de Privacidade e dos Termos de Uso. O que você salvar aqui
+        passa a ser exibido nas páginas públicas <strong>/privacidade</strong> e <strong>/termos</strong> (usadas
+        pelos links no app e na web). Se deixar em branco, é usado o texto padrão do sistema.
+      </p>
+
+      <div>
+        <label className="block text-sm font-medium text-gray-700 mb-1">Política de Privacidade</label>
+        <textarea value={privacy ?? ''} onChange={(e) => setPrivacy(e.target.value)} rows={12}
+          placeholder="Cole aqui o texto da Política de Privacidade..."
+          className="w-full px-3 py-2 rounded-xl border border-gray-200 text-sm font-mono leading-relaxed focus:outline-none focus:ring-2 focus:ring-primary" />
+      </div>
+
+      <div>
+        <label className="block text-sm font-medium text-gray-700 mb-1">Termos de Uso</label>
+        <textarea value={terms ?? ''} onChange={(e) => setTerms(e.target.value)} rows={12}
+          placeholder="Cole aqui o texto dos Termos de Uso..."
+          className="w-full px-3 py-2 rounded-xl border border-gray-200 text-sm font-mono leading-relaxed focus:outline-none focus:ring-2 focus:ring-primary" />
+      </div>
+
+      <button onClick={() => save.mutate()} disabled={save.isPending}
+        className="h-10 px-6 rounded-xl bg-primary hover:bg-primary-dark disabled:opacity-50 text-white text-sm font-semibold">
+        {save.isPending ? 'Salvando...' : 'Salvar documentos'}
+      </button>
     </div>
   )
 }

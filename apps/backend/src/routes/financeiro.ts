@@ -65,7 +65,11 @@ export const financeiroRoutes: FastifyPluginAsync = async (app) => {
            COALESCE(SUM(${NET_VALOR}) FILTER (WHERE a.status = 'completed'), 0) AS receita_total,
            COUNT(*) FILTER (WHERE a.status = 'pending' OR a.status = 'confirmed') AS agendamentos_abertos,
            COUNT(*) FILTER (WHERE a.status = 'cancelled') AS agendamentos_cancelados,
-           COUNT(*) AS total_agendamentos
+           COUNT(*) AS total_agendamentos,
+           -- #5: agendamentos feitos pelo bot (created_by IS NULL) e o valor —
+           -- "clientes que você poderia perder". Exclui cancelados e vendas avulsas.
+           COUNT(*) FILTER (WHERE a.created_by IS NULL AND a.source = 'appointment' AND a.status <> 'cancelled') AS agendamentos_bot,
+           COALESCE(SUM(COALESCE(a.price_snapshot, s.price)) FILTER (WHERE a.created_by IS NULL AND a.source = 'appointment' AND a.status <> 'cancelled'), 0) AS receita_bot
          FROM appointments a
          JOIN services s ON s.id = a.service_id
          ${FEES_JOIN}
@@ -130,6 +134,9 @@ export const financeiroRoutes: FastifyPluginAsync = async (app) => {
       total_vendas: totalVendas,
       receita_total: receitaTotal,
       agendamentos_abertos: Number(totals.agendamentos_abertos),
+      // #5: agendamentos captados pelo bot no mês + valor.
+      agendamentos_bot: Number(totals.agendamentos_bot),
+      receita_bot: Number(totals.receita_bot),
       // SAL-8 — novos KPIs (campos aditivos; os existentes acima não mudam):
       ticket_medio: ticketMedio,
       agendamentos_cancelados: cancelados,

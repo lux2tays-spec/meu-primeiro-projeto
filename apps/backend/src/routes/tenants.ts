@@ -56,11 +56,14 @@ const staffUpdateSchema = z.object({
   role: z.enum(['owner', 'admin', 'staff']).optional(),
 }).refine((d) => Object.values(d).some((v) => v !== undefined), { message: 'Nenhum campo para atualizar' })
 
+const birthDateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).or(z.literal('')).nullable().optional()
+
 const customerCreateSchema = z.object({
   name: z.string().min(1).max(120),
   last_name: z.string().max(120).optional().nullable(),
   phone: z.string().min(8).max(30),
   email: z.string().email().or(z.literal('')).nullable().optional(),
+  birth_date: birthDateSchema,
 })
 
 // Update: only keys present in the body are applied; empty string CLEARS the
@@ -72,6 +75,7 @@ const customerUpdateSchema = z.object({
   last_name: z.string().max(120).nullable().optional(),
   email: z.string().email().or(z.literal('')).nullable().optional(),
   phone: z.string().min(8).max(30).optional(),
+  birth_date: birthDateSchema,
 })
 
 // SAL-7: normaliza telefone para o padrão armazenado (só dígitos, como o bot
@@ -780,7 +784,7 @@ export const tenantRoutes: FastifyPluginAsync = async (app) => {
     const { tenant_id } = request.user
 
     const { rows: [customer] } = await db.query(
-      `SELECT id, name, last_name, phone, email, created_at FROM customers WHERE id = $1 AND tenant_id = $2 AND deleted_at IS NULL`,
+      `SELECT id, name, last_name, phone, email, birth_date, created_at FROM customers WHERE id = $1 AND tenant_id = $2 AND deleted_at IS NULL`,
       [request.params.id, tenant_id]
     )
     if (!customer) return reply.status(404).send({ error: 'Cliente não encontrado' })
@@ -857,6 +861,7 @@ export const tenantRoutes: FastifyPluginAsync = async (app) => {
     if (body.last_name !== undefined)     { sets.push(`last_name = $${i++}`); values.push(body.last_name || null) }
     if (body.email !== undefined)         { sets.push(`email = $${i++}`);     values.push(body.email || null) }
     if (normalizedPhone !== undefined)    { sets.push(`phone = $${i++}`);     values.push(normalizedPhone) }
+    if (body.birth_date !== undefined)    { sets.push(`birth_date = $${i++}`); values.push(body.birth_date || null) }
     if (sets.length === 0) return reply.status(400).send({ error: 'Nenhum campo para atualizar' })
 
     values.push(request.params.id, tenant_id)
@@ -977,10 +982,10 @@ export const tenantRoutes: FastifyPluginAsync = async (app) => {
 
     try {
       const { rows: [customer] } = await db.query(
-        `INSERT INTO customers (tenant_id, name, last_name, phone, email)
-         VALUES ($1, $2, $3, $4, $5)
-         RETURNING id, name, last_name, phone, email, created_at`,
-        [tenant_id, body.name.trim(), body.last_name?.trim() || null, body.phone.trim(), body.email || null]
+        `INSERT INTO customers (tenant_id, name, last_name, phone, email, birth_date)
+         VALUES ($1, $2, $3, $4, $5, $6)
+         RETURNING id, name, last_name, phone, email, birth_date, created_at`,
+        [tenant_id, body.name.trim(), body.last_name?.trim() || null, body.phone.trim(), body.email || null, body.birth_date || null]
       )
       return reply.status(201).send(customer)
     } catch (err: any) {

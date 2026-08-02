@@ -9,6 +9,20 @@ const planVariant: Record<string, any> = { free: 'default', basico: 'info', prem
 const planLabel: Record<string, string> = { free: 'Free', basico: 'Básico', premium: 'Premium', profissional: 'Profissional' }
 const statusVariant: Record<string, any> = { active: 'success', trial: 'warning', suspended: 'danger', cancelled: 'danger' }
 const statusLabel: Record<string, string> = { active: 'Ativo', trial: 'Trial', suspended: 'Suspenso', cancelled: 'Cancelado' }
+
+// #11: "último uso" em texto relativo curto (nunca / há Xh / há N dias / data).
+function fmtLastSeen(ts?: string | null): string {
+  if (!ts) return 'Nunca'
+  const then = new Date(ts).getTime()
+  const diffMin = Math.floor((Date.now() - then) / 60000)
+  if (diffMin < 1) return 'Agora'
+  if (diffMin < 60) return `há ${diffMin} min`
+  const diffH = Math.floor(diffMin / 60)
+  if (diffH < 24) return `há ${diffH}h`
+  const diffD = Math.floor(diffH / 24)
+  if (diffD < 30) return `há ${diffD} ${diffD === 1 ? 'dia' : 'dias'}`
+  return new Date(ts).toLocaleDateString('pt-BR')
+}
 const whatsappVariant: Record<string, any> = { connected: 'success', qr_pending: 'warning', disconnected: 'default' }
 const whatsappLabel: Record<string, string> = { connected: 'WhatsApp ✓', qr_pending: 'Aguardando QR', disconnected: 'Desconectado' }
 
@@ -78,14 +92,15 @@ export default function TenantsPage() {
               <th className="text-left px-4 py-3 font-medium text-gray-500">WhatsApp</th>
               <th className="text-left px-4 py-3 font-medium text-gray-500">Usuários</th>
               <th className="text-left px-4 py-3 font-medium text-gray-500">Cadastro</th>
+              <th className="text-left px-4 py-3 font-medium text-gray-500">Último uso</th>
               <th className="px-4 py-3" />
             </tr>
           </thead>
           <tbody>
             {isLoading ? (
-              <tr><td colSpan={9} className="text-center py-12 text-gray-400">Carregando...</td></tr>
+              <tr><td colSpan={10} className="text-center py-12 text-gray-400">Carregando...</td></tr>
             ) : tenants.length === 0 ? (
-              <tr><td colSpan={9} className="text-center py-12 text-gray-400">Nenhum tenant encontrado</td></tr>
+              <tr><td colSpan={10} className="text-center py-12 text-gray-400">Nenhum tenant encontrado</td></tr>
             ) : tenants.map((t: any) => (
               <tr key={t.id} className="border-b border-gray-50 last:border-0 hover:bg-gray-50 transition-colors">
                 <td className="px-6 py-4">
@@ -121,6 +136,9 @@ export default function TenantsPage() {
                 <td className="px-4 py-4 text-gray-700">{t.user_count}</td>
                 <td className="px-4 py-4 text-gray-400 text-xs">
                   {new Date(t.created_at).toLocaleDateString('pt-BR')}
+                </td>
+                <td className="px-4 py-4 text-xs" title={t.last_seen_at ? new Date(t.last_seen_at).toLocaleString('pt-BR') : (t.last_login_at ? `Último login: ${new Date(t.last_login_at).toLocaleString('pt-BR')}` : 'Nunca usou')}>
+                  {fmtLastSeen(t.last_seen_at ?? t.last_login_at)}
                 </td>
                 <td className="px-4 py-4">
                   <Link

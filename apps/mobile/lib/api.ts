@@ -162,9 +162,9 @@ export const tenantApi = {
   customers: (search?: string) =>
     api.get<any[]>(`/tenant/customers${search ? `?search=${encodeURIComponent(search)}` : ''}`),
   customer: (id: string) => api.get<any>(`/tenant/customers/${id}`),
-  addCustomer: (data: { name: string; last_name?: string; phone: string; email?: string }) =>
+  addCustomer: (data: { name: string; last_name?: string; phone: string; email?: string; birth_date?: string }) =>
     api.post<any>('/tenant/customers', data),
-  updateCustomer: (id: string, data: { name?: string; last_name?: string; email?: string; phone?: string }) =>
+  updateCustomer: (id: string, data: { name?: string; last_name?: string; email?: string; phone?: string; birth_date?: string }) =>
     api.put<any>(`/tenant/customers/${id}`, data),
   onboarding: () =>
     api.get<{
@@ -347,9 +347,9 @@ export const customersApi = {
   list: (search?: string) =>
     api.get<any[]>(`/tenant/customers${search ? `?search=${encodeURIComponent(search)}` : ''}`),
   get: (id: string) => api.get<any>(`/tenant/customers/${id}`),
-  create: (data: { name: string; last_name?: string; phone: string; email?: string }) =>
+  create: (data: { name: string; last_name?: string; phone: string; email?: string; birth_date?: string }) =>
     api.post<any>('/tenant/customers', data),
-  update: (id: string, data: { name?: string; last_name?: string; email?: string; phone?: string }) =>
+  update: (id: string, data: { name?: string; last_name?: string; email?: string; phone?: string; birth_date?: string }) =>
     api.put<any>(`/tenant/customers/${id}`, data),
   remove: (id: string) => api.delete<any>(`/tenant/customers/${id}`),
 }
