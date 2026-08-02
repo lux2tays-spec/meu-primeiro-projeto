@@ -21,6 +21,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { tenantApi, customersApi, customerFullName } from '@/lib/api'
 import { colors, font, spacing, radius } from '@/lib/theme'
 import { useAuthStore } from '@/lib/store'
+import { useToast } from '@/lib/toast'
 import { Card } from '@/components/ui/Card'
 
 // Aniversário (opcional): máscara DD/MM/AAAA <-> ISO YYYY-MM-DD.
@@ -239,12 +240,22 @@ function AddCustomerModal({
         birth_date: birthToISO(birth),
       }),
     onSuccess: () => {
+      useToast.getState().show('Cliente cadastrado!', 'success')
       onCreated()
     },
     onError: (err: any) => {
       Alert.alert('Não foi possível salvar', err?.message ?? 'Tente novamente.')
     },
   })
+
+  // Valida o aniversário (se preenchido) antes de enviar.
+  function submitCustomer() {
+    if (birth.trim() && !birthToISO(birth)) {
+      Alert.alert('Data de aniversário inválida', 'Use o formato DD/MM/AAAA com o ano completo (4 dígitos). Ex.: 05/03/1990.')
+      return
+    }
+    mutation.mutate()
+  }
 
   const canSubmit = name.trim().length > 0 && phone.trim().length >= 8 && !mutation.isPending
 
@@ -313,7 +324,7 @@ function AddCustomerModal({
           <TouchableOpacity
             style={[styles.primaryBtn, !canSubmit && styles.primaryBtnDisabled]}
             disabled={!canSubmit}
-            onPress={() => mutation.mutate()}
+            onPress={submitCustomer}
           >
             {mutation.isPending ? (
               <ActivityIndicator color="#fff" />
@@ -365,17 +376,28 @@ function CustomerDetailModal({
         last_name: editLastName.trim() || undefined,
         phone: editPhone.replace(/\D/g, '') || undefined,
         email: editEmail.trim() || undefined,
-        birth_date: editBirth.trim() ? birthToISO(editBirth) : '',
+        birth_date: editBirth.trim() ? (birthToISO(editBirth) as string) : '',
       }),
     onSuccess: () => {
       setEditing(false)
       queryClient.invalidateQueries({ queryKey: ['customers'] })
       queryClient.invalidateQueries({ queryKey: ['customer', customerId] })
+      useToast.getState().show('Cliente atualizado!', 'success')
     },
     onError: (err: any) => {
       Alert.alert('Não foi possível salvar', err?.message ?? 'Tente novamente.')
     },
   })
+
+  // Valida antes de salvar: aniversário preenchido precisa estar completo
+  // (DD/MM/AAAA com ano de 4 dígitos), senão é descartado em silêncio.
+  function saveEdit() {
+    if (editBirth.trim() && !birthToISO(editBirth)) {
+      Alert.alert('Data de aniversário inválida', 'Use o formato DD/MM/AAAA com o ano completo (4 dígitos). Ex.: 05/03/1990.')
+      return
+    }
+    updateMutation.mutate()
+  }
 
   const deleteMutation = useMutation({
     mutationFn: () => customersApi.remove(customerId!),
@@ -488,7 +510,7 @@ function CustomerDetailModal({
                 disabled={!editName.trim() || !editPhoneOk || updateMutation.isPending}
                 accessibilityRole="button"
                 accessibilityLabel="Salvar alterações do cliente"
-                onPress={() => updateMutation.mutate()}>
+                onPress={saveEdit}>
                 <Text style={styles.primaryBtnText}>{updateMutation.isPending ? 'Salvando...' : 'Salvar'}</Text>
               </TouchableOpacity>
               <TouchableOpacity style={[styles.secondaryBtn, { marginTop: spacing.sm }]} onPress={() => setEditing(false)}>
