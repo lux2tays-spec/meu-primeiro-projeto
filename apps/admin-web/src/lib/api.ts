@@ -171,6 +171,7 @@ export const rootApi = {
 
   // Plans
   plans: () => api.get<any[]>('/root/plans'),
+  plansCapabilities: () => api.get<Array<{ key: string; label: string; type: 'bool' | 'number'; group: 'limit' | 'feature'; column: string | null }>>('/root/plans-capabilities'),
   createPlan: (data: any) => api.post<any>('/root/plans', data),
   updatePlan: (id: string, data: any) => api.patch<any>(`/root/plans/${id}`, data),
   deletePlan: (id: string) => api.delete(`/root/plans/${id}`),

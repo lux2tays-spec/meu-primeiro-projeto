@@ -496,6 +496,9 @@ function PlansTab() {
         </button>
       </div>
 
+      {/* #10 — Matriz de recursos por plano */}
+      <CapabilitiesMatrix />
+
       {isLoading ? <div className="text-gray-400 text-sm">Carregando...</div> : (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {plans?.map((p: any) => (
@@ -684,5 +687,113 @@ function LegalTab() {
         {save.isPending ? 'Salvando...' : 'Salvar documentos'}
       </button>
     </div>
+  )
+}
+
+// #10 — Matriz de recursos por plano: linhas = recursos/limites, colunas = planos.
+function CapabilitiesMatrix() {
+  const qc = useQueryClient()
+  const [success, setSuccess] = useState('')
+  const showSuccess = (msg: string) => { setSuccess(msg); setTimeout(() => setSuccess(''), 3000) }
+  const { data: plans } = useQuery({ queryKey: ['root-plans'], queryFn: rootApi.plans })
+  const { data: catalog } = useQuery({ queryKey: ['root-plans-caps'], queryFn: rootApi.plansCapabilities })
+
+  // Estado editável: matrix[planId][key] = boolean | number
+  const [matrix, setMatrix] = useState<Record<string, Record<string, any>>>({})
+
+  useEffect(() => {
+    if (!plans || !catalog) return
+    const next: Record<string, Record<string, any>> = {}
+    for (const p of plans as any[]) {
+      next[p.id] = {}
+      for (const c of catalog) {
+        const resolved = p.resolved_capabilities ?? {}
+        next[p.id][c.key] = c.type === 'bool' ? !!resolved[c.key] : Number(resolved[c.key] ?? 0)
+      }
+    }
+    setMatrix(next)
+  }, [plans, catalog])
+
+  const setCell = (planId: string, key: string, val: any) =>
+    setMatrix((m) => ({ ...m, [planId]: { ...m[planId], [key]: val } }))
+
+  const save = useMutation({
+    mutationFn: async () => {
+      for (const p of (plans as any[]) ?? []) {
+        const caps: Record<string, any> = {}
+        const patch: any = { capabilities: caps }
+        for (const c of catalog ?? []) {
+          const v = matrix[p.id]?.[c.key]
+          if (c.column) patch[c.column] = v          // max_agendas, max_users, media_enabled
+          else caps[c.key] = v
+        }
+        await rootApi.updatePlan(p.id, patch)
+      }
+    },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['root-plans'] }); showSuccess('Matriz de recursos salva!') },
+  })
+
+  if (!plans || !catalog) return <div className="text-gray-400 text-sm">Carregando matriz…</div>
+
+  const limits = catalog.filter((c) => c.group === 'limit')
+  const features = catalog.filter((c) => c.group === 'feature')
+  const planList = plans as any[]
+
+  const Group = ({ title, items }: { title: string; items: typeof catalog }) => (
+    <>
+      <tr className="bg-gray-50">
+        <td className="px-3 py-2 text-xs font-bold text-gray-500 uppercase tracking-wide" colSpan={planList.length + 1}>{title}</td>
+      </tr>
+      {items.map((c) => (
+        <tr key={c.key} className="border-b border-gray-50">
+          <td className="px-3 py-2 text-sm text-gray-700 sticky left-0 bg-white">{c.label}</td>
+          {planList.map((p) => (
+            <td key={p.id} className="px-3 py-2 text-center">
+              {c.type === 'bool' ? (
+                <input type="checkbox" className="w-4 h-4 accent-primary"
+                  checked={!!matrix[p.id]?.[c.key]}
+                  onChange={(e) => setCell(p.id, c.key, e.target.checked)} />
+              ) : (
+                <input type="number" min={0} className="w-20 h-8 px-2 rounded-lg border border-gray-200 text-sm text-center"
+                  value={matrix[p.id]?.[c.key] ?? 0}
+                  onChange={(e) => setCell(p.id, c.key, Math.max(0, Math.floor(Number(e.target.value) || 0)))} />
+              )}
+            </td>
+          ))}
+        </tr>
+      ))}
+    </>
+  )
+
+  return (
+    <section className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5 space-y-4">
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="font-semibold text-gray-900">Matriz de recursos por plano</h2>
+          <p className="text-xs text-gray-500 mt-0.5">Marque o que cada plano inclui. Os bullets do plano (site/app) são gerados daqui. Limite de mensagens: 0 = ilimitado.</p>
+        </div>
+        <button onClick={() => save.mutate()} disabled={save.isPending}
+          className="h-10 px-5 bg-primary text-white rounded-xl text-sm font-semibold hover:bg-primary-dark disabled:opacity-50">
+          {save.isPending ? 'Salvando…' : 'Salvar matriz'}
+        </button>
+      </div>
+      {success && <div className="bg-green-50 text-green-700 rounded-xl px-4 py-2 text-sm">{success}</div>}
+      <div className="overflow-x-auto">
+        <table className="min-w-full text-sm">
+          <thead>
+            <tr className="border-b border-gray-200">
+              <th className="px-3 py-2 text-left font-medium text-gray-500 sticky left-0 bg-white">Recurso / limite</th>
+              {planList.map((p) => (
+                <th key={p.id} className="px-3 py-2 text-center font-semibold text-gray-900 whitespace-nowrap">{p.name}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            <Group title="Limites" items={limits} />
+            <Group title="Recursos" items={features} />
+          </tbody>
+        </table>
+      </div>
+    </section>
   )
 }

@@ -3,6 +3,7 @@ import { db } from '../lib/db'
 import { getPaymentConfig } from '../lib/paymentConfig'
 import { createPreapproval, cancelPreapproval } from '../services/mercadopago'
 import { applyPreapproval } from '../lib/subscriptionState'
+import { bulletsFromCapabilities, resolveCapabilities } from '../lib/planCapabilities'
 
 // Tenant-facing subscription endpoints. Only `authenticate` (NOT planGuard) —
 // an expired-trial tenant must be able to reach checkout to reactivate.
@@ -53,12 +54,15 @@ export const subscriptionRoutes: FastifyPluginAsync = async (app) => {
   // anual e o preço anual já calculado (mensal×12×(1−desc/100)) por conveniência.
   app.get('/plans', async (_request, reply) => {
     const { rows } = await db.query(
-      `SELECT slug, name, description, price_cents, annual_discount_pct, max_agendas, max_users, trial_days, features
+      `SELECT slug, name, description, price_cents, annual_discount_pct, max_agendas, max_users, media_enabled, trial_days, features, capabilities
        FROM platform_plans WHERE is_active = TRUE ORDER BY sort_order, price_cents`
     )
     const plans = rows.map((p: any) => ({
       ...p,
       annual_price_cents: Math.round(p.price_cents * 12 * (1 - (p.annual_discount_pct || 0) / 100)),
+      // Bullets gerados da matriz de recursos (#10).
+      features: bulletsFromCapabilities(p),
+      capabilities: resolveCapabilities(p),
     }))
     return reply.send(plans)
   })
