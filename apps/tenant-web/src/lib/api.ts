@@ -515,8 +515,9 @@ export const notificationsApi = {
 export const subscriptionApi = {
   plans: () => api.get<any[]>('/subscription/plans'),
   paymentInfo: () => api.get<{ available: boolean; public_key: string | null }>('/subscription/payment-info'),
-  checkout: (plan: string, cardTokenId?: string) =>
-    api.post<{ status?: string; init_point?: string }>('/subscription/checkout', { plan, card_token_id: cardTokenId }),
+  checkout: (plan: string, cardTokenId?: string, billingPeriod: 'monthly' | 'annual' = 'monthly') =>
+    api.post<{ status?: string; init_point?: string }>('/subscription/checkout', { plan, card_token_id: cardTokenId, billing_period: billingPeriod }),
   me: () => api.get<any>('/subscription/me'),
+  payments: () => api.get<Array<{ mp_payment_id: string; plan?: string; amount_cents: number; status?: string; paid_at?: string | null }>>('/subscription/payments'),
   cancel: () => api.post<{ ok: boolean }>('/subscription/cancel'),
 }

@@ -19,6 +19,21 @@ export const THEME_DEFAULTS = {
 export const ASSET_SLOTS = ['logo', 'logo_dark', 'logo_transparent', 'favicon', 'icon'] as const
 
 export const brandingRoutes: FastifyPluginAsync = async (app) => {
+  // Planos públicos (para a landing page /web) — sem dados sensíveis. Inclui o
+  // preço mensal, o desconto anual e o preço anual já calculado.
+  app.get('/public-plans', async (_request, reply) => {
+    const { rows } = await db.query(
+      `SELECT slug, name, description, price_cents, annual_discount_pct, max_agendas, max_users, trial_days, features
+       FROM platform_plans WHERE is_active = TRUE ORDER BY sort_order, price_cents`
+    )
+    const plans = rows.map((p: any) => ({
+      ...p,
+      annual_price_cents: Math.round(p.price_cents * 12 * (1 - (p.annual_discount_pct || 0) / 100)),
+    }))
+    reply.header('Cache-Control', 'public, max-age=60')
+    return reply.send(plans)
+  })
+
   // Aggregate branding (name, tagline, colors, asset URLs).
   app.get('/branding', async (_request, reply) => {
     const brand = await getBrandConfig()

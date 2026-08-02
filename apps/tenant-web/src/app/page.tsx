@@ -2,13 +2,14 @@ import Link from 'next/link'
 import type { Metadata } from 'next'
 import {
   MessageCircle, CalendarDays, Coins, CreditCard, Users, Bell,
-  Headset, BarChart3, Check, ArrowRight, Clock, TrendingUp, Sparkles, ShieldCheck,
+  Headset, BarChart3, ArrowRight, Clock, TrendingUp, Sparkles, ShieldCheck,
 } from 'lucide-react'
 import Logo, { LP_FONT } from '@/components/landing/Logo'
 import Reveal from '@/components/landing/Reveal'
 import PhoneChat, { type ChatMessage } from '@/components/landing/PhoneChat'
 import AgendaMock from '@/components/landing/AgendaMock'
 import SupportWhatsAppButton from '@/components/landing/SupportWhatsAppButton'
+import PricingPlans from '@/components/landing/PricingPlans'
 
 export const metadata: Metadata = {
   title: 'AíConfirma — Seu atendimento no WhatsApp no piloto automático',
@@ -68,13 +69,6 @@ const ROI = [
   { icon: TrendingUp, stat: 'Menos clientes perdidos', desc: 'Cada mensagem respondida na hora é um agendamento que não escapa pro concorrente.' },
   { icon: Clock,      stat: 'Horas de volta na semana', desc: 'Chega de vai-e-vem no WhatsApp pra marcar horário — a IA faz isso por você.' },
   { icon: Coins,      stat: 'Comissão sem erro',        desc: 'Cálculo automático por profissional. Fim da planilha e das dúvidas no fim do mês.' },
-]
-
-const PLANS = [
-  { name: 'Grátis', price: 'Teste', period: '5 dias', highlight: false, features: ['1 agenda', '1 usuário', 'Assistente de IA', 'Sem cartão para testar'] },
-  { name: 'Básico', price: 'R$ 89', period: '/mês', highlight: false, features: ['1 agenda', '1 usuário', 'Agenda + lembretes', 'Comissões'] },
-  { name: 'Premium', price: 'R$ 169', period: '/mês', highlight: true, features: ['3 agendas', '3 usuários', 'Tudo do Básico', 'Multi-profissional'] },
-  { name: 'Profissional', price: 'R$ 299', period: '/mês', highlight: false, features: ['10 agendas', '10 usuários', 'Tudo do Premium', 'Ideal para equipes'] },
 ]
 
 function Section({ id, className = '', children }: { id?: string; className?: string; children: React.ReactNode }) {
@@ -265,30 +259,10 @@ export default function Home() {
             <span className="dark:text-white">Planos que cabem no seu negócio</span>
           </h2>
           <p className="mx-auto mt-3 max-w-2xl text-center text-slate-600 dark:text-slate-300">
-            Comece grátis. Cresça quando quiser. <span className="whitespace-nowrap">Valores ilustrativos.</span>
+            Comece grátis. Cresça quando quiser. <span className="whitespace-nowrap">No plano anual você economiza.</span>
           </p>
         </Reveal>
-        <div className="mt-10 grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
-          {PLANS.map((p, i) => (
-            <Reveal key={p.name} delay={i * 70}>
-              <div className={`flex h-full flex-col rounded-2xl border p-6 ${p.highlight ? 'border-[#2CB86E] bg-white shadow-xl shadow-[#2CB86E]/10 dark:bg-white/10' : 'border-slate-100 bg-white dark:border-white/10 dark:bg-white/5'}`}>
-                {p.highlight && <span className="mb-2 inline-block w-fit rounded-full bg-[#2CB86E] px-2.5 py-0.5 text-[11px] font-bold text-white">Mais popular</span>}
-                <p className="font-bold text-slate-900 dark:text-white">{p.name}</p>
-                <p className="mt-1"><span className="text-3xl font-extrabold" style={{ color: NAVY }}><span className="dark:text-white">{p.price}</span></span> <span className="text-sm text-slate-500 dark:text-slate-400">{p.period}</span></p>
-                <ul className="mt-4 flex-1 space-y-2">
-                  {p.features.map((f) => (
-                    <li key={f} className="flex items-start gap-2 text-sm text-slate-600 dark:text-slate-300">
-                      <Check size={16} className="mt-0.5 shrink-0 text-[#2CB86E]" /> {f}
-                    </li>
-                  ))}
-                </ul>
-                <Link href="/register" className={`mt-6 rounded-xl px-4 py-2.5 text-center text-sm font-bold transition ${p.highlight ? 'bg-[#2CB86E] text-white hover:brightness-105' : 'border border-slate-200 text-slate-700 hover:bg-slate-50 dark:border-white/15 dark:text-white dark:hover:bg-white/5'}`}>
-                  Testar grátis
-                </Link>
-              </div>
-            </Reveal>
-          ))}
-        </div>
+        <PricingPlans />
       </Section>
 
       {/* ── CTA final ───────────────────────────────────────────────────────── */}

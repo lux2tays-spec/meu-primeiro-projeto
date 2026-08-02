@@ -440,14 +440,17 @@ export const subscriptionApi = {
       name: string
       description?: string | null
       price_cents: number
+      annual_discount_pct?: number
+      annual_price_cents?: number
       max_agendas: number
       max_users: number
     }>>('/subscription/plans'),
   paymentInfo: () =>
     api.get<{ available: boolean; public_key: string | null }>('/subscription/payment-info'),
-  checkout: (plan: string, cardTokenId: string) =>
-    api.post<{ status?: string }>('/subscription/checkout', { plan, card_token_id: cardTokenId }),
-  me: () => api.get<any>('/subscription/me'),
+  checkout: (plan: string, cardTokenId: string, billingPeriod: 'monthly' | 'annual' = 'monthly') =>
+    api.post<{ status?: string }>('/subscription/checkout', { plan, card_token_id: cardTokenId, billing_period: billingPeriod }),
+  me: () => api.get<{ plan: string; status: string; next_billing_date?: string | null; billing_period?: string } | null>('/subscription/me'),
+  payments: () => api.get<Array<{ mp_payment_id: string; plan?: string; amount_cents: number; status?: string; paid_at?: string | null }>>('/subscription/payments'),
   cancel: () => api.post<{ ok: boolean }>('/subscription/cancel', {}),
 }
 

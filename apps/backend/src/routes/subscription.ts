@@ -49,11 +49,28 @@ function mapCardDecline(reason: string | undefined | null): string | null {
 export const subscriptionRoutes: FastifyPluginAsync = async (app) => {
   app.addHook('preHandler', (app as any).authenticate)
 
-  // Active plans (from platform_plans, managed by Root Admin)
+  // Active plans (from platform_plans, managed by Root Admin). Inclui o desconto
+  // anual e o preço anual já calculado (mensal×12×(1−desc/100)) por conveniência.
   app.get('/plans', async (_request, reply) => {
     const { rows } = await db.query(
-      `SELECT slug, name, description, price_cents, max_agendas, max_users, trial_days, features
+      `SELECT slug, name, description, price_cents, annual_discount_pct, max_agendas, max_users, trial_days, features
        FROM platform_plans WHERE is_active = TRUE ORDER BY sort_order, price_cents`
+    )
+    const plans = rows.map((p: any) => ({
+      ...p,
+      annual_price_cents: Math.round(p.price_cents * 12 * (1 - (p.annual_discount_pct || 0) / 100)),
+    }))
+    return reply.send(plans)
+  })
+
+  // Histórico de cobranças da assinatura (para o App e a Web).
+  app.get('/payments', async (request, reply) => {
+    const { tenant_id } = request.user
+    const { rows } = await db.query(
+      `SELECT mp_payment_id, plan, amount_cents, status, paid_at
+       FROM subscription_payments WHERE tenant_id = $1
+       ORDER BY paid_at DESC NULLS LAST, created_at DESC LIMIT 24`,
+      [tenant_id]
     )
     return reply.send(rows)
   })
@@ -78,15 +95,21 @@ export const subscriptionRoutes: FastifyPluginAsync = async (app) => {
   //  - Without it (fallback): returns { init_point } for the hosted MP page.
   app.post('/checkout', async (request, reply) => {
     const { tenant_id, user_id } = request.user
-    const { plan, card_token_id } = request.body as { plan?: string; card_token_id?: string }
+    const { plan, card_token_id, billing_period } = request.body as { plan?: string; card_token_id?: string; billing_period?: string }
     if (!plan) return reply.status(400).send({ error: 'Plano não informado' })
+    const period: 'monthly' | 'annual' = billing_period === 'annual' ? 'annual' : 'monthly'
 
     const { rows: [planRow] } = await db.query(
-      'SELECT slug, name, price_cents FROM platform_plans WHERE slug = $1 AND is_active = TRUE',
+      'SELECT slug, name, price_cents, annual_discount_pct FROM platform_plans WHERE slug = $1 AND is_active = TRUE',
       [plan]
     )
     if (!planRow) return reply.status(404).send({ error: 'Plano não encontrado' })
     if (planRow.price_cents <= 0) return reply.status(400).send({ error: 'Este plano é gratuito e não requer pagamento' })
+
+    // Valor a cobrar por ciclo: mensal = price_cents; anual = 12×(1−desconto).
+    const chargeCents = period === 'annual'
+      ? Math.round(planRow.price_cents * 12 * (1 - (planRow.annual_discount_pct || 0) / 100))
+      : planRow.price_cents
 
     // Payment availability is a PLATFORM-side concern (the platform owner's
     // Mercado Pago config). The tenant can't fix it and must never see the
@@ -113,10 +136,11 @@ export const subscriptionRoutes: FastifyPluginAsync = async (app) => {
       tenantId: tenant_id!,
       plan: planRow.slug,
       planName: planRow.name,
-      priceBrl: planRow.price_cents / 100,
+      priceBrl: chargeCents / 100,
       payerEmail: user?.email ?? 'sem-email@aiconfirma.com.br',
       backUrl,
       cardTokenId: card_token_id,
+      billingPeriod: period,
     })
 
     if (!result.ok) {
@@ -150,6 +174,7 @@ export const subscriptionRoutes: FastifyPluginAsync = async (app) => {
         plan: planRow.slug,
         mpSubscriptionId: result.id,
         mpStatus: result.status,
+        billingPeriod: period,
       })
       return reply.send({ status: 'authorized' })
     }
@@ -194,7 +219,7 @@ export const subscriptionRoutes: FastifyPluginAsync = async (app) => {
   app.get('/me', async (request, reply) => {
     const { tenant_id } = request.user
     const { rows: [sub] } = await db.query(
-      `SELECT plan, status, mp_subscription_id, next_billing_date FROM subscriptions WHERE tenant_id = $1`,
+      `SELECT plan, status, mp_subscription_id, next_billing_date, billing_period FROM subscriptions WHERE tenant_id = $1`,
       [tenant_id]
     )
     return reply.send(sub ?? null)

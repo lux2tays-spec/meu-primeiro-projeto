@@ -19,22 +19,25 @@ export async function createPreapproval(cfg: PaymentConfig, params: {
   tenantId: string
   plan: string
   planName: string
-  priceBrl: number  // in reais (e.g. 49.00)
+  priceBrl: number  // in reais — já é o valor a cobrar POR CICLO (mensal ou anual)
   payerEmail: string
   backUrl: string
   cardTokenId?: string
+  billingPeriod?: 'monthly' | 'annual'
 }): Promise<PreapprovalResult> {
   if (!cfg.mp_access_token) return { ok: false, reason: 'payment_not_configured' }
 
   const transparent = !!params.cardTokenId
+  const annual = params.billingPeriod === 'annual'
 
   const body: Record<string, unknown> = {
-    reason: `AiConfirma — Plano ${params.planName}`,
+    reason: `AiConfirma — Plano ${params.planName}${annual ? ' (anual)' : ''}`,
     external_reference: `${params.tenantId}:${params.plan}`,
     payer_email: params.payerEmail,
     back_url: params.backUrl,
     auto_recurring: {
-      frequency: 1,
+      // Anual = cobra 1x a cada 12 meses; mensal = 1x por mês.
+      frequency: annual ? 12 : 1,
       frequency_type: 'months',
       transaction_amount: Number(params.priceBrl.toFixed(2)),
       currency_id: 'BRL',

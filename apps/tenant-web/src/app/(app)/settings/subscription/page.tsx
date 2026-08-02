@@ -21,7 +21,8 @@ declare global {
 const MP_SDK_URL = 'https://sdk.mercadopago.com/js/v2'
 const GENERIC_ERROR = 'Não foi possível processar o cartão. Verifique os dados e tente novamente.'
 
-const fmtPrice = (cents: number) => cents <= 0 ? 'Grátis' : `R$ ${(cents / 100).toFixed(0)}/mês`
+const brl = (cents: number) => (cents / 100).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
+const fmtPrice = (cents: number) => cents <= 0 ? 'Grátis' : `${brl(cents)}/mês`
 
 /** Loads the Mercado Pago SDK once and resolves when window.MercadoPago is available. */
 let mpSdkPromise: Promise<void> | null = null
@@ -47,7 +48,8 @@ function loadMercadoPagoSdk(): Promise<void> {
 }
 
 // PAY-6: `notice` explica a mudança de cobrança em upgrade/downgrade.
-type Plan = { slug: string; name: string; price_cents: number; notice?: string }
+// amount_cents = valor a cobrar no ciclo escolhido (mensal ou anual).
+type Plan = { slug: string; name: string; price_cents: number; amount_cents: number; billing_period: 'monthly' | 'annual'; notice?: string }
 
 function CheckoutModal({ plan, onClose, onSuccess }: { plan: Plan; onClose: () => void; onSuccess: () => void }) {
   const [loading, setLoading] = useState(true)
@@ -83,14 +85,14 @@ function CheckoutModal({ plan, onClose, onSuccess }: { plan: Plan; onClose: () =
         const mp = new window.MercadoPago(info.public_key, { locale: 'pt-BR' })
         const bricks = mp.bricks()
         const controller = await bricks.create('cardPayment', 'mp-card-container', {
-          initialization: { amount: plan.price_cents / 100 },
+          initialization: { amount: plan.amount_cents / 100 },
           customization: { paymentMethods: { maxInstallments: 1 } },
           callbacks: {
             onReady: () => { if (!cancelled) setLoading(false) },
             onSubmit: (formData: { token?: string }) => {
               setError('')
               return new Promise<void>((resolve, reject) => {
-                subscriptionApi.checkout(plan.slug, formData?.token)
+                subscriptionApi.checkout(plan.slug, formData?.token, plan.billing_period)
                   .then(() => { resolve(); onSuccess() })
                   .catch((e: unknown) => {
                     const msg = e instanceof Error && e.message ? e.message : ''
@@ -125,7 +127,7 @@ function CheckoutModal({ plan, onClose, onSuccess }: { plan: Plan; onClose: () =
       try { brickRef.current?.unmount?.() } catch { /* already gone */ }
       brickRef.current = null
     }
-  }, [plan.slug, plan.price_cents, onSuccess])
+  }, [plan.slug, plan.amount_cents, onSuccess])
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
@@ -138,8 +140,8 @@ function CheckoutModal({ plan, onClose, onSuccess }: { plan: Plan; onClose: () =
         </div>
 
         <div className="flex items-center justify-between bg-gray-50 rounded-xl px-4 py-3">
-          <span className="font-semibold text-gray-900">{plan.name}</span>
-          <span className="text-primary font-bold">{fmtPrice(plan.price_cents)}</span>
+          <span className="font-semibold text-gray-900">{plan.name} {plan.billing_period === 'annual' ? '(anual)' : '(mensal)'}</span>
+          <span className="text-primary font-bold">{brl(plan.amount_cents)}{plan.billing_period === 'annual' ? '/ano' : '/mês'}</span>
         </div>
 
         {/* PAY-6: aviso sobre a mudança de cobrança (upgrade/downgrade) */}
@@ -217,9 +219,13 @@ export default function SubscriptionPage() {
   const [cancelling, setCancelling] = useState(false)
   const [cancelError, setCancelError] = useState('')
   const [cancelled, setCancelled] = useState(false)
+  const [period, setPeriod] = useState<'monthly' | 'annual'>('monthly')
   const queryClient = useQueryClient()
   const { data: tenant } = useQuery({ queryKey: ['tenant'], queryFn: tenantApi.me })
   const { data: plans } = useQuery({ queryKey: ['sub-plans'], queryFn: subscriptionApi.plans })
+  const { data: sub } = useQuery({ queryKey: ['sub-me'], queryFn: subscriptionApi.me })
+  const { data: payments = [] } = useQuery({ queryKey: ['sub-payments'], queryFn: subscriptionApi.payments })
+  const anyAnnualDiscount = (plans ?? []).some((p: any) => (p.annual_discount_pct ?? 0) > 0)
 
   const trialExpired = tenant?.status === 'trial' && tenant?.trial_ends_at && new Date(tenant.trial_ends_at).getTime() < Date.now()
   const blocked = trialExpired || tenant?.status === 'suspended' || tenant?.status === 'cancelled'
@@ -230,6 +236,8 @@ export default function SubscriptionPage() {
     setSuccess(true)
     setCancelled(false)
     queryClient.invalidateQueries({ queryKey: ['tenant'] })
+    queryClient.invalidateQueries({ queryKey: ['sub-me'] })
+    queryClient.invalidateQueries({ queryKey: ['sub-payments'] })
   }, [queryClient])
 
   const handleCancelSubscription = useCallback(async () => {
@@ -241,6 +249,7 @@ export default function SubscriptionPage() {
       setCancelled(true)
       setSuccess(false)
       queryClient.invalidateQueries({ queryKey: ['tenant'] })
+      queryClient.invalidateQueries({ queryKey: ['sub-me'] })
     } catch (e: unknown) {
       const msg = e instanceof Error && e.message ? e.message : ''
       setCancelError(msg || 'Não foi possível cancelar agora. Tente novamente ou fale com o suporte.')
@@ -285,19 +294,36 @@ export default function SubscriptionPage() {
         </div>
       )}
 
+      {/* Toggle mensal / anual */}
+      <div className="inline-flex rounded-xl bg-gray-100 p-1">
+        <button
+          onClick={() => setPeriod('monthly')}
+          className={`px-4 h-9 text-sm font-semibold rounded-lg transition-colors ${period === 'monthly' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500'}`}>
+          Mensal
+        </button>
+        <button
+          onClick={() => setPeriod('annual')}
+          className={`px-4 h-9 text-sm font-semibold rounded-lg transition-colors ${period === 'annual' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500'}`}>
+          Anual{anyAnnualDiscount ? ' • economize' : ''}
+        </button>
+      </div>
+
       {/* UI-9: 1 coluna no mobile, subindo até 4 em telas grandes */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         {(plans ?? []).map((plan: any) => {
           const isCurrent = tenant?.plan === plan.slug
           const isFree = plan.price_cents <= 0
+          const discountPct = plan.annual_discount_pct ?? 0
+          const annualCents = plan.annual_price_cents ?? Math.round(plan.price_cents * 12)
+          const cycleCents = period === 'annual' ? annualCents : plan.price_cents
           // PAY-6: upgrade x downgrade em relação ao plano pago ativo
           const currentPrice = Number((plans ?? []).find((p: any) => p.slug === tenant?.plan)?.price_cents ?? 0)
           const isUpgrade = hasActivePaid && plan.price_cents > currentPrice
           const isDowngrade = hasActivePaid && plan.price_cents < currentPrice && !isFree
           const changeNotice = isUpgrade
-            ? 'Você está fazendo um upgrade: a nova mensalidade (maior) substitui a atual e passa a valer imediatamente.'
+            ? 'Você está fazendo um upgrade: a nova cobrança (maior) substitui a atual e passa a valer imediatamente.'
             : isDowngrade
-              ? 'Você está fazendo um downgrade: a mensalidade menor e os novos limites do plano passam a valer imediatamente.'
+              ? 'Você está fazendo um downgrade: a cobrança menor e os novos limites do plano passam a valer imediatamente.'
               : undefined
           const features: string[] = Array.isArray(plan.features) && plan.features.length
             ? plan.features
@@ -307,14 +333,19 @@ export default function SubscriptionPage() {
               {isCurrent && <span className="text-xs font-semibold text-primary mb-2">✓ Plano atual</span>}
               {!isCurrent && <span className="mb-5" />}
               <p className="font-bold text-gray-900">{plan.name}</p>
-              <p className="text-primary font-bold text-lg mt-1">{fmtPrice(plan.price_cents)}</p>
+              <p className="text-primary font-bold text-lg mt-1">
+                {isFree ? 'Grátis' : `${brl(cycleCents)}${period === 'annual' ? '/ano' : '/mês'}`}
+              </p>
+              {!isFree && period === 'annual' && discountPct > 0 && (
+                <p className="text-green-600 text-xs font-semibold mt-0.5">de {brl(plan.price_cents * 12)} — economize {discountPct}%</p>
+              )}
               <div className="mt-3 space-y-1 flex-1">
                 {features.map((f, i) => <p key={i} className="text-gray-500 text-xs">✓ {f}</p>)}
               </div>
               {!isCurrent && !isFree && (
                 <>
                   <button
-                    onClick={() => { setSuccess(false); setCheckoutPlan({ slug: plan.slug, name: plan.name, price_cents: plan.price_cents, notice: changeNotice }) }}
+                    onClick={() => { setSuccess(false); setCheckoutPlan({ slug: plan.slug, name: plan.name, price_cents: plan.price_cents, amount_cents: cycleCents, billing_period: period, notice: changeNotice }) }}
                     className={`mt-4 w-full h-9 text-sm font-semibold rounded-xl transition-colors ${
                       isDowngrade
                         ? 'border border-primary text-primary hover:bg-primary/5'
@@ -342,6 +373,8 @@ export default function SubscriptionPage() {
             { label: 'Status', value: tenant?.status ?? '—' },
             { label: 'Máx. agendas', value: tenant?.max_agendas ?? '—' },
             { label: 'Máx. usuários', value: tenant?.max_users ?? '—' },
+            ...(sub?.billing_period ? [{ label: 'Cobrança', value: sub.billing_period === 'annual' ? 'Anual' : 'Mensal' }] : []),
+            ...(hasActivePaid && sub?.next_billing_date ? [{ label: sub.status === 'cancelled' ? 'Acesso até' : 'Renova em', value: new Date(sub.next_billing_date).toLocaleDateString('pt-BR') }] : []),
             ...(tenant?.trial_ends_at ? [{ label: 'Teste até', value: new Date(tenant.trial_ends_at).toLocaleDateString('pt-BR') }] : []),
           ].map((row) => (
             <div key={row.label} className="flex gap-2">
@@ -359,6 +392,24 @@ export default function SubscriptionPage() {
             className="text-red-500 hover:text-red-700 text-sm font-medium transition-colors">
             Cancelar assinatura
           </button>
+        </div>
+      )}
+
+      {/* Histórico de cobranças */}
+      {payments.length > 0 && (
+        <div className="bg-white rounded-2xl p-5 border border-gray-100 shadow-sm">
+          <p className="font-semibold text-gray-900 mb-3">Histórico de cobranças</p>
+          <div className="divide-y divide-gray-50">
+            {payments.map((pmt) => (
+              <div key={pmt.mp_payment_id} className="flex items-center justify-between gap-3 py-2 text-sm">
+                <span className="text-gray-900 font-medium">{brl(pmt.amount_cents)}</span>
+                <span className="text-gray-400 text-xs flex-1 text-center">{pmt.paid_at ? new Date(pmt.paid_at).toLocaleDateString('pt-BR') : '—'}</span>
+                <span className={`text-xs font-semibold ${pmt.status === 'approved' ? 'text-green-600' : pmt.status === 'rejected' ? 'text-red-500' : 'text-yellow-600'}`}>
+                  {pmt.status === 'approved' ? 'Pago' : pmt.status === 'rejected' ? 'Recusado' : pmt.status === 'refunded' ? 'Estornado' : (pmt.status ?? '—')}
+                </span>
+              </div>
+            ))}
+          </div>
         </div>
       )}
 

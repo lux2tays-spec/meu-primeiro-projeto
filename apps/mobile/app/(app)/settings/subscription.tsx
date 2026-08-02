@@ -17,12 +17,15 @@ import { colors, font, spacing, radius } from '@/lib/theme'
 // PAY-7: os planos vêm SEMPRE do backend (/subscription/plans). Este fallback
 // só é usado se a query falhar (offline etc.), para a tela não ficar vazia.
 const FALLBACK_PLANS: PlanItem[] = [
-  { id: 'basico',       label: 'Básico',       price: 'R$ 89,00/mês',  priceCents: 8900,  agendas: 1,  users: 1 },
-  { id: 'premium',      label: 'Premium',      price: 'R$ 169,00/mês', priceCents: 16900, agendas: 3,  users: 3 },
-  { id: 'profissional', label: 'Profissional', price: 'R$ 299,00/mês', priceCents: 29900, agendas: 10, users: 10 },
+  { id: 'basico',       label: 'Básico',       price: 'R$ 89,00/mês',  priceCents: 8900,  annualCents: 106800, discountPct: 0, agendas: 1,  users: 1 },
+  { id: 'premium',      label: 'Premium',      price: 'R$ 169,00/mês', priceCents: 16900, annualCents: 202800, discountPct: 0, agendas: 3,  users: 3 },
+  { id: 'profissional', label: 'Profissional', price: 'R$ 299,00/mês', priceCents: 29900, annualCents: 358800, discountPct: 0, agendas: 10, users: 10 },
 ]
 
-type PlanItem = { id: string; label: string; price: string; priceCents: number; agendas: number; users: number }
+type PlanItem = { id: string; label: string; price: string; priceCents: number; annualCents: number; discountPct: number; agendas: number; users: number }
+
+type Period = 'monthly' | 'annual'
+const brl = (cents: number) => (cents / 100).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
 
 // ---------- input masks / helpers (client-side only, nothing is logged) ----------
 
@@ -64,8 +67,13 @@ export default function SubscriptionScreen() {
     isError: plansError,
   } = useQuery({ queryKey: ['subscription-plans'], queryFn: subscriptionApi.plans })
 
+  const [period, setPeriod] = useState<Period>('monthly')
   const [modalVisible, setModalVisible] = useState(false)
   const [selectedPlan, setSelectedPlan] = useState<PlanItem | null>(null)
+
+  // Assinatura atual (renovação/período) e histórico de cobranças.
+  const { data: sub } = useQuery({ queryKey: ['subscription-me'], queryFn: subscriptionApi.me })
+  const { data: payments = [] } = useQuery({ queryKey: ['subscription-payments'], queryFn: subscriptionApi.payments })
   const [card, setCard] = useState(emptyCard)
   const [errors, setErrors] = useState<CardErrors>({})
   const [submitting, setSubmitting] = useState(false)
@@ -89,6 +97,8 @@ export default function SubscriptionScreen() {
           label: p.name,
           price: formatPrice(p.price_cents),
           priceCents: p.price_cents,
+          annualCents: p.annual_price_cents ?? Math.round(p.price_cents * 12),
+          discountPct: p.annual_discount_pct ?? 0,
           agendas: p.max_agendas,
           users: p.max_users,
         }))
@@ -97,6 +107,10 @@ export default function SubscriptionScreen() {
       : FALLBACK_PLANS
 
   const currentPlan = plans.find((p) => p.id === tenant?.plan)
+  // Preço do ciclo selecionado (mensal x anual) e rótulo.
+  const cycleCents = (p: PlanItem) => (period === 'annual' ? p.annualCents : p.priceCents)
+  const cycleLabel = (p: PlanItem) => `${brl(cycleCents(p))}${period === 'annual' ? '/ano' : '/mês'}`
+  const anyAnnualDiscount = plans.some((p) => p.discountPct > 0)
 
   // PAY-4: trial já expirado (data no passado) muda o aviso.
   const trialEndsAt = tenant?.trial_ends_at ? new Date(tenant.trial_ends_at) : null
@@ -171,12 +185,14 @@ export default function SubscriptionScreen() {
         cpf: onlyDigits(card.cpf),
       })
 
-      await subscriptionApi.checkout(selectedPlan.id, cardTokenId)
+      await subscriptionApi.checkout(selectedPlan.id, cardTokenId, period)
 
       setModalVisible(false)
       setCard(emptyCard)
       queryClient.invalidateQueries({ queryKey: ['tenant'] })
       queryClient.invalidateQueries({ queryKey: ['subscription-plans'] })
+      queryClient.invalidateQueries({ queryKey: ['subscription-me'] })
+      queryClient.invalidateQueries({ queryKey: ['subscription-payments'] })
       toast.show('Assinatura ativada!', 'success')
     } catch (e: any) {
       Alert.alert(
@@ -193,6 +209,7 @@ export default function SubscriptionScreen() {
     try {
       await subscriptionApi.cancel()
       queryClient.invalidateQueries({ queryKey: ['tenant'] })
+      queryClient.invalidateQueries({ queryKey: ['subscription-me'] })
       toast.show('Assinatura cancelada', 'success')
     } catch (e: any) {
       // e.message já é a mensagem amigável do backend — nunca o erro cru do MP.
@@ -231,7 +248,22 @@ export default function SubscriptionScreen() {
             />
           </View>
           <Text style={styles.planName}>{currentPlan?.label ?? (tenant?.plan === 'free' ? 'Gratuito (Trial)' : tenant?.plan)}</Text>
-          {currentPlan && <Text style={styles.planPrice}>{currentPlan.price}</Text>}
+          {currentPlan && (
+            <Text style={styles.planPrice}>
+              {sub?.billing_period === 'annual' ? `${brl(currentPlan.annualCents)}/ano` : currentPlan.price}
+            </Text>
+          )}
+          {/* Renovação */}
+          {tenant?.status === 'active' && sub?.next_billing_date && (
+            <View style={styles.trialInfo}>
+              <Ionicons name="refresh-outline" size={16} color={colors.textSecondary} />
+              <Text style={[styles.trialText, { color: colors.textSecondary }]}>
+                {sub.status === 'cancelled' ? 'Acesso até' : 'Renova em'}{' '}
+                {new Date(sub.next_billing_date).toLocaleDateString('pt-BR')}
+                {sub?.billing_period === 'annual' ? ' · cobrança anual' : ' · cobrança mensal'}
+              </Text>
+            </View>
+          )}
           {/* PAY-4: data no passado = trial EXPIRADO, não "expira em..." */}
           {isTrial && (
             <View style={styles.trialInfo}>
@@ -251,6 +283,25 @@ export default function SubscriptionScreen() {
 
         {/* Plans comparison */}
         <Text style={styles.sectionTitle}>Escolha um plano</Text>
+
+        {/* Toggle mensal / anual */}
+        <View style={styles.periodToggle}>
+          <TouchableOpacity
+            style={[styles.periodBtn, period === 'monthly' && styles.periodBtnActive]}
+            onPress={() => setPeriod('monthly')}
+          >
+            <Text style={[styles.periodBtnText, period === 'monthly' && styles.periodBtnTextActive]}>Mensal</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.periodBtn, period === 'annual' && styles.periodBtnActive]}
+            onPress={() => setPeriod('annual')}
+          >
+            <Text style={[styles.periodBtnText, period === 'annual' && styles.periodBtnTextActive]}>
+              Anual{anyAnnualDiscount ? ' • economize' : ''}
+            </Text>
+          </TouchableOpacity>
+        </View>
+
         {plansLoading && plans.length === 0 && (
           <ActivityIndicator color={colors.primary} style={{ paddingVertical: spacing.xl }} />
         )}
@@ -273,7 +324,12 @@ export default function SubscriptionScreen() {
                 <View style={styles.planRow}>
                   <View style={{ flex: 1 }}>
                     <Text style={[styles.planCardName, isCurrent && styles.planCardNameActive]}>{plan.label}</Text>
-                    <Text style={styles.planCardPrice}>{plan.price}</Text>
+                    <Text style={styles.planCardPrice}>{cycleLabel(plan)}</Text>
+                    {period === 'annual' && plan.discountPct > 0 && (
+                      <Text style={styles.discountText}>
+                        de {brl(plan.priceCents * 12)} — economize {plan.discountPct}%
+                      </Text>
+                    )}
                   </View>
                   {isCurrent && <Badge label="Atual" variant="success" />}
                 </View>
@@ -315,6 +371,29 @@ export default function SubscriptionScreen() {
             </Text>
           </View>
         )}
+
+        {/* Histórico de cobranças */}
+        {payments.length > 0 && (
+          <View style={{ gap: spacing.sm }}>
+            <Text style={styles.sectionTitle}>Histórico de cobranças</Text>
+            <Card style={{ gap: spacing.sm }}>
+              {payments.map((pmt) => (
+                <View key={pmt.mp_payment_id} style={styles.payRow}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.payAmount}>{brl(pmt.amount_cents)}</Text>
+                    <Text style={styles.payDate}>
+                      {pmt.paid_at ? new Date(pmt.paid_at).toLocaleDateString('pt-BR') : '—'}
+                    </Text>
+                  </View>
+                  <Badge
+                    label={pmt.status === 'approved' ? 'Pago' : pmt.status === 'rejected' ? 'Recusado' : pmt.status === 'refunded' ? 'Estornado' : (pmt.status ?? '—')}
+                    variant={pmt.status === 'approved' ? 'success' : pmt.status === 'rejected' ? 'danger' : 'warning'}
+                  />
+                </View>
+              ))}
+            </Card>
+          </View>
+        )}
       </ScrollView>
 
       {/* Checkout transparente — cartão nunca sai do app a não ser para o Mercado Pago */}
@@ -352,8 +431,8 @@ export default function SubscriptionScreen() {
                 {/* Resumo do plano */}
                 <View style={styles.planSummary}>
                   <View style={{ flex: 1 }}>
-                    <Text style={styles.planSummaryName}>{selectedPlan?.label}</Text>
-                    <Text style={styles.planSummaryPrice}>{selectedPlan?.price}</Text>
+                    <Text style={styles.planSummaryName}>{selectedPlan?.label} {period === 'annual' ? '(anual)' : '(mensal)'}</Text>
+                    <Text style={styles.planSummaryPrice}>{selectedPlan ? cycleLabel(selectedPlan) : ''}</Text>
                   </View>
                   <Ionicons name="shield-checkmark-outline" size={22} color={colors.primary} />
                 </View>
@@ -419,7 +498,7 @@ export default function SubscriptionScreen() {
                 </View>
 
                 <Button
-                  label={`Assinar por ${selectedPlan?.price ?? ''}`}
+                  label={`Assinar por ${selectedPlan ? cycleLabel(selectedPlan) : ''}`}
                   onPress={handleSubscribe}
                   loading={submitting}
                 />
@@ -444,6 +523,15 @@ const styles = StyleSheet.create({
   trialText: { flex: 1, fontSize: font.sm, color: colors.warning, fontWeight: '500' },
   trialTextExpired: { color: colors.danger, fontWeight: '600' },
   plansOfflineHint: { fontSize: font.sm, color: colors.textSecondary, textAlign: 'center' },
+  periodToggle: { flexDirection: 'row', backgroundColor: colors.surfaceAlt, borderRadius: radius.full, padding: 4, gap: 4 },
+  periodBtn: { flex: 1, alignItems: 'center', paddingVertical: spacing.sm, borderRadius: radius.full },
+  periodBtnActive: { backgroundColor: colors.primary },
+  periodBtnText: { fontSize: font.sm, fontWeight: '700', color: colors.textSecondary },
+  periodBtnTextActive: { color: '#fff' },
+  discountText: { fontSize: font.sm, color: colors.success, fontWeight: '600', marginTop: 2 },
+  payRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+  payAmount: { fontSize: font.md, fontWeight: '700', color: colors.text },
+  payDate: { fontSize: font.sm, color: colors.textSecondary, marginTop: 2 },
   cancelSection: { gap: spacing.xs },
   cancelHint: { fontSize: font.sm, color: colors.textSecondary, textAlign: 'center' },
   sectionTitle: { fontSize: font.lg, fontWeight: '700', color: colors.text },

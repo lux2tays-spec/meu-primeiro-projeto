@@ -460,6 +460,35 @@ export const webhookRoutes: FastifyPluginAsync = async (app) => {
       app.log.warn('MP_WEBHOOK_SECRET not set — Mercado Pago webhook signature NOT verified.')
     }
 
+    // 2a. Payment events → registra no histórico de cobranças (best-effort).
+    if (type === 'payment') {
+      const accessToken = payCfg.mp_access_token
+      if (accessToken && resourceId) {
+        try {
+          const payRes = await fetch(`https://api.mercadopago.com/v1/payments/${resourceId}`, {
+            headers: { Authorization: `Bearer ${accessToken}` },
+            signal: AbortSignal.timeout(15_000),
+          })
+          if (payRes.ok) {
+            const pay = await payRes.json() as any
+            const [tenantId, plan] = String(pay.external_reference ?? '').split(':')
+            if (tenantId) {
+              await db.query(
+                `INSERT INTO subscription_payments (tenant_id, mp_payment_id, plan, amount_cents, status, paid_at)
+                 VALUES ($1,$2,$3,$4,$5,$6)
+                 ON CONFLICT (mp_payment_id) DO UPDATE SET
+                   status = EXCLUDED.status, amount_cents = EXCLUDED.amount_cents, paid_at = EXCLUDED.paid_at`,
+                [tenantId, String(pay.id), plan ?? null,
+                 Math.round((Number(pay.transaction_amount) || 0) * 100),
+                 pay.status ?? null, pay.date_approved ?? pay.date_created ?? null]
+              )
+            }
+          }
+        } catch (e) { app.log.error({ e }, 'MP payment webhook record failed') }
+      }
+      return reply.send({ ok: true })
+    }
+
     // 2. Only handle subscription events
     if (type !== 'subscription_preapproval' && type !== 'preapproval') {
       return reply.send({ ok: true })

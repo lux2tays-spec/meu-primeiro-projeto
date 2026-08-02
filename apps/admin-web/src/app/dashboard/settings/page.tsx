@@ -16,7 +16,7 @@ const EMAIL_TEMPLATE_LABELS: Record<string, string> = {
   subscription_confirmed: 'Assinatura confirmada',
 }
 
-const PLAN_BLANK = { slug: '', name: '', description: '', price_cents: 0, max_agendas: 1, max_users: 1, trial_days: 0, features: [], is_active: true, sort_order: 0, media_enabled: false }
+const PLAN_BLANK = { slug: '', name: '', description: '', price_cents: 0, annual_discount_pct: 0, max_agendas: 1, max_users: 1, trial_days: 0, features: [], is_active: true, sort_order: 0, media_enabled: false }
 
 export default function SettingsPage() {
   const [tab, setTab] = useState<Tab>('brand')
@@ -544,12 +544,19 @@ function PlansTab() {
             <div className="grid grid-cols-2 gap-4">
               <SF label="Nome do plano" value={form.name} onChange={(v: string) => setForm((f: any) => ({ ...f, name: v }))} placeholder="Ex: Enterprise" />
               <SF label="Slug (ID único)" value={form.slug} onChange={(v: string) => setForm((f: any) => ({ ...f, slug: v.toLowerCase().replace(/\s/g, '_') }))} placeholder="enterprise" />
-              <SF label="Preço (centavos)" value={form.price_cents} onChange={(v: string) => setForm((f: any) => ({ ...f, price_cents: Number(v) }))} type="number" placeholder="8900 = R$89,00" />
+              <SF label="Preço mensal (centavos)" value={form.price_cents} onChange={(v: string) => setForm((f: any) => ({ ...f, price_cents: Number(v) }))} type="number" placeholder="8900 = R$89,00" />
+              <SF label="Desconto anual (%)" value={form.annual_discount_pct ?? 0} onChange={(v: string) => setForm((f: any) => ({ ...f, annual_discount_pct: Math.min(90, Math.max(0, Number(v) || 0)) }))} type="number" placeholder="Ex: 20" />
               <SF label="Máx. agendas" value={form.max_agendas} onChange={(v: string) => setForm((f: any) => ({ ...f, max_agendas: Number(v) }))} type="number" />
               <SF label="Máx. usuários" value={form.max_users} onChange={(v: string) => setForm((f: any) => ({ ...f, max_users: Number(v) }))} type="number" />
               <SF label="Dias de trial" value={form.trial_days} onChange={(v: string) => setForm((f: any) => ({ ...f, trial_days: Number(v) }))} type="number" />
               <SF label="Ordem (sort)" value={form.sort_order} onChange={(v: string) => setForm((f: any) => ({ ...f, sort_order: Number(v) }))} type="number" />
             </div>
+            {form.price_cents > 0 && (
+              <p className="text-xs text-gray-500 -mt-1">
+                Anual: <strong>{fmt(Math.round(form.price_cents * 12 * (1 - (form.annual_discount_pct || 0) / 100)))}/ano</strong>
+                {(form.annual_discount_pct || 0) > 0 && <> (de {fmt(form.price_cents * 12)} — {form.annual_discount_pct}% de desconto)</>}
+              </p>
+            )}
 
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Descrição</label>

@@ -782,13 +782,13 @@ export const rootRoutes: FastifyPluginAsync = async (app) => {
   })
 
   app.post('/plans', async (request, reply) => {
-    const { slug, name, description, price_cents, max_agendas, max_users, trial_days, features, is_active, sort_order } = request.body as any
+    const { slug, name, description, price_cents, annual_discount_pct, max_agendas, max_users, trial_days, features, is_active, sort_order } = request.body as any
     try {
       const { rows: [plan] } = await db.query(
-        `INSERT INTO platform_plans (slug, name, description, price_cents, max_agendas, max_users, trial_days, features, is_active, sort_order)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *`,
-        [slug, name, description ?? null, price_cents ?? 0, max_agendas ?? 1, max_users ?? 1,
-         trial_days ?? 0, JSON.stringify(features ?? []), is_active ?? true, sort_order ?? 0]
+        `INSERT INTO platform_plans (slug, name, description, price_cents, annual_discount_pct, max_agendas, max_users, trial_days, features, is_active, sort_order)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *`,
+        [slug, name, description ?? null, price_cents ?? 0, Math.min(90, Math.max(0, Number(annual_discount_pct) || 0)),
+         max_agendas ?? 1, max_users ?? 1, trial_days ?? 0, JSON.stringify(features ?? []), is_active ?? true, sort_order ?? 0]
       )
       await logAdminAction(auditFromRequest(request, 'plan.create', plan.id, `${slug} — ${name}`))
       return reply.status(201).send(plan)
@@ -799,7 +799,7 @@ export const rootRoutes: FastifyPluginAsync = async (app) => {
   })
 
   app.patch<{ Params: { id: string } }>('/plans/:id', async (request, reply) => {
-    const { name, description, price_cents, max_agendas, max_users, trial_days, features, is_active, sort_order, media_enabled } = request.body as any
+    const { name, description, price_cents, annual_discount_pct, max_agendas, max_users, trial_days, features, is_active, sort_order, media_enabled } = request.body as any
     const { rows: [plan] } = await db.query(
       `UPDATE platform_plans SET
          name          = COALESCE($1, name),
@@ -812,11 +812,13 @@ export const rootRoutes: FastifyPluginAsync = async (app) => {
          is_active     = COALESCE($8, is_active),
          sort_order    = COALESCE($9, sort_order),
          media_enabled = COALESCE($11, media_enabled),
+         annual_discount_pct = COALESCE($12, annual_discount_pct),
          updated_at    = NOW()
        WHERE id = $10 RETURNING *`,
       [name, description, price_cents, max_agendas, max_users, trial_days,
        features ? JSON.stringify(features) : null, is_active, sort_order, request.params.id,
-       typeof media_enabled === 'boolean' ? media_enabled : null]
+       typeof media_enabled === 'boolean' ? media_enabled : null,
+       annual_discount_pct === undefined || annual_discount_pct === null ? null : Math.min(90, Math.max(0, Number(annual_discount_pct) || 0))]
     )
     if (!plan) return reply.status(404).send({ error: 'Plano não encontrado' })
     // Plan capability changed → drop cached media flags so the bot re-reads it.
