@@ -788,6 +788,25 @@ export const rootRoutes: FastifyPluginAsync = async (app) => {
     return reply.send(PLAN_CAPABILITIES.map((c) => ({ key: c.key, label: c.label, type: c.type, group: c.group, column: c.column ?? null })))
   })
 
+  // ── Alertas da plataforma (Root Admin) ───────────────────────────────────────
+  app.get('/admin-alerts', async (request, reply) => {
+    const { limit } = request.query as { limit?: string }
+    const lim = Math.min(Math.max(parseInt(limit ?? '50', 10) || 50, 1), 200)
+    const { rows } = await db.query(
+      `SELECT a.id, a.type, a.tenant_id, a.message, a.data, a.read_at, a.created_at, t.name AS tenant_name
+       FROM admin_alerts a LEFT JOIN tenants t ON t.id = a.tenant_id
+       ORDER BY a.created_at DESC LIMIT $1`,
+      [lim]
+    )
+    const { rows: [{ count }] } = await db.query('SELECT COUNT(*)::int AS count FROM admin_alerts WHERE read_at IS NULL')
+    return reply.send({ alerts: rows, unread: count })
+  })
+
+  app.post('/admin-alerts/read-all', async (_request, reply) => {
+    await db.query('UPDATE admin_alerts SET read_at = NOW() WHERE read_at IS NULL')
+    return reply.send({ ok: true })
+  })
+
   app.post('/plans', async (request, reply) => {
     const { slug, name, description, price_cents, annual_discount_pct, max_agendas, max_users, trial_days, features, is_active, sort_order, capabilities } = request.body as any
     try {

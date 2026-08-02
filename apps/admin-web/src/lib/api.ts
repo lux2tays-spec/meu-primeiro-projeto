@@ -170,6 +170,8 @@ export const rootApi = {
   deleteBrandingAsset: (slot: string) => api.delete(`/root/branding/asset/${slot}`),
 
   // Plans
+  adminAlerts: (limit = 50) => api.get<{ alerts: any[]; unread: number }>(`/root/admin-alerts?limit=${limit}`),
+  adminAlertsReadAll: () => api.post('/root/admin-alerts/read-all', {}),
   plans: () => api.get<any[]>('/root/plans'),
   plansCapabilities: () => api.get<Array<{ key: string; label: string; type: 'bool' | 'number'; group: 'limit' | 'feature'; column: string | null }>>('/root/plans-capabilities'),
   createPlan: (data: any) => api.post<any>('/root/plans', data),

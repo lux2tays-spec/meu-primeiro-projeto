@@ -1,5 +1,5 @@
 'use client'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { rootApi } from '@/lib/api'
 import { StatCard } from '@/components/ui/StatCard'
 import { Badge } from '@/components/ui/Badge'
@@ -34,6 +34,8 @@ export default function DashboardPage() {
         <h1 className="text-2xl font-bold text-gray-900">Visão Geral</h1>
         <p className="text-gray-500 text-sm mt-1">Métricas em tempo real da plataforma</p>
       </div>
+
+      <AdminAlerts />
 
       {/* Main stats */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
@@ -142,5 +144,47 @@ export default function DashboardPage() {
         </div>
       )}
     </div>
+  )
+}
+
+// #10 — Alertas da plataforma (ex.: tenant estourou o limite de mensagens).
+function AdminAlerts() {
+  const qc = useQueryClient()
+  const { data } = useQuery({ queryKey: ['admin-alerts'], queryFn: () => rootApi.adminAlerts(20) })
+  const readAll = useMutation({
+    mutationFn: () => rootApi.adminAlertsReadAll(),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['admin-alerts'] }),
+  })
+  const alerts: any[] = data?.alerts ?? []
+  const unread = data?.unread ?? 0
+  if (alerts.length === 0) return null
+
+  return (
+    <section className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5">
+      <div className="flex items-center justify-between mb-3">
+        <h2 className="font-semibold text-gray-900">
+          🔔 Alertas da plataforma {unread > 0 && <span className="ml-2 text-xs font-bold text-white bg-red-500 rounded-full px-2 py-0.5">{unread}</span>}
+        </h2>
+        {unread > 0 && (
+          <button onClick={() => readAll.mutate()} disabled={readAll.isPending}
+            className="text-sm text-primary hover:underline disabled:opacity-50">Marcar todas como lidas</button>
+        )}
+      </div>
+      <div className="divide-y divide-gray-50 max-h-72 overflow-y-auto">
+        {alerts.map((a) => (
+          <div key={a.id} className={`flex items-start gap-3 py-2.5 ${a.read_at ? 'opacity-50' : ''}`}>
+            <span className="mt-0.5 text-lg">{a.type === 'plan_limit' ? '📈' : '🔔'}</span>
+            <div className="flex-1">
+              <p className="text-sm text-gray-800">{a.message}</p>
+              <p className="text-xs text-gray-400 mt-0.5">
+                {a.tenant_id && a.tenant_name ? <Link href={`/dashboard/tenants/${a.tenant_id}`} className="text-primary hover:underline">{a.tenant_name}</Link> : null}
+                {' · '}{new Date(a.created_at).toLocaleString('pt-BR')}
+              </p>
+            </div>
+            {!a.read_at && <span className="mt-1 w-2 h-2 rounded-full bg-red-500 shrink-0" />}
+          </div>
+        ))}
+      </div>
+    </section>
   )
 }

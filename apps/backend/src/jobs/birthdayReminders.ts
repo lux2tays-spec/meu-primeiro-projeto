@@ -18,12 +18,15 @@ const BIRTHDAY_QUERY = `
     wi.instance_name
   FROM customers c
   JOIN tenants t              ON t.id = c.tenant_id
+  JOIN platform_plans pp      ON pp.slug = t.plan
   JOIN agent_config ac        ON ac.tenant_id = c.tenant_id
   JOIN whatsapp_instances wi  ON wi.tenant_id = c.tenant_id AND wi.status = 'connected'
   WHERE
     c.deleted_at IS NULL
     AND c.birth_date IS NOT NULL
     AND ac.birthday_reminder_enabled = TRUE
+    -- #10: gating — só se o plano do tenant inclui o recurso.
+    AND COALESCE((pp.capabilities->>'birthday_reminder')::boolean, false) = TRUE
     AND t.status IN ('active', 'trial')
     -- Aniversário (mês/dia) daqui a N dias (N = days_before), ignorando o ano.
     AND EXTRACT(MONTH FROM c.birth_date) = EXTRACT(MONTH FROM (NOW() AT TIME ZONE 'America/Sao_Paulo')::date + ac.birthday_reminder_days_before)

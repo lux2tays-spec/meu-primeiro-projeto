@@ -20,10 +20,13 @@ const REMINDER_QUERY = `
   JOIN services         s  ON s.id = a.service_id
   JOIN customers        c  ON c.id = a.customer_id
   JOIN tenants          t  ON t.id = a.tenant_id
+  JOIN platform_plans   pp ON pp.slug = t.plan
   LEFT JOIN agent_config ac ON ac.tenant_id = a.tenant_id
   JOIN whatsapp_instances wi ON wi.tenant_id = a.tenant_id AND wi.status = 'connected'
   WHERE
     a.status = 'completed'
+    -- #10: gating — lembrete de retorno só se o plano inclui o recurso.
+    AND COALESCE((pp.capabilities->>'return_reminders')::boolean, false) = TRUE
     AND s.reminder_days IS NOT NULL
     AND s.reminder_days > 0
     AND (NOW()::date - a.starts_at::date) = s.reminder_days

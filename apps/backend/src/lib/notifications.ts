@@ -26,6 +26,7 @@ export type NotificationType =
   | 'service_completion'
   | 'broadcast'
   | 'trial_ending'
+  | 'plan_limit'
 
 export type NotificationChannel = 'inapp' | 'push' | 'email' | 'whatsapp'
 
@@ -143,6 +144,23 @@ export async function notifyTenantManagers(
 ): Promise<void> {
   const { rows } = await db.query(
     `SELECT user_id FROM user_roles WHERE tenant_id = $1 AND role IN ('owner', 'admin')`,
+    [tenantId]
+  )
+  await Promise.allSettled(
+    rows.map((r: any) => createNotification({ ...notif, tenantId, userId: r.user_id }))
+  )
+}
+
+/**
+ * Notifica TODOS os usuários do tenant (owner + admin + staff). Usado para avisos
+ * que todo mundo do negócio precisa ver — ex.: limite de mensagens atingido.
+ */
+export async function notifyAllTenantUsers(
+  tenantId: string,
+  notif: Omit<CreateNotificationParams, 'userId' | 'tenantId'>
+): Promise<void> {
+  const { rows } = await db.query(
+    `SELECT DISTINCT user_id FROM user_roles WHERE tenant_id = $1`,
     [tenantId]
   )
   await Promise.allSettled(
