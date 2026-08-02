@@ -513,6 +513,12 @@ function CustomerDetailModal({
                   <Text style={styles.detailContactText}>{data.email}</Text>
                 </View>
               ) : null}
+              {data?.birth_date ? (
+                <View style={styles.detailContactRow}>
+                  <Ionicons name="gift-outline" size={16} color={colors.textSecondary} />
+                  <Text style={styles.detailContactText}>Aniversário: {isoToBirth(data.birth_date)}</Text>
+                </View>
+              ) : null}
 
               {/* Interest */}
               <Text style={styles.sectionTitle}>Interesse</Text>

@@ -9,6 +9,8 @@ import DespesasTab from './DespesasTab'
 import ProjecaoTab from './ProjecaoTab'
 import NovoLancamentoModal from './NovoLancamentoModal'
 import NovaVendaModal from './NovaVendaModal'
+import { useCapabilities } from '@/lib/useCapabilities'
+import UpgradeGate from '@/components/UpgradeGate'
 
 const MONTHS = ['Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez']
 
@@ -24,6 +26,7 @@ function fmtDate(iso: string) {
 
 export default function FinanceiroPage() {
   const qc = useQueryClient()
+  const { can, loaded: capsLoaded } = useCapabilities()
   const now = new Date()
   const [month, setMonth] = useState(now.getMonth() + 1)
   const [year,  setYear]  = useState(now.getFullYear())
@@ -112,6 +115,8 @@ export default function FinanceiroPage() {
       </div>
     )
   }
+
+  if (capsLoaded && !can('vendas_module')) return <UpgradeGate feature="Financeiro" />
 
   return (
     <div className="max-w-4xl space-y-6">

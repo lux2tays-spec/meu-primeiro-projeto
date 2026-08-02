@@ -262,6 +262,9 @@ function CustomerDrawer({ customerId, canDelete, onClose }: { customerId: string
                   ) : (
                     <p className="text-sm text-gray-400 italic">E-mail não informado</p>
                   )}
+                  {customer.birth_date && (
+                    <p className="text-sm text-gray-500">🎂 Aniversário: {String(customer.birth_date).slice(0, 10).split('-').reverse().join('/')}</p>
+                  )}
                   <p className="text-xs text-gray-400 mt-1">
                     Cliente desde {new Date(customer.created_at).toLocaleDateString('pt-BR')}
                   </p>

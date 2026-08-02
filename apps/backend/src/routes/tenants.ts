@@ -754,7 +754,7 @@ export const tenantRoutes: FastifyPluginAsync = async (app) => {
     const offset = paginated ? (pg - 1) * lim : 0
 
     const dataPromise = db.query(
-      `SELECT c.id, c.name, c.last_name, c.phone, c.email, c.created_at,
+      `SELECT c.id, c.name, c.last_name, c.phone, c.email, to_char(c.birth_date, 'YYYY-MM-DD') AS birth_date, c.created_at,
          (SELECT COUNT(*) FROM appointments a WHERE a.customer_id = c.id AND a.tenant_id = c.tenant_id) AS appointment_count,
          (SELECT MAX(a.starts_at) FROM appointments a WHERE a.customer_id = c.id AND a.tenant_id = c.tenant_id) AS last_appointment_at
        FROM customers c
@@ -784,7 +784,7 @@ export const tenantRoutes: FastifyPluginAsync = async (app) => {
     const { tenant_id } = request.user
 
     const { rows: [customer] } = await db.query(
-      `SELECT id, name, last_name, phone, email, birth_date, created_at FROM customers WHERE id = $1 AND tenant_id = $2 AND deleted_at IS NULL`,
+      `SELECT id, name, last_name, phone, email, to_char(birth_date, 'YYYY-MM-DD') AS birth_date, created_at FROM customers WHERE id = $1 AND tenant_id = $2 AND deleted_at IS NULL`,
       [request.params.id, tenant_id]
     )
     if (!customer) return reply.status(404).send({ error: 'Cliente não encontrado' })
@@ -984,7 +984,7 @@ export const tenantRoutes: FastifyPluginAsync = async (app) => {
       const { rows: [customer] } = await db.query(
         `INSERT INTO customers (tenant_id, name, last_name, phone, email, birth_date)
          VALUES ($1, $2, $3, $4, $5, $6)
-         RETURNING id, name, last_name, phone, email, birth_date, created_at`,
+         RETURNING id, name, last_name, phone, email, to_char(birth_date, 'YYYY-MM-DD') AS birth_date, created_at`,
         [tenant_id, body.name.trim(), body.last_name?.trim() || null, body.phone.trim(), body.email || null, body.birth_date || null]
       )
       return reply.status(201).send(customer)

@@ -5,6 +5,8 @@ import { financeiroApi, appointmentsApi, tenantApi, getToken, friendlyMessage } 
 import { getTokenPayload } from '@/lib/auth'
 import Loading from '@/components/ui/Loading'
 import NovaVendaModal from '../financeiro/NovaVendaModal'
+import { useCapabilities } from '@/lib/useCapabilities'
+import UpgradeGate from '@/components/UpgradeGate'
 
 const PM_LABEL: Record<string, string> = { pix: 'Pix', payment_link: 'Link', credit_card: 'Crédito', debit_card: 'Débito', cash: 'Dinheiro' }
 const PM_OPTIONS = Object.entries(PM_LABEL)
@@ -18,6 +20,7 @@ const inputCls = 'h-9 px-3 rounded-xl border border-gray-200 text-sm focus:outli
 
 export default function VendasPage() {
   const qc = useQueryClient()
+  const { can, loaded: capsLoaded } = useCapabilities()
   const [role, setRole] = useState<string | null>(null)
   useEffect(() => { setRole(getTokenPayload(getToken())?.role ?? null) }, [])
   const isManager = role === null || ['owner', 'admin', 'root'].includes(role)
@@ -78,6 +81,8 @@ export default function VendasPage() {
       </div>
     )
   }
+
+  if (capsLoaded && !can('vendas_module')) return <UpgradeGate feature="Vendas" />
 
   return (
     <div className="max-w-5xl space-y-6">
