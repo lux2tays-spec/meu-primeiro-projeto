@@ -1,5 +1,6 @@
 'use client'
 import { useState } from 'react'
+import { useRouter } from 'next/navigation'
 import { useQuery } from '@tanstack/react-query'
 import Link from 'next/link'
 import { rootApi } from '@/lib/api'
@@ -27,6 +28,7 @@ const whatsappVariant: Record<string, any> = { connected: 'success', qr_pending:
 const whatsappLabel: Record<string, string> = { connected: 'WhatsApp ✓', qr_pending: 'Aguardando QR', disconnected: 'Desconectado' }
 
 export default function TenantsPage() {
+  const router = useRouter()
   const [search, setSearch] = useState('')
   const [plan, setPlan] = useState('')
   const [status, setStatus] = useState('')
@@ -102,7 +104,7 @@ export default function TenantsPage() {
             ) : tenants.length === 0 ? (
               <tr><td colSpan={10} className="text-center py-12 text-gray-400">Nenhum tenant encontrado</td></tr>
             ) : tenants.map((t: any) => (
-              <tr key={t.id} className="border-b border-gray-50 last:border-0 hover:bg-gray-50 transition-colors">
+              <tr key={t.id} onClick={() => router.push(`/dashboard/tenants/${t.id}`)} className="border-b border-gray-50 last:border-0 hover:bg-gray-50 transition-colors cursor-pointer">
                 <td className="px-6 py-4">
                   <div className="flex items-center gap-3">
                     <div className="w-9 h-9 rounded-xl bg-primary-light flex items-center justify-center font-bold text-primary text-sm flex-shrink-0">
