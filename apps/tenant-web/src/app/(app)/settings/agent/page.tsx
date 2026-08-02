@@ -2,6 +2,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { agentApi, tenantApi, friendlyMessage } from '@/lib/api'
+import { useCapabilities } from '@/lib/useCapabilities'
 import Loading from '@/components/ui/Loading'
 
 const TONES = [
@@ -41,6 +42,7 @@ const BLANK = {
 
 export default function AgentPage() {
   const qc = useQueryClient()
+  const { can } = useCapabilities()
   const [tab, setTab] = useState<Tab>('Identidade')
   const [form, setForm] = useState(BLANK)
   const [saved, setSaved] = useState(false)
@@ -348,23 +350,26 @@ export default function AgentPage() {
             <div className="border-t border-gray-100 pt-5 space-y-4">
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-sm font-semibold text-gray-900">Lembrete de aniversário</p>
+                  <p className="text-sm font-semibold text-gray-900">Lembrete de aniversário {!can('birthday_reminder') && '🔒'}</p>
                   <p className="text-xs text-gray-400 mt-0.5">
-                    O bot envia parabéns no WhatsApp e convida a agendar — ótimo para trazer o cliente de volta.
+                    {can('birthday_reminder')
+                      ? 'O bot envia parabéns no WhatsApp e convida a agendar — ótimo para trazer o cliente de volta.'
+                      : <>Recurso de planos superiores. <a href="/settings/subscription" className="text-primary hover:underline">Fazer upgrade</a>.</>}
                   </p>
                 </div>
                 <button
                   type="button"
                   role="switch"
+                  disabled={!can('birthday_reminder')}
                   aria-checked={form.birthday_reminder_enabled}
                   onClick={() => set('birthday_reminder_enabled', !form.birthday_reminder_enabled)}
-                  className={`relative w-11 h-6 rounded-full transition-colors shrink-0 ${form.birthday_reminder_enabled ? 'bg-primary' : 'bg-gray-200'}`}
+                  className={`relative w-11 h-6 rounded-full transition-colors shrink-0 ${form.birthday_reminder_enabled ? 'bg-primary' : 'bg-gray-200'} ${!can('birthday_reminder') ? 'opacity-50 cursor-not-allowed' : ''}`}
                 >
                   <span className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${form.birthday_reminder_enabled ? 'translate-x-5' : ''}`} />
                 </button>
               </div>
 
-              {form.birthday_reminder_enabled && (
+              {can('birthday_reminder') && form.birthday_reminder_enabled && (
                 <div className="space-y-4">
                   <Field label="Enviar quantos dias antes" hint="0 = no próprio dia. Ex.: 3 = três dias antes.">
                     <input

@@ -1,8 +1,10 @@
 import { FastifyPluginAsync } from 'fastify'
 import { db } from '../lib/db'
+import { capabilityGuard } from '../lib/planCapabilities'
 
 export const affiliateRoutes: FastifyPluginAsync = async (app) => {
   app.addHook('preHandler', (app as any).authenticate)
+  app.addHook('preHandler', capabilityGuard('affiliate'))
 
   // Get the affiliate record for the logged-in user (auto-creates if missing)
   app.get('/me', async (request, reply) => {

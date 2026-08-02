@@ -2,6 +2,7 @@ import { FastifyPluginAsync } from 'fastify'
 import { z } from 'zod'
 import { db } from '../lib/db'
 import { isStaff, canManage, resolveStaffProfessionalId } from '../lib/roles'
+import { capabilityGuard } from '../lib/planCapabilities'
 
 const listQuerySchema = z.object({
   professional_id: z.string().uuid().optional(),
@@ -22,6 +23,7 @@ const paySchema = z.object({
 export const commissionRoutes: FastifyPluginAsync = async (app) => {
   app.addHook('preHandler', (app as any).authenticate)
   app.addHook('preHandler', (app as any).planGuard)
+  app.addHook('preHandler', capabilityGuard('commissions'))
 
   // ── List commissions + totals ───────────────────────────────────────────────
   // Owner/admin: all professionals (optional professional_id filter).

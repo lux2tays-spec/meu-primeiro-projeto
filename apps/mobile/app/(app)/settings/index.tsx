@@ -9,6 +9,7 @@ import { useAuthStore } from '@/lib/store'
 import { useBrandingStore } from '@/lib/branding'
 import { tenantApi, authApi } from '@/lib/api'
 import { unregisterPushToken } from '@/lib/push'
+import { useCapabilities, promptUpgrade } from '@/lib/capabilities'
 import { colors, font, spacing } from '@/lib/theme'
 
 const WEB_URL = process.env.EXPO_PUBLIC_WEB_URL ?? 'https://aiconfirma.com.br'
@@ -17,6 +18,7 @@ export default function SettingsScreen() {
   const clearAuth = useAuthStore((s) => s.clearAuth)
   const appName = useBrandingStore((s) => s.appName)
   const role = useAuthStore((s) => s.role)
+  const { can } = useCapabilities()
   const { data: tenant } = useQuery({ queryKey: ['tenant'], queryFn: tenantApi.me })
 
   function handleLogout() {
@@ -122,7 +124,7 @@ export default function SettingsScreen() {
           <View style={styles.divider} />
           <SettingsRow icon="sparkles-outline" label="Agente IA" subtitle="Configurar personalidade e instruções do bot" onPress={() => router.push('/(app)/settings/agent')} />
           <View style={styles.divider} />
-          <SettingsRow icon="calendar-outline" label="Google Agenda" subtitle="Sincronizar agendamentos com seu Google Calendar" onPress={() => router.push('/(app)/settings/google-calendar')} />
+          <SettingsRow icon="calendar-outline" label="Google Agenda" subtitle="Sincronizar agendamentos com seu Google Calendar" locked={!can('google_calendar')} onPress={() => can('google_calendar') ? router.push('/(app)/settings/google-calendar') : promptUpgrade('Google Agenda')} />
         </Card>
 
         {/* Negócio */}
@@ -146,11 +148,11 @@ export default function SettingsScreen() {
         <Card style={styles.group}>
           <SettingsRow icon="wallet-outline" label="Meios de Pagamento" subtitle="Conectar Mercado Pago e gerar links" onPress={() => router.push('/(app)/settings/payments')} />
           <View style={styles.divider} />
-          <SettingsRow icon="cash-outline" label="Comissões" subtitle="Comissões dos profissionais por serviço" onPress={() => router.push('/(app)/comissoes')} />
+          <SettingsRow icon="cash-outline" label="Comissões" subtitle="Comissões dos profissionais por serviço" locked={!can('commissions')} onPress={() => can('commissions') ? router.push('/(app)/comissoes') : promptUpgrade('Comissões')} />
           <View style={styles.divider} />
           <SettingsRow icon="card-outline" label="Assinatura" subtitle="Plano atual, faturamento e cartões" onPress={() => router.push('/(app)/settings/subscription')} />
           <View style={styles.divider} />
-          <SettingsRow icon="share-social-outline" label="Painel de Afiliado" subtitle="Indique e ganhe por cada indicação" onPress={() => router.push('/(app)/settings/affiliate')} />
+          <SettingsRow icon="share-social-outline" label="Painel de Afiliado" subtitle="Indique e ganhe por cada indicação" locked={!can('affiliate')} onPress={() => can('affiliate') ? router.push('/(app)/settings/affiliate') : promptUpgrade('Painel de Afiliado')} />
         </Card>
 
         {/* Ajuda */}

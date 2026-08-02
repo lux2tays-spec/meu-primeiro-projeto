@@ -102,6 +102,20 @@ export async function getTenantCapabilities(tenantId: string): Promise<PlanCapab
   return caps
 }
 
+// preHandler Fastify que bloqueia a rota (403) quando o plano do tenant não tem
+// o recurso. Root passa sempre. O front trata 'plan_upgrade_required' com o
+// cadeado + convite de upgrade.
+export function capabilityGuard(key: string) {
+  return async (request: any, reply: any) => {
+    if (request.user?.role === 'root') return
+    if (!request.user?.tenant_id) return
+    const caps = await getTenantCapabilities(request.user.tenant_id)
+    if (!caps[key]) {
+      return reply.status(403).send({ error: 'plan_upgrade_required', capability: key })
+    }
+  }
+}
+
 export async function invalidateTenantCapabilities(tenantId?: string) {
   try {
     if (tenantId) { await redis.del(`tenant:caps:${tenantId}`); return }

@@ -3,7 +3,7 @@ import { db } from '../lib/db'
 import { getPaymentConfig } from '../lib/paymentConfig'
 import { createPreapproval, cancelPreapproval } from '../services/mercadopago'
 import { applyPreapproval } from '../lib/subscriptionState'
-import { bulletsFromCapabilities, resolveCapabilities } from '../lib/planCapabilities'
+import { bulletsFromCapabilities, resolveCapabilities, getTenantCapabilities } from '../lib/planCapabilities'
 
 // Tenant-facing subscription endpoints. Only `authenticate` (NOT planGuard) —
 // an expired-trial tenant must be able to reach checkout to reactivate.
@@ -65,6 +65,13 @@ export const subscriptionRoutes: FastifyPluginAsync = async (app) => {
       capabilities: resolveCapabilities(p),
     }))
     return reply.send(plans)
+  })
+
+  // Recursos do plano ATUAL do tenant (para o gating no App/Web).
+  app.get('/capabilities', async (request, reply) => {
+    const { tenant_id } = request.user
+    if (!tenant_id) return reply.send({})
+    return reply.send(await getTenantCapabilities(tenant_id))
   })
 
   // Histórico de cobranças da assinatura (para o App e a Web).

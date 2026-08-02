@@ -3,6 +3,7 @@ import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity, Alert, Platform, Switch,
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
+import { Ionicons } from '@expo/vector-icons'
 import { router } from 'expo-router'
 import * as DocumentPicker from 'expo-document-picker'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
@@ -10,6 +11,7 @@ import { Input } from '@/components/ui/Input'
 import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
 import { agentApi, tenantApi, isPlanLimitError } from '@/lib/api'
+import { useCapabilities, promptUpgrade } from '@/lib/capabilities'
 import { useToast } from '@/lib/toast'
 import { colors, font, spacing, radius } from '@/lib/theme'
 
@@ -60,6 +62,7 @@ const BLANK = {
 export default function AgentScreen() {
   const queryClient = useQueryClient()
   const toast = useToast()
+  const { can } = useCapabilities()
   const { data: config, isLoading } = useQuery({ queryKey: ['agent-config'], queryFn: agentApi.getConfig })
   // CFG-17: tipos de negócio vêm do backend (mesma lista usada no onboarding);
   // o hardcode fica só como fallback quando a query falha.
@@ -392,20 +395,28 @@ export default function AgentScreen() {
             <View style={s.remindersSection}>
               <View style={s.remindersHeader}>
                 <View style={{ flex: 1 }}>
-                  <Text style={s.label}>Lembrete de aniversário</Text>
+                  <Text style={s.label}>Lembrete de aniversário {!can('birthday_reminder') && '🔒'}</Text>
                   <Text style={s.hint}>
-                    O bot envia uma mensagem de parabéns no WhatsApp e convida a agendar — ótimo para trazer o cliente de volta.
+                    {can('birthday_reminder')
+                      ? 'O bot envia uma mensagem de parabéns no WhatsApp e convida a agendar — ótimo para trazer o cliente de volta.'
+                      : 'Recurso disponível em planos superiores. Toque para ver os planos.'}
                   </Text>
                 </View>
-                <Switch
-                  value={form.birthday_reminder_enabled}
-                  onValueChange={(v) => set('birthday_reminder_enabled', v)}
-                  trackColor={{ true: colors.primary, false: colors.border }}
-                  thumbColor="#fff"
-                />
+                {can('birthday_reminder') ? (
+                  <Switch
+                    value={form.birthday_reminder_enabled}
+                    onValueChange={(v) => set('birthday_reminder_enabled', v)}
+                    trackColor={{ true: colors.primary, false: colors.border }}
+                    thumbColor="#fff"
+                  />
+                ) : (
+                  <TouchableOpacity onPress={() => promptUpgrade('Lembrete de aniversário')}>
+                    <Ionicons name="lock-closed" size={20} color={colors.textDisabled} />
+                  </TouchableOpacity>
+                )}
               </View>
 
-              {form.birthday_reminder_enabled && (
+              {can('birthday_reminder') && form.birthday_reminder_enabled && (
                 <>
                   <Label hint="0 = no próprio dia do aniversário. Ex.: 3 = envia 3 dias antes.">Enviar quantos dias antes</Label>
                   <Input

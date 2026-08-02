@@ -7,6 +7,7 @@ import { isTenantToken, getTokenPayload } from '@/lib/auth'
 import { useQuery } from '@tanstack/react-query'
 import BrandLogo from '@/components/BrandLogo'
 import { useBranding } from '@/components/BrandingProvider'
+import { useCapabilities } from '@/lib/useCapabilities'
 import NotificationBell from '@/components/NotificationBell'
 import {
   LayoutDashboard, CalendarDays, Users, Wallet, MessageCircle, Bot, Tag,
@@ -15,23 +16,23 @@ import {
 } from 'lucide-react'
 
 // managerOnly: SAL-11 — papéis "staff" não veem entradas de gestão financeira.
-const NAV: { href: string; icon: LucideIcon; label: string; managerOnly?: boolean }[] = [
+const NAV: { href: string; icon: LucideIcon; label: string; managerOnly?: boolean; cap?: string }[] = [
   { href: '/dashboard',             icon: LayoutDashboard, label: 'Dashboard' },
   { href: '/calendar',              icon: CalendarDays,    label: 'Agenda' },
   { href: '/customers',             icon: Users,           label: 'Clientes' },
-  { href: '/vendas',                icon: ShoppingBag,     label: 'Vendas', managerOnly: true },
-  { href: '/financeiro',            icon: Wallet,          label: 'Financeiro', managerOnly: true },
-  { href: '/comissoes',             icon: Coins,           label: 'Comissões' },
+  { href: '/vendas',                icon: ShoppingBag,     label: 'Vendas', managerOnly: true, cap: 'vendas_module' },
+  { href: '/financeiro',            icon: Wallet,          label: 'Financeiro', managerOnly: true, cap: 'vendas_module' },
+  { href: '/comissoes',             icon: Coins,           label: 'Comissões', cap: 'commissions' },
   { href: '/settings/whatsapp',     icon: MessageCircle,   label: 'WhatsApp' },
   { href: '/settings/agent',        icon: Bot,             label: 'Agente IA' },
   { href: '/settings/services',     icon: Tag,             label: 'Serviços' },
   { href: '/settings/staff',        icon: UserCog,         label: 'Equipe' },
   { href: '/settings/hours',        icon: Clock,           label: 'Horários' },
-  { href: '/settings/google-calendar', icon: CalendarCheck, label: 'Google Agenda' },
+  { href: '/settings/google-calendar', icon: CalendarCheck, label: 'Google Agenda', cap: 'google_calendar' },
   { href: '/settings/payments',     icon: CreditCard,      label: 'Pagamentos' },
   { href: '/settings/taxas',        icon: Percent,         label: 'Taxas', managerOnly: true },
   { href: '/settings/subscription', icon: Package,         label: 'Assinatura' },
-  { href: '/settings/affiliate',    icon: Share2,          label: 'Afiliados' },
+  { href: '/settings/affiliate',    icon: Share2,          label: 'Afiliados', cap: 'affiliate' },
   { href: '/settings/perfil',       icon: UserCircle,      label: 'Meu Perfil' },
   { href: '/settings/notifications', icon: Bell,           label: 'Notificações' },
   { href: '/settings/support',      icon: LifeBuoy,        label: 'Suporte' },
@@ -41,6 +42,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter()
   const pathname = usePathname()
   const { appName } = useBranding()
+  const { can } = useCapabilities()
   const [ready, setReady] = useState(false)
   const [sidebarOpen, setSidebarOpen] = useState(false)
 
@@ -169,17 +171,20 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
           {navItems.map((item) => {
             const active = pathname === item.href || (item.href !== '/dashboard' && pathname.startsWith(item.href))
             const Icon = item.icon
+            const locked = !!item.cap && !can(item.cap)
             return (
               <Link
                 key={item.href}
-                href={item.href}
+                href={locked ? '/settings/subscription' : item.href}
                 onClick={() => setSidebarOpen(false)}
+                title={locked ? 'Recurso do plano — faça upgrade' : undefined}
                 className={`flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-colors ${
                   active ? 'bg-primary text-white' : 'text-gray-400 hover:bg-sidebar-hover hover:text-white'
-                }`}
+                } ${locked ? 'opacity-60' : ''}`}
               >
                 <Icon size={18} strokeWidth={1.75} className="shrink-0" />
-                {item.label}
+                <span className="flex-1">{item.label}</span>
+                {locked && <Lock size={13} className="shrink-0 opacity-70" />}
               </Link>
             )
           })}

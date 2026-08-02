@@ -2,10 +2,15 @@
 import { useQuery } from '@tanstack/react-query'
 import { affiliateApi } from '@/lib/api'
 import Loading from '@/components/ui/Loading'
+import { useCapabilities } from '@/lib/useCapabilities'
+import UpgradeGate from '@/components/UpgradeGate'
 
 export default function AffiliatePage() {
-  const { data: affiliate, isLoading } = useQuery({ queryKey: ['affiliate'], queryFn: affiliateApi.me })
+  const { can, loaded } = useCapabilities()
+  const allowed = !loaded || can('affiliate')
+  const { data: affiliate, isLoading } = useQuery({ queryKey: ['affiliate'], queryFn: affiliateApi.me, enabled: allowed })
 
+  if (loaded && !can('affiliate')) return <UpgradeGate feature="Painel de Afiliado" />
   if (isLoading) return <Loading card />
 
   const referralUrl = `${typeof window !== 'undefined' ? window.location.origin.replace(':3002', ':3002') : 'https://app.aiconfirma.com.br'}/register?ref=${affiliate?.referral_code}`

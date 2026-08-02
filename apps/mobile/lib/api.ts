@@ -450,6 +450,7 @@ export const subscriptionApi = {
   checkout: (plan: string, cardTokenId: string, billingPeriod: 'monthly' | 'annual' = 'monthly') =>
     api.post<{ status?: string }>('/subscription/checkout', { plan, card_token_id: cardTokenId, billing_period: billingPeriod }),
   me: () => api.get<{ plan: string; status: string; next_billing_date?: string | null; billing_period?: string } | null>('/subscription/me'),
+  capabilities: () => api.get<Record<string, boolean | number>>('/subscription/capabilities'),
   payments: () => api.get<Array<{ mp_payment_id: string; plan?: string; amount_cents: number; status?: string; paid_at?: string | null }>>('/subscription/payments'),
   cancel: () => api.post<{ ok: boolean }>('/subscription/cancel', {}),
 }

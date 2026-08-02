@@ -6,6 +6,7 @@ import { router } from 'expo-router'
 import { StackActions } from '@react-navigation/native'
 import type { BottomTabBarProps } from '@react-navigation/bottom-tabs'
 import { useAuthStore } from '@/lib/store'
+import { useCapabilities, promptUpgrade } from '@/lib/capabilities'
 import { NovaVendaSheet } from '@/components/financeiro/NovaVendaSheet'
 import { colors, font, spacing, radius } from '@/lib/theme'
 
@@ -13,16 +14,16 @@ import { colors, font, spacing, radius } from '@/lib/theme'
 // Ordem pedida: Início, Calendário, Vendas, [+], Clientes, Finanças, Config.
 // Vendas/Finanças só aparecem para gestores (o backend também bloqueia staff).
 
-type TabDef = { name: string; label: string; icon: keyof typeof Ionicons.glyphMap; managerOnly?: boolean }
+type TabDef = { name: string; label: string; icon: keyof typeof Ionicons.glyphMap; managerOnly?: boolean; cap?: string }
 
 const LEFT: TabDef[] = [
   { name: 'index', label: 'Início', icon: 'home-outline' },
   { name: 'calendar', label: 'Agenda', icon: 'calendar-outline' },
-  { name: 'vendas', label: 'Vendas', icon: 'cart-outline', managerOnly: true },
+  { name: 'vendas', label: 'Vendas', icon: 'cart-outline', managerOnly: true, cap: 'vendas_module' },
 ]
 const RIGHT: TabDef[] = [
   { name: 'customers', label: 'Clientes', icon: 'people-outline' },
-  { name: 'financeiro', label: 'Finanças', icon: 'cash-outline', managerOnly: true },
+  { name: 'financeiro', label: 'Finanças', icon: 'cash-outline', managerOnly: true, cap: 'vendas_module' },
   { name: 'settings', label: 'Config', icon: 'settings-outline' },
 ]
 
@@ -30,6 +31,7 @@ export function BottomTabBar({ state, navigation }: BottomTabBarProps) {
   const insets = useSafeAreaInsets()
   const role = useAuthStore((s) => s.role)
   const isManager = ['owner', 'admin', 'root'].includes(role ?? '')
+  const { can } = useCapabilities()
   const [menuOpen, setMenuOpen] = useState(false)
   const [vendaOpen, setVendaOpen] = useState(false)
 
@@ -54,9 +56,20 @@ export function BottomTabBar({ state, navigation }: BottomTabBarProps) {
 
   const Tab = ({ t }: { t: TabDef }) => {
     const active = activeName === t.name
+    const locked = !!t.cap && !can(t.cap)
     return (
-      <TouchableOpacity style={s.tab} onPress={() => go(t.name)} accessibilityRole="button" accessibilityLabel={t.label}>
-        <Ionicons name={t.icon} size={22} color={active ? colors.primary : colors.textDisabled} />
+      <TouchableOpacity
+        style={s.tab}
+        onPress={() => (locked ? promptUpgrade(t.label) : go(t.name))}
+        accessibilityRole="button"
+        accessibilityLabel={locked ? `${t.label} (bloqueado — requer upgrade)` : t.label}
+      >
+        <View>
+          <Ionicons name={t.icon} size={22} color={active ? colors.primary : colors.textDisabled} />
+          {locked && (
+            <View style={s.lockBadge}><Ionicons name="lock-closed" size={9} color="#fff" /></View>
+          )}
+        </View>
         <Text style={[s.label, { color: active ? colors.primary : colors.textDisabled }]} numberOfLines={1}>{t.label}</Text>
       </TouchableOpacity>
     )
@@ -90,7 +103,7 @@ export function BottomTabBar({ state, navigation }: BottomTabBarProps) {
               <Ionicons name="chevron-forward" size={18} color={colors.textDisabled} />
             </TouchableOpacity>
             {isManager && (
-              <TouchableOpacity style={s.action} onPress={() => { setMenuOpen(false); setVendaOpen(true) }}>
+              <TouchableOpacity style={s.action} onPress={() => { setMenuOpen(false); can('vendas_module') ? setVendaOpen(true) : promptUpgrade('Vendas') }}>
                 <View style={[s.actionIcon, { backgroundColor: colors.success + '18' }]}><Ionicons name="cart-outline" size={22} color={colors.success} /></View>
                 <View style={{ flex: 1 }}>
                   <Text style={s.actionLabel}>Nova venda</Text>
@@ -116,6 +129,7 @@ const s = StyleSheet.create({
   },
   tab: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 2, paddingTop: 6 },
   label: { fontSize: 10, fontWeight: '600' },
+  lockBadge: { position: 'absolute', top: -4, right: -8, width: 14, height: 14, borderRadius: 7, backgroundColor: colors.textDisabled, alignItems: 'center', justifyContent: 'center' },
   centerWrap: { width: 60, alignItems: 'center', justifyContent: 'center' },
   centerBtn: {
     width: 52, height: 52, borderRadius: 26, backgroundColor: colors.primary,

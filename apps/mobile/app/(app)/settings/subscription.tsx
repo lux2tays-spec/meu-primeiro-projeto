@@ -193,6 +193,7 @@ export default function SubscriptionScreen() {
       queryClient.invalidateQueries({ queryKey: ['subscription-plans'] })
       queryClient.invalidateQueries({ queryKey: ['subscription-me'] })
       queryClient.invalidateQueries({ queryKey: ['subscription-payments'] })
+      queryClient.invalidateQueries({ queryKey: ['tenant-capabilities'] })
       toast.show('Assinatura ativada!', 'success')
     } catch (e: any) {
       Alert.alert(
@@ -210,6 +211,7 @@ export default function SubscriptionScreen() {
       await subscriptionApi.cancel()
       queryClient.invalidateQueries({ queryKey: ['tenant'] })
       queryClient.invalidateQueries({ queryKey: ['subscription-me'] })
+      queryClient.invalidateQueries({ queryKey: ['tenant-capabilities'] })
       toast.show('Assinatura cancelada', 'success')
     } catch (e: any) {
       // e.message já é a mensagem amigável do backend — nunca o erro cru do MP.

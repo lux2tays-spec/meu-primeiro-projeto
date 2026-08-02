@@ -238,6 +238,7 @@ export default function SubscriptionPage() {
     queryClient.invalidateQueries({ queryKey: ['tenant'] })
     queryClient.invalidateQueries({ queryKey: ['sub-me'] })
     queryClient.invalidateQueries({ queryKey: ['sub-payments'] })
+    queryClient.invalidateQueries({ queryKey: ['tenant-capabilities'] })
   }, [queryClient])
 
   const handleCancelSubscription = useCallback(async () => {
@@ -250,6 +251,7 @@ export default function SubscriptionPage() {
       setSuccess(false)
       queryClient.invalidateQueries({ queryKey: ['tenant'] })
       queryClient.invalidateQueries({ queryKey: ['sub-me'] })
+      queryClient.invalidateQueries({ queryKey: ['tenant-capabilities'] })
     } catch (e: unknown) {
       const msg = e instanceof Error && e.message ? e.message : ''
       setCancelError(msg || 'Não foi possível cancelar agora. Tente novamente ou fale com o suporte.')

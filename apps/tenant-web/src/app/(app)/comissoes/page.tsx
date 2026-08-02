@@ -4,6 +4,8 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { commissionsApi, tenantApi, getToken, friendlyMessage, type CommissionRow } from '@/lib/api'
 import Loading from '@/components/ui/Loading'
 import { getTokenPayload } from '@/lib/auth'
+import { useCapabilities } from '@/lib/useCapabilities'
+import UpgradeGate from '@/components/UpgradeGate'
 
 function fmtBRL(v: number) {
   return Number(v || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
@@ -28,6 +30,7 @@ function toInstant(date: string) {
 
 export default function ComissoesPage() {
   const qc = useQueryClient()
+  const { can, loaded } = useCapabilities()
 
   // Role is read from the JWT in localStorage — only available on the client.
   const [role, setRole] = useState<string | null>(null)
@@ -161,6 +164,8 @@ export default function ComissoesPage() {
   }
 
   const busy = payMutation.isPending || refundMutation.isPending
+
+  if (loaded && !can('commissions')) return <UpgradeGate feature="Comissões" />
 
   return (
     <div className="max-w-4xl space-y-6">
