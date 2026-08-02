@@ -76,6 +76,7 @@ export default function ComissoesScreen() {
   // Confirmações
   const [confirmPayAll, setConfirmPayAll] = useState(false)
   const [confirmRefund, setConfirmRefund] = useState<{ ids: string[] } | null>(null)
+  const [confirmPayout, setConfirmPayout] = useState<{ professional_id: string; professional_name: string; pending_amount: number } | null>(null)
 
   const { data: professionals = [] } = useQuery({
     queryKey: ['professionals'],
@@ -96,6 +97,13 @@ export default function ComissoesScreen() {
 
   const totals = data?.totals
   const items = data?.data ?? []
+
+  // #7 (split contábil) — quanto repassar por profissional.
+  const { data: payout = [] } = useQuery({
+    queryKey: ['commissions-payout', appliedFrom, appliedTo],
+    queryFn: () => commissionsApi.payoutSummary({ from: appliedFrom ?? undefined, to: appliedTo ?? undefined }),
+    enabled: canManage,
+  })
 
   // Só itens visíveis contam para a seleção (limpa ids que saíram da lista).
   const visibleIds = useMemo(() => new Set(items.map((c) => c.id)), [items])
@@ -124,8 +132,10 @@ export default function ComissoesScreen() {
       commissionsApi.pay(body),
     onSuccess: (res) => {
       qc.invalidateQueries({ queryKey: ['commissions'] })
+      qc.invalidateQueries({ queryKey: ['commissions-payout'] })
       clearSelection()
       setConfirmPayAll(false)
+      setConfirmPayout(null)
       const n = res.paid_count ?? 0
       toast.show(
         n > 0
@@ -136,6 +146,7 @@ export default function ComissoesScreen() {
     },
     onError: (e: any) => {
       setConfirmPayAll(false)
+      setConfirmPayout(null)
       toast.show(e?.message ?? 'Não foi possível marcar como pago.', 'error')
     },
   })
@@ -145,6 +156,7 @@ export default function ComissoesScreen() {
       commissionsApi.refund(body),
     onSuccess: (res) => {
       qc.invalidateQueries({ queryKey: ['commissions'] })
+      qc.invalidateQueries({ queryKey: ['commissions-payout'] })
       clearSelection()
       setConfirmRefund(null)
       const n = res.refunded_count ?? 0
@@ -320,6 +332,28 @@ export default function ComissoesScreen() {
           </View>
         </View>
 
+        {/* #7 — A repassar por profissional (split contábil) */}
+        {canManage && (payout as any[]).some((p) => p.pending_amount > 0) && (
+          <View style={s.payoutCard}>
+            <Text style={s.payoutTitle}>A repassar por profissional</Text>
+            {(payout as any[]).filter((p) => p.pending_amount > 0).map((p) => (
+              <View key={p.professional_id} style={s.payoutRow}>
+                <View style={{ flex: 1 }}>
+                  <Text style={s.payoutName}>{p.professional_name}</Text>
+                  <Text style={s.payoutSub}>{p.pending_count} pendente(s)</Text>
+                </View>
+                <Text style={s.payoutAmount}>{fmtBRL(p.pending_amount)}</Text>
+                <TouchableOpacity
+                  style={s.payoutBtn}
+                  onPress={() => setConfirmPayout(p)}
+                >
+                  <Text style={s.payoutBtnText}>Pagar</Text>
+                </TouchableOpacity>
+              </View>
+            ))}
+          </View>
+        )}
+
         {/* Barra de ações da seleção (owner/admin) */}
         {canManage && selectedVisible.length > 0 && (
           <View style={s.selectionBar}>
@@ -459,6 +493,16 @@ export default function ComissoesScreen() {
       />
 
       <ConfirmDialog
+        visible={!!confirmPayout}
+        title="Repassar comissão"
+        message={`Marcar como paga toda a comissão pendente de ${confirmPayout?.professional_name ?? ''} (${fmtBRL(confirmPayout?.pending_amount ?? 0)})${hasPeriod ? ' do período' : ''}?`}
+        confirmLabel="Marcar como pago"
+        loading={payMutation.isPending}
+        onConfirm={() => confirmPayout && payMutation.mutate({ professional_id: confirmPayout.professional_id, from: appliedFrom ?? undefined, to: appliedTo ?? undefined })}
+        onCancel={() => setConfirmPayout(null)}
+      />
+
+      <ConfirmDialog
         visible={!!confirmRefund}
         title="Reverter para pendente"
         message={`Reverter ${confirmRefund?.ids.length ?? 0} ${(confirmRefund?.ids.length ?? 0) === 1 ? 'comissão paga' : 'comissões pagas'} para pendente? Isso desfaz o pagamento registrado.`}
@@ -511,6 +555,15 @@ const s = StyleSheet.create({
     backgroundColor: colors.primary, borderRadius: radius.lg, padding: spacing.md,
   },
   payBtnText: { color: '#fff', fontWeight: '700', fontSize: font.md },
+  // #7 — A repassar por profissional
+  payoutCard: { backgroundColor: colors.surface, borderRadius: radius.lg, padding: spacing.md, gap: spacing.sm },
+  payoutTitle: { fontSize: font.md, fontWeight: '700', color: colors.text },
+  payoutRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, borderTopWidth: 1, borderTopColor: colors.border, paddingTop: spacing.sm },
+  payoutName: { fontSize: font.md, fontWeight: '600', color: colors.text },
+  payoutSub: { fontSize: font.sm, color: colors.textSecondary, marginTop: 1 },
+  payoutAmount: { fontSize: font.md, fontWeight: '800', color: colors.warning },
+  payoutBtn: { backgroundColor: colors.primary, borderRadius: radius.md, paddingHorizontal: spacing.md, paddingVertical: spacing.sm },
+  payoutBtnText: { color: '#fff', fontWeight: '700', fontSize: font.sm },
   // Período
   periodCard: { gap: spacing.sm },
   periodRow: { flexDirection: 'row', gap: spacing.sm },

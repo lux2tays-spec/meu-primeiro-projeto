@@ -91,6 +91,37 @@ export const commissionRoutes: FastifyPluginAsync = async (app) => {
     return reply.send({ data: rows.rows, totals: totals.rows[0] })
   })
 
+  // #7 (split contábil): resumo de quanto REPASSAR a cada profissional (pendente
+  // + já pago no período). Só gestores (staff não vê o de todo mundo).
+  app.get('/payout-summary', async (request, reply) => {
+    const user = request.user
+    if (!canManage(user)) return reply.status(403).send({ error: 'Sem permissão' })
+    const q = listQuerySchema.parse(request.query)
+
+    let where = 'WHERE co.tenant_id = $1'
+    const params: unknown[] = [user.tenant_id]
+    let i = 2
+    if (q.from) { where += ` AND a.starts_at >= $${i++}`; params.push(q.from) }
+    if (q.to)   { where += ` AND a.starts_at <= $${i++}`; params.push(q.to) }
+
+    const { rows } = await db.query(
+      `SELECT co.professional_id, p.name AS professional_name,
+              COALESCE(SUM(co.amount) FILTER (WHERE co.status = 'pending'), 0)::float AS pending_amount,
+              COALESCE(SUM(co.amount) FILTER (WHERE co.status = 'paid'), 0)::float    AS paid_amount,
+              COUNT(*) FILTER (WHERE co.status = 'pending')::int AS pending_count
+       FROM commissions co
+       LEFT JOIN appointments a ON a.id = co.appointment_id
+       JOIN professionals p ON p.id = co.professional_id
+       ${where}
+       GROUP BY co.professional_id, p.name
+       HAVING COALESCE(SUM(co.amount) FILTER (WHERE co.status = 'pending'), 0) > 0
+           OR COALESCE(SUM(co.amount) FILTER (WHERE co.status = 'paid'), 0) > 0
+       ORDER BY pending_amount DESC, p.name`,
+      params
+    )
+    return reply.send(rows)
+  })
+
   // ── Pay pending commissions (owner/admin only) ──────────────────────────────
   // Marks matching *pending* commissions of this tenant as paid.
   // Filters: explicit ids, and/or professional_id + appointment date range.

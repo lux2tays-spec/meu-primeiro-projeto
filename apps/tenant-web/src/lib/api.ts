@@ -236,6 +236,13 @@ export const commissionsApi = {
     const q = qs.toString()
     return api.get<CommissionsResponse>(`/commissions${q ? `?${q}` : ''}`)
   },
+  payoutSummary: (params?: { from?: string; to?: string }) => {
+    const qs = new URLSearchParams()
+    if (params?.from) qs.set('from', params.from)
+    if (params?.to) qs.set('to', params.to)
+    const q = qs.toString()
+    return api.get<Array<{ professional_id: string; professional_name: string; pending_amount: number; paid_amount: number; pending_count: number }>>(`/commissions/payout-summary${q ? `?${q}` : ''}`)
+  },
   pay: (body: { ids?: string[]; professional_id?: string; from?: string; to?: string }) =>
     api.post<{ paid_count: number }>('/commissions/pay', body),
   // SAL-10: estorno — reverte comissões pagas para pendente (mesmos filtros do /pay).

@@ -75,11 +75,18 @@ export default function ComissoesPage() {
   const rows: CommissionRow[] = data?.data ?? []
   const totals = data?.totals
 
+  // #7 (split contábil) — resumo de quanto repassar a cada profissional.
+  const { data: payout = [] } = useQuery({
+    queryKey: ['commissions-payout', fromDate, toDate],
+    queryFn: () => commissionsApi.payoutSummary(periodParams),
+  })
+
   const selectedPendingIds = rows.filter((r) => selected.has(r.id) && r.status === 'pending').map((r) => r.id)
   const selectedPaidIds = rows.filter((r) => selected.has(r.id) && r.status === 'paid').map((r) => r.id)
 
   function onDone(msg: string) {
     qc.invalidateQueries({ queryKey: ['commissions'] })
+    qc.invalidateQueries({ queryKey: ['commissions-payout'] })
     setSelected(new Set())
     setActionError('')
     setFeedback(msg)
@@ -237,6 +244,33 @@ export default function ComissoesPage() {
           <p className="text-2xl font-bold text-green-600">{fmtBRL(totals?.paid_amount ?? 0)}</p>
         </div>
       </div>
+
+      {/* #7 — A repassar por profissional (split contábil) */}
+      {isManager && payout.some((p) => p.pending_amount > 0) && (
+        <div className={cardCls}>
+          <p className="text-sm font-semibold text-gray-900 mb-1">A repassar por profissional</p>
+          <p className="text-xs text-gray-400 mb-3">Quanto pagar a cada profissional no período. Pague tudo de um profissional com um clique.</p>
+          <div className="divide-y divide-gray-50">
+            {payout.filter((p) => p.pending_amount > 0).map((p) => (
+              <div key={p.professional_id} className="flex items-center justify-between gap-3 py-2.5">
+                <div>
+                  <p className="text-sm font-medium text-gray-900">{p.professional_name}</p>
+                  <p className="text-xs text-gray-400">{p.pending_count} pendente(s){p.paid_amount > 0 ? ` · ${fmtBRL(p.paid_amount)} já pago` : ''}</p>
+                </div>
+                <div className="flex items-center gap-3">
+                  <span className="text-sm font-bold text-amber-600">{fmtBRL(p.pending_amount)}</span>
+                  <button
+                    onClick={() => { if (confirm(`Marcar como paga toda a comissão pendente de ${p.professional_name} (${fmtBRL(p.pending_amount)})?`)) payMutation.mutate({ professional_id: p.professional_id, ...periodParams }) }}
+                    disabled={busy}
+                    className="bg-primary hover:bg-primary-dark text-white text-xs font-semibold px-3 py-1.5 rounded-lg transition-colors disabled:opacity-50">
+                    Pagar
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Ações: pagar / estornar (somente owner/admin) */}
       {isManager && (
