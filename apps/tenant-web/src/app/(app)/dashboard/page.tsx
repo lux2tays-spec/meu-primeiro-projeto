@@ -134,13 +134,17 @@ export default function DashboardPage() {
       {/* Vendas do mês (Total de Vendas + Meta de Vendas) */}
       {isManager && (
         <div>
-          <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">Vendas do mês</h2>
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wide">Vendas do mês</h2>
+            <Link href="/vendas" className="text-primary text-sm hover:underline">Ver relatório →</Link>
+          </div>
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-            <div className="bg-white rounded-2xl p-5 shadow-sm border border-gray-100">
+            {/* Clicar em "Total de Vendas" abre o relatório de vendas. */}
+            <Link href="/vendas" className="block bg-white rounded-2xl p-5 shadow-sm border border-gray-100 hover:border-primary/40 hover:shadow transition">
               <p className="text-gray-500 text-sm mb-1">Total de Vendas</p>
               <p className="text-3xl font-bold text-green-600">{resumo ? fmtBRL(resumo.receita_total) : '—'}</p>
-              <p className="text-[11px] text-gray-400 mt-0.5">{resumo?.total_vendas ?? 0} venda(s) concluída(s)</p>
-            </div>
+              <p className="text-[11px] text-gray-400 mt-0.5">{resumo?.total_vendas ?? 0} venda(s) concluída(s) · ver relatório</p>
+            </Link>
             <div className="bg-white rounded-2xl p-5 shadow-sm border border-gray-100">
               <p className="text-gray-500 text-sm mb-1">Meta de Vendas</p>
               <p className="text-3xl font-bold text-gray-900">{resumo && resumo.meta_lucro > 0 ? fmtBRL(resumo.meta_vendas) : '—'}</p>

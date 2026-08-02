@@ -152,10 +152,18 @@ export default function DashboardScreen() {
         {/* Vendas do mês (Total de Vendas + Meta de Vendas) — só gestores */}
         {isManager && (
           <>
-            <Text style={styles.sectionTitle}>Vendas do mês</Text>
+            <View style={styles.rowBetween}>
+              <Text style={styles.sectionTitle}>Vendas do mês</Text>
+              <TouchableOpacity onPress={() => router.push('/(app)/vendas' as any)}>
+                <Text style={styles.seeAll}>Ver relatório →</Text>
+              </TouchableOpacity>
+            </View>
             <View style={styles.statsRow}>
-              <StatCard label="Total de Vendas" value={resumo ? fmtBRL(resumo.receita_total) : '—'} icon="cash-outline" color={colors.success}
-                subtitle={`${resumo?.total_vendas ?? 0} venda(s)`} />
+              {/* Tocar em "Total de Vendas" abre o relatório de vendas. */}
+              <TouchableOpacity style={{ flex: 1 }} activeOpacity={0.8} onPress={() => router.push('/(app)/vendas' as any)}>
+                <StatCard label="Total de Vendas" value={resumo ? fmtBRL(resumo.receita_total) : '—'} icon="cash-outline" color={colors.success}
+                  subtitle={`${resumo?.total_vendas ?? 0} venda(s) · ver`} />
+              </TouchableOpacity>
               <StatCard label="Meta de Vendas" value={resumo && resumo.meta_lucro > 0 ? fmtBRL(resumo.meta_vendas) : '—'} icon="flag-outline" color={colors.primary}
                 subtitle={resumo && resumo.meta_lucro > 0 ? (resumo.vendas_faltantes > 0 ? `Faltam ${resumo.vendas_faltantes}` : 'Batida! 🎉') : 'Defina no Financeiro'} />
             </View>
@@ -239,6 +247,8 @@ const styles = StyleSheet.create({
   },
   trialText: { color: colors.warning, fontSize: font.sm, fontWeight: '500' },
   sectionTitle: { fontSize: font.lg, fontWeight: '700', color: colors.text },
+  rowBetween: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  seeAll: { fontSize: font.sm, fontWeight: '700', color: colors.primary },
   statsRow: { flexDirection: 'row', gap: spacing.md },
   botCard: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, backgroundColor: colors.primaryLight, borderRadius: radius.lg, padding: spacing.md },
   botIcon: { width: 44, height: 44, borderRadius: 12, backgroundColor: '#fff', alignItems: 'center', justifyContent: 'center' },
