@@ -2,7 +2,7 @@ import Link from 'next/link'
 import type { Metadata } from 'next'
 import {
   MessageCircle, CalendarDays, Coins, CreditCard, Users, Bell,
-  Headset, BarChart3, ArrowRight, Clock, TrendingUp, Sparkles, ShieldCheck,
+  Headset, BarChart3, ArrowRight, Clock, TrendingUp, Sparkles, ShieldCheck, Star, Bot,
 } from 'lucide-react'
 import Logo, { LP_FONT } from '@/components/landing/Logo'
 import Reveal from '@/components/landing/Reveal'
@@ -10,6 +10,7 @@ import PhoneChat, { type ChatMessage } from '@/components/landing/PhoneChat'
 import AgendaMock from '@/components/landing/AgendaMock'
 import SupportWhatsAppButton from '@/components/landing/SupportWhatsAppButton'
 import PricingPlans from '@/components/landing/PricingPlans'
+import Faq from '@/components/landing/Faq'
 
 export const metadata: Metadata = {
   title: 'AíConfirma — Seu atendimento no WhatsApp no piloto automático',
@@ -71,6 +72,13 @@ const ROI = [
   { icon: Coins,      stat: 'Comissão sem erro',        desc: 'Cálculo automático por profissional. Fim da planilha e das dúvidas no fim do mês.' },
 ]
 
+// Depoimentos ilustrativos (prova social). Ajuste os textos conforme cases reais.
+const TESTIMONIALS = [
+  { name: 'Marina S.', role: 'Studio de beleza', text: 'A IA responde na hora, mesmo quando estou atendendo. Parei de perder cliente por demora no WhatsApp — a agenda encheu.', bot: 320 },
+  { name: 'Rafael L.', role: 'Barbearia', text: 'Configurei em minutos lendo o QR Code. Agora o bot agenda e confirma sozinho, e ainda calcula a comissão da equipe.', bot: 540 },
+  { name: 'Dra. Aline', role: 'Clínica de estética', text: 'Os lembretes automáticos reduziram muito as faltas. E quando precisa, eu assumo a conversa e o bot pausa sozinho.', bot: 410 },
+]
+
 function Section({ id, className = '', children }: { id?: string; className?: string; children: React.ReactNode }) {
   return (
     <section id={id} className={`mx-auto w-full max-w-6xl px-5 sm:px-8 ${className}`}>{children}</section>
@@ -85,6 +93,12 @@ export default function Home() {
         <div className="mx-auto flex max-w-6xl items-center justify-between px-5 py-3.5 sm:px-8">
           <Logo id="lp-nav" size={30} />
           <nav className="flex items-center gap-2 sm:gap-3">
+            <a href="#planos" className="hidden rounded-xl px-3 py-2 text-sm font-semibold text-slate-600 hover:text-slate-900 dark:text-slate-300 dark:hover:text-white md:inline-block">
+              Planos
+            </a>
+            <a href="#faq" className="hidden rounded-xl px-3 py-2 text-sm font-semibold text-slate-600 hover:text-slate-900 dark:text-slate-300 dark:hover:text-white md:inline-block">
+              Dúvidas
+            </a>
             <Link href="/login" className="rounded-xl px-3 py-2 text-sm font-semibold text-slate-600 hover:text-slate-900 dark:text-slate-300 dark:hover:text-white">
               Entrar
             </Link>
@@ -252,6 +266,49 @@ export default function Home() {
         </div>
       </Section>
 
+      {/* ── Depoimentos (prova social) ──────────────────────────────────────── */}
+      <Section id="depoimentos" className="py-16 sm:py-20">
+        <Reveal>
+          <h2 className="text-center text-3xl font-extrabold tracking-tight sm:text-4xl" style={{ color: NAVY }}>
+            <span className="dark:text-white">Negócios que já </span>
+            <span className="bg-gradient-to-r from-[#2CB86E] to-[#1D62B5] bg-clip-text text-transparent">atendem no automático</span>
+          </h2>
+          <p className="mx-auto mt-3 max-w-2xl text-center text-slate-600 dark:text-slate-300">
+            Veja quantos agendamentos a IA já fechou sozinha para cada um.
+          </p>
+        </Reveal>
+        <div className="mt-12 grid gap-5 md:grid-cols-3">
+          {TESTIMONIALS.map((t, i) => (
+            <Reveal key={t.name} delay={i * 90}>
+              <figure className="flex h-full flex-col rounded-2xl border border-slate-100 bg-white p-6 shadow-sm dark:border-white/10 dark:bg-white/5">
+                <div className="flex gap-0.5 text-[#F5B301]">
+                  {Array.from({ length: 5 }).map((_, s) => <Star key={s} size={15} fill="currentColor" strokeWidth={0} />)}
+                </div>
+                <blockquote className="mt-3 flex-1 text-sm leading-relaxed text-slate-600 dark:text-slate-300">“{t.text}”</blockquote>
+                {/* Painel do app: agendamentos fechados pela IA */}
+                <div className="mt-4 flex items-center gap-3 rounded-xl bg-[#2CB86E]/10 px-4 py-3 ring-1 ring-[#2CB86E]/20">
+                  <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-[#2CB86E]/15 text-[#2CB86E]"><Bot size={18} /></div>
+                  <div>
+                    <p className="text-lg font-extrabold leading-none text-[#1C9DAA] dark:text-[#8FE3B4]">{t.bot}+</p>
+                    <p className="text-[11px] font-medium text-slate-500 dark:text-slate-400">agendamentos feitos pela IA</p>
+                  </div>
+                </div>
+                <figcaption className="mt-4 flex items-center gap-3 border-t border-slate-100 pt-4 dark:border-white/10">
+                  <div className="flex h-9 w-9 items-center justify-center rounded-full bg-slate-100 font-bold text-slate-500 dark:bg-white/10 dark:text-white">{t.name.charAt(0)}</div>
+                  <div>
+                    <p className="text-sm font-bold text-slate-900 dark:text-white">{t.name}</p>
+                    <p className="text-xs text-slate-500 dark:text-slate-400">{t.role}</p>
+                  </div>
+                </figcaption>
+              </figure>
+            </Reveal>
+          ))}
+        </div>
+        <Reveal>
+          <p className="mx-auto mt-6 max-w-2xl text-center text-xs text-slate-400">Depoimentos ilustrativos.</p>
+        </Reveal>
+      </Section>
+
       {/* ── Planos ──────────────────────────────────────────────────────────── */}
       <Section id="planos" className="py-4">
         <Reveal>
@@ -263,6 +320,19 @@ export default function Home() {
           </p>
         </Reveal>
         <PricingPlans />
+      </Section>
+
+      {/* ── FAQ ─────────────────────────────────────────────────────────────── */}
+      <Section id="faq" className="py-16 sm:py-20">
+        <Reveal>
+          <h2 className="text-center text-3xl font-extrabold tracking-tight sm:text-4xl" style={{ color: NAVY }}>
+            <span className="dark:text-white">Perguntas frequentes</span>
+          </h2>
+          <p className="mx-auto mt-3 max-w-2xl text-center text-slate-600 dark:text-slate-300">
+            Tudo o que você precisa saber antes de começar.
+          </p>
+        </Reveal>
+        <Faq />
       </Section>
 
       {/* ── CTA final ───────────────────────────────────────────────────────── */}
