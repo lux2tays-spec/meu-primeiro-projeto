@@ -5,6 +5,7 @@ import { syncAppointmentToCalendar, deleteCalendarEvent } from '../services/goog
 import { findAvailableSlots, isOverlapViolation } from '../services/scheduling'
 import { syncCommissionForAppointment } from '../lib/commissions'
 import { evolutionSend } from '../services/evolution'
+import { sendAppointmentConfirmation } from '../lib/appointmentConfirmation'
 
 const createSchema = z.object({
   customer_id: z.string().uuid(),
@@ -208,6 +209,14 @@ export const appointmentRoutes: FastifyPluginAsync = async (app) => {
 
     const body = updateSchema.parse(request.body)
 
+    // #2 — para enviar a confirmação só na TRANSIÇÃO para 'confirmed', guardamos
+    // o status anterior.
+    let prevStatus: string | undefined
+    if (body.status === 'confirmed') {
+      const { rows: [cur] } = await db.query('SELECT status FROM appointments WHERE id = $1 AND tenant_id = $2', [appointmentId, tenant_id])
+      prevStatus = cur?.status
+    }
+
     // Ensure any referenced professional/service belongs to this tenant (prevent cross-tenant references)
     if (body.professional_id) {
       const { rows: [prof] } = await db.query(
@@ -324,6 +333,12 @@ export const appointmentRoutes: FastifyPluginAsync = async (app) => {
       syncCommissionForAppointment(appointmentId).catch(console.error)
     }
 
+    // #2 — confirmação manual: ao passar para 'confirmed', avisa o cliente no
+    // WhatsApp na hora (os lembretes seguem pelos jobs). Fire-and-forget.
+    if (body.status === 'confirmed' && prevStatus !== 'confirmed') {
+      sendAppointmentConfirmation(tenant_id!, appointmentId).catch(console.error)
+    }
+
     return reply.send(updated)
   })
 
@@ -336,6 +351,13 @@ export const appointmentRoutes: FastifyPluginAsync = async (app) => {
 
     const allowed = await canEditAppointment(user_id, tenant_id!, role, request.params.id)
     if (!allowed) return reply.status(403).send({ error: 'Sem permissão' })
+
+    // #2 — status anterior para enviar a confirmação só na transição p/ 'confirmed'.
+    let prevStatus: string | undefined
+    if (status === 'confirmed') {
+      const { rows: [cur] } = await db.query('SELECT status FROM appointments WHERE id = $1 AND tenant_id = $2', [request.params.id, tenant_id])
+      prevStatus = cur?.status
+    }
 
     let appt: any
     try {
@@ -368,6 +390,11 @@ export const appointmentRoutes: FastifyPluginAsync = async (app) => {
 
     // Keep the professional's commission in sync with the new status
     syncCommissionForAppointment(request.params.id).catch(console.error)
+
+    // #2 — confirmação manual: avisa o cliente no WhatsApp ao confirmar.
+    if (status === 'confirmed' && prevStatus !== 'confirmed') {
+      sendAppointmentConfirmation(tenant_id!, request.params.id).catch(console.error)
+    }
 
     return reply.send(appt)
   })
