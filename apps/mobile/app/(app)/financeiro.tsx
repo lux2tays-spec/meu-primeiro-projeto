@@ -4,6 +4,7 @@ import {
   RefreshControl, Alert, TextInput, Modal, ActivityIndicator,
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
+import { router } from 'expo-router'
 import { Ionicons } from '@expo/vector-icons'
 import { useQuery, useInfiniteQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { financeiroApi } from '@/lib/api'
@@ -223,29 +224,29 @@ export default function FinanceiroScreen() {
           </View>
         ) : (
           <>
-            {/* KPIs */}
+            {/* KPIs — tocar leva ao detalhe (#6/#7) */}
             <View style={s.kpiRow}>
-              <View style={[s.kpi, { backgroundColor: '#ECFDF5' }]}>
+              <TouchableOpacity style={[s.kpi, { backgroundColor: '#ECFDF5' }]} activeOpacity={0.8} onPress={() => setTab('vendas')}>
                 <Text style={s.kpiLabel} numberOfLines={1}>Receita</Text>
                 <Text style={[s.kpiValue, { color: colors.success }]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.6}>{fmtBRL(resumo?.receita_total ?? 0)}</Text>
-              </View>
-              <View style={[s.kpi, { backgroundColor: colors.primaryLight }]}>
+              </TouchableOpacity>
+              <TouchableOpacity style={[s.kpi, { backgroundColor: colors.primaryLight }]} activeOpacity={0.8} onPress={() => setTab('vendas')}>
                 <Text style={s.kpiLabel} numberOfLines={1}>Vendas</Text>
                 <Text style={[s.kpiValue, { color: colors.primary }]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.6}>{resumo?.total_vendas ?? 0}</Text>
-              </View>
-              <View style={[s.kpi, { backgroundColor: '#FFF7ED' }]}>
+              </TouchableOpacity>
+              <TouchableOpacity style={[s.kpi, { backgroundColor: '#FFF7ED' }]} activeOpacity={0.8} onPress={() => router.push('/(app)/calendar' as any)}>
                 <Text style={s.kpiLabel} numberOfLines={1}>Em aberto</Text>
                 <Text style={[s.kpiValue, { color: colors.warning }]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.6}>{resumo?.agendamentos_abertos ?? 0}</Text>
-              </View>
+              </TouchableOpacity>
             </View>
 
             {/* KPIs novos: ticket médio + taxa de cancelamento */}
             <View style={s.kpiRow}>
-              <View style={[s.kpi, { backgroundColor: '#EEF2FF' }]}>
+              <TouchableOpacity style={[s.kpi, { backgroundColor: '#EEF2FF' }]} activeOpacity={0.8} onPress={() => setTab('vendas')}>
                 <Text style={s.kpiLabel} numberOfLines={1}>Ticket médio</Text>
                 <Text style={[s.kpiValue, { color: colors.info }]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.6}>{fmtBRL(resumo?.ticket_medio ?? 0)}</Text>
-              </View>
-              <View style={[s.kpi, { backgroundColor: '#FEF2F2' }]}>
+              </TouchableOpacity>
+              <TouchableOpacity style={[s.kpi, { backgroundColor: '#FEF2F2' }]} activeOpacity={0.8} onPress={() => router.push('/(app)/calendar' as any)}>
                 <Text style={s.kpiLabel} numberOfLines={1}>Cancelamentos</Text>
                 <Text style={[s.kpiValue, { color: colors.danger }]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.6}>
                   {Number(resumo?.taxa_cancelamento ?? 0).toLocaleString('pt-BR', { maximumFractionDigits: 1 })}%
@@ -253,23 +254,23 @@ export default function FinanceiroScreen() {
                 <Text style={s.kpiSub}>
                   {resumo?.agendamentos_cancelados ?? 0} de {resumo?.total_agendamentos ?? 0}
                 </Text>
-              </View>
+              </TouchableOpacity>
             </View>
 
             {/* KPIs financeiros: despesas + lucro */}
             <View style={s.kpiRow}>
-              <View style={[s.kpi, { backgroundColor: '#FEF2F2' }]}>
+              <TouchableOpacity style={[s.kpi, { backgroundColor: '#FEF2F2' }]} activeOpacity={0.8} onPress={() => setTab('despesas')}>
                 <Text style={s.kpiLabel} numberOfLines={1}>Despesas</Text>
                 <Text style={[s.kpiValue, { color: colors.danger }]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.6}>{fmtBRL(resumo?.despesas_total ?? 0)}</Text>
                 <Text style={s.kpiSub} numberOfLines={1}>Fixas {fmtBRL(resumo?.despesas_fixas ?? 0)}</Text>
-              </View>
-              <View style={[s.kpi, { backgroundColor: '#ECFDF5' }]}>
+              </TouchableOpacity>
+              <TouchableOpacity style={[s.kpi, { backgroundColor: '#ECFDF5' }]} activeOpacity={0.8} onPress={() => setTab('despesas')}>
                 <Text style={s.kpiLabel} numberOfLines={1}>Lucro</Text>
                 <Text style={[s.kpiValue, { color: (resumo?.lucro ?? 0) >= (resumo?.meta_lucro ?? 0) && (resumo?.meta_lucro ?? 0) > 0 ? colors.success : colors.text }]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.6}>
                   {fmtBRL(resumo?.lucro ?? 0)}
                 </Text>
                 <Text style={s.kpiSub}>Meta {fmtBRL(resumo?.meta_lucro ?? 0)}{(resumo?.meta_lucro ?? 0) > 0 ? ` · ${resumo?.progresso_meta ?? 0}%` : ''}</Text>
-              </View>
+              </TouchableOpacity>
             </View>
 
             {/* Card de Meta de Lucro */}

@@ -126,27 +126,18 @@ export default function DashboardScreen() {
           </View>
         )}
 
-        {/* Stats */}
+        {/* Stats — tocar abre a Agenda (#5) */}
         <Text style={styles.sectionTitle}>Hoje</Text>
         <View style={styles.statsRow}>
-          <StatCard
-            label="Agendamentos"
-            value={total}
-            icon="calendar-outline"
-            color={colors.primary}
-          />
-          <StatCard
-            label="Confirmados"
-            value={confirmed}
-            icon="checkmark-circle-outline"
-            color={colors.success}
-          />
-          <StatCard
-            label="Pendentes"
-            value={pending}
-            icon="time-outline"
-            color={colors.warning}
-          />
+          <TouchableOpacity style={{ flex: 1 }} activeOpacity={0.8} onPress={() => router.push('/(app)/calendar' as any)}>
+            <StatCard label="Agendamentos" value={total} icon="calendar-outline" color={colors.primary} />
+          </TouchableOpacity>
+          <TouchableOpacity style={{ flex: 1 }} activeOpacity={0.8} onPress={() => router.push('/(app)/calendar' as any)}>
+            <StatCard label="Confirmados" value={confirmed} icon="checkmark-circle-outline" color={colors.success} />
+          </TouchableOpacity>
+          <TouchableOpacity style={{ flex: 1 }} activeOpacity={0.8} onPress={() => router.push('/(app)/calendar' as any)}>
+            <StatCard label="Pendentes" value={pending} icon="time-outline" color={colors.warning} />
+          </TouchableOpacity>
         </View>
 
         {/* Vendas do mês (Total de Vendas + Meta de Vendas) — só gestores */}
@@ -164,8 +155,10 @@ export default function DashboardScreen() {
                 <StatCard label="Total de Vendas" value={resumo ? fmtBRL(resumo.receita_total) : '—'} icon="cash-outline" color={colors.success}
                   subtitle={`${resumo?.total_vendas ?? 0} venda(s) · ver`} />
               </TouchableOpacity>
-              <StatCard label="Meta de Vendas" value={resumo && resumo.meta_lucro > 0 ? fmtBRL(resumo.meta_vendas) : '—'} icon="flag-outline" color={colors.primary}
-                subtitle={resumo && resumo.meta_lucro > 0 ? (resumo.vendas_faltantes > 0 ? `Faltam ${resumo.vendas_faltantes}` : 'Batida! 🎉') : 'Defina no Financeiro'} />
+              <TouchableOpacity style={{ flex: 1 }} activeOpacity={0.8} onPress={() => router.push('/(app)/financeiro' as any)}>
+                <StatCard label="Meta de Vendas" value={resumo && resumo.meta_lucro > 0 ? fmtBRL(resumo.meta_vendas) : '—'} icon="flag-outline" color={colors.primary}
+                  subtitle={resumo && resumo.meta_lucro > 0 ? (resumo.vendas_faltantes > 0 ? `Faltam ${resumo.vendas_faltantes}` : 'Batida! 🎉') : 'Defina no Financeiro'} />
+              </TouchableOpacity>
             </View>
 
             {/* #5 — agendamentos captados pelo bot ("clientes que você poderia perder") */}

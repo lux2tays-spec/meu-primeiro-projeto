@@ -145,22 +145,22 @@ export default function DashboardPage() {
               <p className="text-3xl font-bold text-green-600">{resumo ? fmtBRL(resumo.receita_total) : '—'}</p>
               <p className="text-[11px] text-gray-400 mt-0.5">{resumo?.total_vendas ?? 0} venda(s) concluída(s) · ver relatório</p>
             </Link>
-            <div className="bg-white rounded-2xl p-5 shadow-sm border border-gray-100">
+            <Link href="/financeiro" className="block bg-white rounded-2xl p-5 shadow-sm border border-gray-100 hover:border-primary/40 hover:shadow transition">
               <p className="text-gray-500 text-sm mb-1">Meta de Vendas</p>
               <p className="text-3xl font-bold text-gray-900">{resumo && resumo.meta_lucro > 0 ? fmtBRL(resumo.meta_vendas) : '—'}</p>
               <p className="text-[11px] text-gray-400 mt-0.5">
                 {resumo && resumo.meta_lucro > 0
                   ? (resumo.vendas_faltantes > 0 ? `Faltam ${resumo.vendas_faltantes} venda(s)` : 'Meta batida! 🎉')
-                  : <Link href="/financeiro" className="text-primary hover:underline">Defina uma meta de lucro</Link>}
+                  : 'Defina uma meta de lucro'}
               </p>
-            </div>
-            <div className="bg-white rounded-2xl p-5 shadow-sm border border-gray-100">
+            </Link>
+            <Link href="/financeiro" className="block bg-white rounded-2xl p-5 shadow-sm border border-gray-100 hover:border-primary/40 hover:shadow transition">
               <p className="text-gray-500 text-sm mb-1">Lucro do mês</p>
               <p className={`text-3xl font-bold ${resumo && resumo.meta_lucro > 0 && resumo.lucro >= resumo.meta_lucro ? 'text-green-600' : 'text-gray-900'}`}>
                 {resumo ? fmtBRL(resumo.lucro) : '—'}
               </p>
               <p className="text-[11px] text-gray-400 mt-0.5">Despesas {resumo ? fmtBRL(resumo.despesas_total) : '—'}</p>
-            </div>
+            </Link>
           </div>
 
           {/* #5 — agendamentos captados pelo bot ("clientes que você poderia perder") */}

@@ -1,5 +1,6 @@
 'use client'
 import { useEffect, useState } from 'react'
+import { useRouter } from 'next/navigation'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { financeiroApi, getToken, friendlyMessage } from '@/lib/api'
 import Loading from '@/components/ui/Loading'
@@ -26,6 +27,7 @@ function fmtDate(iso: string) {
 
 export default function FinanceiroPage() {
   const qc = useQueryClient()
+  const router = useRouter()
   const { can, loaded: capsLoaded } = useCapabilities()
   const now = new Date()
   const [month, setMonth] = useState(now.getMonth() + 1)
@@ -142,37 +144,40 @@ export default function FinanceiroPage() {
         </div>
       </div>
 
-      {/* KPIs — 5 originais + Despesas e Lucro (flex-wrap no mobile) */}
+      {/* KPIs — clicar em cada card leva ao detalhe (#6/#7) */}
       <div className="flex flex-wrap gap-4">
-        <div className={`${cardCls} flex-1 min-w-[150px]`}>
+        <button onClick={() => setTab('vendas')} className={`${cardCls} flex-1 min-w-[150px] text-left hover:border-primary/40 hover:shadow transition`}>
           <p className="text-xs text-gray-500 mb-1">Receita do mês</p>
           <p className="text-2xl font-bold text-green-600">{fmtBRL(resumo?.receita_total ?? 0)}</p>
-        </div>
-        <div className={`${cardCls} flex-1 min-w-[150px]`}>
+          <p className="text-[11px] text-primary mt-0.5">ver vendas →</p>
+        </button>
+        <button onClick={() => setTab('vendas')} className={`${cardCls} flex-1 min-w-[150px] text-left hover:border-primary/40 hover:shadow transition`}>
           <p className="text-xs text-gray-500 mb-1">Vendas concluídas</p>
           <p className="text-2xl font-bold text-gray-900">{resumo?.total_vendas ?? 0}</p>
-        </div>
-        <div className={`${cardCls} flex-1 min-w-[150px]`}>
+          <p className="text-[11px] text-primary mt-0.5">ver vendas →</p>
+        </button>
+        <button onClick={() => setTab('vendas')} className={`${cardCls} flex-1 min-w-[150px] text-left hover:border-primary/40 hover:shadow transition`}>
           <p className="text-xs text-gray-500 mb-1">Ticket médio</p>
           <p className="text-2xl font-bold text-gray-900">{fmtBRL(resumo?.ticket_medio ?? 0)}</p>
-        </div>
-        <div className={`${cardCls} flex-1 min-w-[150px]`}>
+        </button>
+        <button onClick={() => router.push('/calendar')} className={`${cardCls} flex-1 min-w-[150px] text-left hover:border-primary/40 hover:shadow transition`}>
           <p className="text-xs text-gray-500 mb-1">Agendamentos abertos</p>
           <p className="text-2xl font-bold text-blue-600">{resumo?.agendamentos_abertos ?? 0}</p>
-        </div>
-        <div className={`${cardCls} flex-1 min-w-[150px]`}>
+          <p className="text-[11px] text-primary mt-0.5">ver agenda →</p>
+        </button>
+        <button onClick={() => router.push('/calendar')} className={`${cardCls} flex-1 min-w-[150px] text-left hover:border-primary/40 hover:shadow transition`}>
           <p className="text-xs text-gray-500 mb-1">Taxa de cancelamento</p>
           <p className="text-2xl font-bold text-red-500">{(resumo?.taxa_cancelamento ?? 0).toLocaleString('pt-BR')}%</p>
           <p className="text-[11px] text-gray-400 mt-0.5">
             {resumo?.agendamentos_cancelados ?? 0} de {resumo?.total_agendamentos ?? 0} agendamentos
           </p>
-        </div>
-        <div className={`${cardCls} flex-1 min-w-[150px]`}>
+        </button>
+        <button onClick={() => setTab('despesas')} className={`${cardCls} flex-1 min-w-[150px] text-left hover:border-primary/40 hover:shadow transition`}>
           <p className="text-xs text-gray-500 mb-1">Despesas do mês</p>
           <p className="text-2xl font-bold text-red-500">{fmtBRL(resumo?.despesas_total ?? 0)}</p>
-          <p className="text-[11px] text-gray-400 mt-0.5">Fixas {fmtBRL(resumo?.despesas_fixas ?? 0)}</p>
-        </div>
-        <div className={`${cardCls} flex-1 min-w-[150px]`}>
+          <p className="text-[11px] text-primary mt-0.5">ver despesas →</p>
+        </button>
+        <button onClick={() => setTab('despesas')} className={`${cardCls} flex-1 min-w-[150px] text-left hover:border-primary/40 hover:shadow transition`}>
           <p className="text-xs text-gray-500 mb-1">Lucro</p>
           <p className={`text-2xl font-bold ${(resumo?.lucro ?? 0) >= (resumo?.meta_lucro ?? 0) && (resumo?.meta_lucro ?? 0) > 0 ? 'text-green-600' : 'text-gray-900'}`}>
             {fmtBRL(resumo?.lucro ?? 0)}
@@ -180,7 +185,7 @@ export default function FinanceiroPage() {
           <p className="text-[11px] text-gray-400 mt-0.5">
             Meta {fmtBRL(resumo?.meta_lucro ?? 0)}{(resumo?.meta_lucro ?? 0) > 0 ? ` · ${resumo?.progresso_meta ?? 0}%` : ''}
           </p>
-        </div>
+        </button>
       </div>
 
       {/* Card de Meta de Lucro (quanto faturar + nº de vendas) */}
