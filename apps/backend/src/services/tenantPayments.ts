@@ -23,6 +23,7 @@ export async function createSalePreference(tenantId: string, params: {
   appointmentId: string
   title: string
   amount: number
+  notifyBase?: string  // base pública da API (derivada da requisição); tem prioridade sobre a env
 }): Promise<PreferenceResult> {
   const { rows: [t] } = await db.query('SELECT mp_access_token FROM tenants WHERE id = $1', [tenantId])
   if (!t?.mp_access_token) return { ok: false, reason: 'mp_not_configured' }
@@ -30,7 +31,9 @@ export async function createSalePreference(tenantId: string, params: {
   let token: string
   try { token = decrypt(t.mp_access_token) } catch { return { ok: false, reason: 'mp_token_invalid' } }
 
-  const apiBase = publicApiBase()
+  // notification_url: usa a base derivada da requisição (robusto, sem depender de
+  // env) e, se não vier, cai na env WEBHOOK_BASE_URL/BACKEND_URL.
+  const apiBase = (params.notifyBase || publicApiBase() || '').replace(/\/$/, '')
   const webBase = tenantWebBase()
   const body: Record<string, unknown> = {
     items: [{ title: params.title, quantity: 1, currency_id: 'BRL', unit_price: Number(params.amount.toFixed(2)) }],

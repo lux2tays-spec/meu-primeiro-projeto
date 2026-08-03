@@ -48,14 +48,28 @@ export default function VendasPage() {
   const totalValor = data?.total_valor ?? 0
   const pages = Math.max(1, Math.ceil(total / 50))
 
+  // #3 — vendas com pagamento pendente (janela ampla p/ pegar as antigas).
+  const pendFrom = iso(new Date(today.getFullYear(), today.getMonth() - 6, 1))
+  const pendTo = iso(today)
+  const { data: pendData } = useQuery({ queryKey: ['vendas-pending', pendFrom, pendTo], queryFn: () => financeiroApi.pendingSales(pendFrom, pendTo) })
+  const pendentes = pendData?.data ?? []
+
+  function invalidateAll() {
+    qc.invalidateQueries({ queryKey: ['vendas-range'] })
+    qc.invalidateQueries({ queryKey: ['vendas-pending'] })
+    qc.invalidateQueries({ queryKey: ['activity-log'] })
+    qc.invalidateQueries({ queryKey: ['fin-resumo'] })
+    qc.invalidateQueries({ queryKey: ['fin-resumo-dashboard'] })
+  }
+
   const del = useMutation({
     mutationFn: (id: string) => financeiroApi.deleteVenda(id),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['vendas-range'] })
-      qc.invalidateQueries({ queryKey: ['activity-log'] })
-      qc.invalidateQueries({ queryKey: ['fin-resumo'] })
-      qc.invalidateQueries({ queryKey: ['fin-resumo-dashboard'] })
-    },
+    onSuccess: invalidateAll,
+  })
+
+  const markPaid = useMutation({
+    mutationFn: (id: string) => financeiroApi.markVendaPaid(id),
+    onSuccess: invalidateAll,
   })
 
   function preset(days: number) {
@@ -93,6 +107,34 @@ export default function VendasPage() {
           + Nova venda
         </button>
       </div>
+
+      {/* #3 — Pagamentos pendentes (link de pagamento) */}
+      {pendentes.length > 0 && (
+        <div className="bg-amber-50 border border-amber-200 rounded-2xl p-5">
+          <p className="text-sm font-semibold text-gray-900">💳 Pagamentos pendentes</p>
+          <p className="text-xs text-gray-500 mb-3">Vendas com link aguardando pagamento. Marque como pago se já recebeu.</p>
+          <div className="divide-y divide-amber-100">
+            {pendentes.map((v: any) => (
+              <div key={v.id} className="flex items-center justify-between gap-3 py-2.5 text-sm">
+                <div className="min-w-0">
+                  <p className="font-medium text-gray-900 truncate">{v.servico_nome}</p>
+                  <p className="text-xs text-gray-500 truncate">{v.cliente_nome} · {fmtBRL(Number(v.valor))}</p>
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  {v.mp_payment_url && (
+                    <a href={v.mp_payment_url} target="_blank" rel="noreferrer" className="text-primary text-xs font-medium hover:underline">Abrir link</a>
+                  )}
+                  <button onClick={() => { if (confirm(`Marcar como paga a venda de ${fmtBRL(Number(v.valor))}? Ela entra na receita.`)) markPaid.mutate(v.id) }}
+                    disabled={markPaid.isPending}
+                    className="h-8 px-3 rounded-lg bg-success hover:brightness-95 text-white text-xs font-semibold disabled:opacity-50">
+                    Marcar pago
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Período */}
       <div className={`${cardCls} space-y-3`}>

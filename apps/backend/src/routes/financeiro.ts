@@ -199,6 +199,8 @@ export const financeiroRoutes: FastifyPluginAsync = async (app) => {
            a.notes,
            a.payment_method,
            a.source,
+           a.payment_status,
+           a.mp_payment_url,
            a.customer_id,
            a.service_id,
            a.professional_id,
@@ -671,7 +673,12 @@ export const financeiroRoutes: FastifyPluginAsync = async (app) => {
     // WhatsApp do cliente. Se o MP não estiver configurado, desfaz a venda.
     if (isLink) {
       const title = items.length ? items.map((it) => it.name).join(' + ') : (b.custom_service || 'Pagamento')
-      const pref = await createSalePreference(tenant_id!, { appointmentId: venda.id, title, amount: b.valor })
+      // Base pública da API derivada da requisição (para o notification_url do MP),
+      // respeitando proxy reverso (x-forwarded-*). Fallback: env dentro do serviço.
+      const fwdProto = String(request.headers['x-forwarded-proto'] || '').split(',')[0].trim()
+      const fwdHost = String(request.headers['x-forwarded-host'] || request.headers.host || '').split(',')[0].trim()
+      const notifyBase = fwdHost ? `${fwdProto || (request as any).protocol || 'https'}://${fwdHost}` : undefined
+      const pref = await createSalePreference(tenant_id!, { appointmentId: venda.id, title, amount: b.valor, notifyBase })
       if (!pref.ok) {
         await db.query('DELETE FROM appointments WHERE id = $1 AND tenant_id = $2', [venda.id, tenant_id])
         const msg = pref.reason === 'mp_not_configured' || pref.reason === 'mp_token_invalid'

@@ -364,6 +364,9 @@ export const financeiroApi = {
   vendasRange: (from: string, to: string, page = 1, limit = 50) =>
     api.get<VendasResponse>(`/financeiro/vendas?from=${from}&to=${to}&page=${page}&limit=${limit}`),
   deleteVenda: (id: string) => api.delete(`/financeiro/vendas/${id}`),
+  pendingSales: (from: string, to: string) =>
+    api.get<VendasResponse>(`/financeiro/vendas?pending=1&from=${from}&to=${to}&limit=100`),
+  markVendaPaid: (id: string) => api.post<{ ok: boolean }>(`/financeiro/vendas/${id}/mark-paid`, {}),
   activityLog: () => api.get<any[]>('/financeiro/activity-log'),
   paymentMethods: () => api.get<{ key: string; label: string }[]>('/financeiro/payment-methods'),
   paymentFees: () => api.get<{ method_key: string; pct: number }[]>('/financeiro/payment-fees'),

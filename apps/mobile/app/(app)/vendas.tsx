@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { View, Text, ScrollView, TouchableOpacity, StyleSheet, RefreshControl, Alert, ActivityIndicator } from 'react-native'
+import { View, Text, ScrollView, TouchableOpacity, StyleSheet, RefreshControl, Alert, ActivityIndicator, Share } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { Ionicons } from '@expo/vector-icons'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
@@ -44,14 +44,37 @@ export default function VendasScreen() {
   })
   const { data: log = [] } = useQuery({ queryKey: ['activity-log'], queryFn: financeiroApi.activityLog, enabled: isOwner && showLog })
 
+  // #3 — vendas com link de pagamento pendentes (janela ampla p/ pegar as antigas).
+  const pendFrom = isoDate(new Date(now.getFullYear(), now.getMonth() - 6, 1))
+  const pendTo = isoDate(now)
+  const { data: pendData } = useQuery({
+    queryKey: ['vendas-pending', pendFrom, pendTo],
+    queryFn: () => financeiroApi.pendingSales(pendFrom, pendTo),
+  })
+  const pendentes = pendData?.data ?? []
+
   const vendas = data?.data ?? []
   const totalValor = data?.total_valor ?? 0
 
   function afterChange() {
     qc.invalidateQueries({ queryKey: ['vendas-range'] })
+    qc.invalidateQueries({ queryKey: ['vendas-pending'] })
     qc.invalidateQueries({ queryKey: ['activity-log'] })
     qc.invalidateQueries({ queryKey: ['fin-resumo'] })
     qc.invalidateQueries({ queryKey: ['fin-resumo-dashboard'] })
+  }
+
+  const markPaid = useMutation({
+    mutationFn: (id: string) => financeiroApi.markVendaPaid(id),
+    onSuccess: () => { toast.show('Venda marcada como paga!', 'success'); afterChange() },
+    onError: (e: any) => toast.show(e?.message ?? 'Não foi possível marcar como pago.', 'error'),
+  })
+
+  function confirmMarkPaid(v: any) {
+    Alert.alert('Marcar como pago', `Confirmar o recebimento de ${fmtBRL(Number(v.valor))} da venda "${v.servico_nome}"? Ela entra na receita.`, [
+      { text: 'Cancelar', style: 'cancel' },
+      { text: 'Marcar pago', onPress: () => markPaid.mutate(v.id) },
+    ])
   }
 
   const del = useMutation({
@@ -96,6 +119,30 @@ export default function VendasScreen() {
           <Text style={s.totalLabel}>{vendas.length} venda(s) no período</Text>
           <Text style={s.totalValue}>Total: {fmtBRL(totalValor)}</Text>
         </View>
+
+        {/* #3 — Pagamentos pendentes (link de pagamento) */}
+        {pendentes.length > 0 && (
+          <View style={s.pendCard}>
+            <Text style={s.pendTitle}>💳 Pagamentos pendentes</Text>
+            <Text style={s.pendHint}>Vendas com link aguardando pagamento. Marque como pago se já recebeu.</Text>
+            {pendentes.map((v: any) => (
+              <View key={v.id} style={s.pendRow}>
+                <View style={{ flex: 1 }}>
+                  <Text style={s.pendName} numberOfLines={1}>{v.servico_nome}</Text>
+                  <Text style={s.pendSub} numberOfLines={1}>{v.cliente_nome} · {fmtBRL(Number(v.valor))}</Text>
+                </View>
+                {v.mp_payment_url ? (
+                  <TouchableOpacity style={s.pendShare} onPress={() => Share.share({ message: v.mp_payment_url }).catch(() => {})}>
+                    <Ionicons name="share-outline" size={16} color={colors.primary} />
+                  </TouchableOpacity>
+                ) : null}
+                <TouchableOpacity style={s.pendPayBtn} onPress={() => confirmMarkPaid(v)}>
+                  <Text style={s.pendPayText}>Marcar pago</Text>
+                </TouchableOpacity>
+              </View>
+            ))}
+          </View>
+        )}
 
         {/* Lista */}
         {isLoading ? <ActivityIndicator color={colors.primary} style={{ marginTop: spacing.xl }} /> : vendas.length === 0 ? (
@@ -176,6 +223,15 @@ const s = StyleSheet.create({
   editLink: { fontSize: font.sm, fontWeight: '700', color: colors.primary },
   delLink: { fontSize: font.sm, fontWeight: '700', color: colors.danger },
   sectionTitle: { fontSize: font.md, fontWeight: '700', color: colors.text, marginTop: spacing.md },
+  pendCard: { backgroundColor: '#FFF7ED', borderRadius: radius.lg, padding: spacing.md, gap: spacing.xs, borderWidth: 1, borderColor: '#FDE7C7' },
+  pendTitle: { fontSize: font.md, fontWeight: '700', color: colors.text },
+  pendHint: { fontSize: font.sm, color: colors.textSecondary, marginBottom: spacing.xs },
+  pendRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, borderTopWidth: 1, borderTopColor: '#FDE7C7', paddingTop: spacing.sm },
+  pendName: { fontSize: font.md, fontWeight: '600', color: colors.text },
+  pendSub: { fontSize: font.sm, color: colors.textSecondary, marginTop: 1 },
+  pendShare: { width: 34, height: 34, borderRadius: radius.md, alignItems: 'center', justifyContent: 'center', borderWidth: 1.5, borderColor: colors.primary },
+  pendPayBtn: { backgroundColor: colors.success, borderRadius: radius.md, paddingHorizontal: spacing.md, paddingVertical: spacing.sm },
+  pendPayText: { color: '#fff', fontWeight: '700', fontSize: font.sm },
   logToggle: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: spacing.lg, marginBottom: spacing.xs },
   logCard: { backgroundColor: colors.surface, borderRadius: radius.lg, padding: spacing.md, gap: spacing.sm },
   logRow: { borderBottomWidth: 1, borderBottomColor: colors.border, paddingBottom: spacing.sm },
