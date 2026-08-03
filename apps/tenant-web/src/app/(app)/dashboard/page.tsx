@@ -163,6 +163,18 @@ export default function DashboardPage() {
             </Link>
           </div>
 
+          {/* #4 — vendas com link de pagamento pendentes */}
+          {(resumo?.links_pendentes_count ?? 0) > 0 && (
+            <Link href="/financeiro" className="mt-6 flex items-center gap-4 bg-amber-50 border border-amber-200 rounded-2xl p-5 hover:shadow transition">
+              <div className="w-12 h-12 rounded-xl bg-white flex items-center justify-center text-2xl shrink-0">🔗</div>
+              <div className="flex-1">
+                <p className="text-sm font-semibold text-gray-900">Links de pagamento pendentes</p>
+                <p className="text-sm text-gray-600 mt-0.5">{resumo?.links_pendentes_count} venda(s) aguardando pagamento</p>
+              </div>
+              <p className="text-2xl font-bold text-amber-600 shrink-0">{fmtBRL(resumo?.links_pendentes_total ?? 0)}</p>
+            </Link>
+          )}
+
           {/* #5 — agendamentos captados pelo bot ("clientes que você poderia perder") */}
           <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wide mt-6 mb-3">Clientes que você poderia perder</h2>
           <div className="bg-primary/5 border border-primary/20 rounded-2xl p-5 flex items-center gap-4">

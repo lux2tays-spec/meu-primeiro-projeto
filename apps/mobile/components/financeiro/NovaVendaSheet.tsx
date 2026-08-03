@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { View, Text, Modal, ScrollView, FlatList, TextInput, TouchableOpacity, StyleSheet, KeyboardAvoidingView, Platform } from 'react-native'
+import { View, Text, Modal, ScrollView, FlatList, TextInput, TouchableOpacity, StyleSheet, KeyboardAvoidingView, Platform, Alert, Share } from 'react-native'
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { Ionicons } from '@expo/vector-icons'
 import { useQuery, useMutation } from '@tanstack/react-query'
@@ -83,8 +83,22 @@ export function NovaVendaSheet({ visible, onClose, onSaved }: { visible: boolean
         valor: valorNum, notes: notes.trim() || undefined, payment_method: pm,
       })
     },
-    onSuccess: () => {
-      useToast.getState().show('Venda registrada!', 'success')
+    onSuccess: (data: any) => {
+      // Venda com link de pagamento: mostra o link + status do envio no WhatsApp.
+      const url = data?.payment?.url as string | undefined
+      if (url) {
+        const sent = !!data?.payment?.whatsapp_sent
+        Alert.alert(
+          'Link de pagamento gerado 💳',
+          `${sent ? 'Enviado ao WhatsApp do cliente ✓' : 'Não foi possível enviar automaticamente — compartilhe o link abaixo:'}\n\nA venda fica PENDENTE e entra na receita quando o pagamento for confirmado.\n\n${url}`,
+          [
+            { text: 'Compartilhar', onPress: () => Share.share({ message: url }).catch(() => {}) },
+            { text: 'OK', style: 'cancel' },
+          ]
+        )
+      } else {
+        useToast.getState().show('Venda registrada!', 'success')
+      }
       // Limpa a seleção para a próxima venda não herdar serviços/valor.
       setSelectedIds([]); setIsOutro(false); setServiceSearch(''); setValor(''); setOutroDesc(''); setNotes('')
       setSearch(''); setCustomerId(''); setSelectedCustomer(null); setNewMode(false); setNewName(''); setNewLastName(''); setNewPhone(''); setProfessionalId('')

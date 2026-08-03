@@ -77,9 +77,16 @@ export default function NovaVendaModal({ onClose, onSaved }: { onClose: () => vo
         payment_method: paymentMethod,
       })
     },
-    onSuccess: onSaved,
+    onSuccess: (data: any) => {
+      const url = data?.payment?.url as string | undefined
+      if (url) setPaymentLink({ url, sent: !!data?.payment?.whatsapp_sent })
+      else onSaved()
+    },
     onError: (e: any) => setError(friendlyMessage(e, 'Não foi possível registrar a venda.')),
   })
+
+  const [paymentLink, setPaymentLink] = useState<{ url: string; sent: boolean } | null>(null)
+  const [copied, setCopied] = useState(false)
 
   const canSave = (creatingNew ? (newCustomer.name.trim() && newCustomer.phone.trim()) : customerId)
     && (isOutro ? outroDesc.trim() : selectedIds.length > 0) && Number(valor) > 0 && !save.isPending
@@ -92,6 +99,29 @@ export default function NovaVendaModal({ onClose, onSaved }: { onClose: () => vo
           <button onClick={onClose} className="text-gray-400 hover:text-gray-600">✕</button>
         </div>
 
+        {paymentLink ? (
+          <div className="space-y-4">
+            <div className="bg-green-50 border border-green-200 rounded-xl px-4 py-3 text-sm text-green-800">
+              Link de pagamento gerado 💳 {paymentLink.sent ? '— enviado ao WhatsApp do cliente ✓' : '— envie o link ao cliente:'}
+              <p className="text-green-700 text-xs mt-1">A venda fica <strong>pendente</strong> e entra na receita quando o pagamento for confirmado.</p>
+            </div>
+            <input readOnly value={paymentLink.url} onFocus={(e) => e.currentTarget.select()} className={inputCls} />
+            <div className="flex gap-2">
+              <button onClick={() => { navigator.clipboard?.writeText(paymentLink.url); setCopied(true); setTimeout(() => setCopied(false), 1500) }}
+                className="flex-1 h-10 border border-gray-200 text-gray-700 text-sm font-semibold rounded-xl hover:bg-gray-50">
+                {copied ? 'Copiado ✓' : 'Copiar link'}
+              </button>
+              <a href={paymentLink.url} target="_blank" rel="noreferrer"
+                className="flex-1 h-10 leading-10 text-center border border-gray-200 text-gray-700 text-sm font-semibold rounded-xl hover:bg-gray-50">
+                Abrir
+              </a>
+            </div>
+            <button onClick={onSaved} className="w-full h-11 bg-primary hover:bg-primary-dark text-white text-sm font-semibold rounded-xl">
+              Concluir
+            </button>
+          </div>
+        ) : (
+        <>
         {/* Cliente */}
         <div>
           <div className="flex items-center justify-between mb-1">
@@ -200,8 +230,10 @@ export default function NovaVendaModal({ onClose, onSaved }: { onClose: () => vo
 
         <button onClick={() => { setError(''); save.mutate() }} disabled={!canSave}
           className="w-full h-11 bg-primary hover:bg-primary-dark text-white text-sm font-semibold rounded-xl transition-colors disabled:opacity-50">
-          {save.isPending ? 'Registrando…' : 'Registrar venda'}
+          {save.isPending ? 'Registrando…' : (paymentMethod === 'payment_link' ? 'Gerar link e registrar' : 'Registrar venda')}
         </button>
+        </>
+        )}
       </div>
     </div>
   )

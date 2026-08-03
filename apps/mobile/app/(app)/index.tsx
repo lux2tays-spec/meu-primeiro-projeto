@@ -161,6 +161,20 @@ export default function DashboardScreen() {
               </TouchableOpacity>
             </View>
 
+            {/* #4 — vendas com link de pagamento pendentes */}
+            {(resumo?.links_pendentes_count ?? 0) > 0 && (
+              <TouchableOpacity activeOpacity={0.8} onPress={() => router.push('/(app)/financeiro' as any)}>
+                <View style={styles.pendingCard}>
+                  <View style={styles.pendingIcon}><Ionicons name="link-outline" size={20} color={colors.warning} /></View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.pendingTitle}>Links de pagamento pendentes</Text>
+                    <Text style={styles.pendingSub}>{resumo?.links_pendentes_count} venda(s) aguardando pagamento</Text>
+                  </View>
+                  <Text style={styles.pendingValue}>{fmtBRL(resumo?.links_pendentes_total ?? 0)}</Text>
+                </View>
+              </TouchableOpacity>
+            )}
+
             {/* #5 — agendamentos captados pelo bot ("clientes que você poderia perder") */}
             <Text style={styles.sectionTitle}>Clientes que você poderia perder</Text>
             <View style={styles.botCard}>
@@ -248,6 +262,11 @@ const styles = StyleSheet.create({
   botValue: { fontSize: font.lg, fontWeight: '800', color: colors.primaryDark },
   botSub: { fontSize: font.sm, color: colors.primaryDark, marginTop: 2, opacity: 0.85 },
   botMoney: { fontSize: font.lg, fontWeight: '800', color: colors.success },
+  pendingCard: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, backgroundColor: '#FFF7ED', borderRadius: radius.lg, padding: spacing.md, borderWidth: 1, borderColor: '#FDE7C7' },
+  pendingIcon: { width: 40, height: 40, borderRadius: 10, backgroundColor: '#fff', alignItems: 'center', justifyContent: 'center' },
+  pendingTitle: { fontSize: font.md, fontWeight: '700', color: colors.text },
+  pendingSub: { fontSize: font.sm, color: colors.textSecondary, marginTop: 2 },
+  pendingValue: { fontSize: font.lg, fontWeight: '800', color: colors.warning },
   list: { gap: spacing.sm },
   empty: { color: colors.textSecondary, fontSize: font.md, textAlign: 'center', paddingVertical: spacing.xl },
   fab: {

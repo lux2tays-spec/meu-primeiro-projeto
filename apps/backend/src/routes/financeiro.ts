@@ -6,6 +6,7 @@ import { resolveDespesas, applyPercentValues, computeFinanceExtras } from '../li
 import { syncCommissionForAppointment } from '../lib/commissions'
 import { deleteCalendarEvent } from '../services/google-calendar'
 import { logTenantActivity } from '../lib/tenantActivity'
+import { createSalePreference, sendPaymentLinkWhatsApp } from '../services/tenantPayments'
 
 const paymentLinkSchema = z.object({
   title: z.string().min(1),
@@ -63,9 +64,12 @@ export const financeiroRoutes: FastifyPluginAsync = async (app) => {
         `SELECT
            COUNT(*) FILTER (WHERE a.status = 'completed') AS total_vendas,
            COALESCE(SUM(${NET_VALOR}) FILTER (WHERE a.status = 'completed'), 0) AS receita_total,
-           COUNT(*) FILTER (WHERE a.status = 'pending' OR a.status = 'confirmed') AS agendamentos_abertos,
+           COUNT(*) FILTER (WHERE (a.status = 'pending' OR a.status = 'confirmed') AND a.source <> 'quick_sale') AS agendamentos_abertos,
            COUNT(*) FILTER (WHERE a.status = 'cancelled') AS agendamentos_cancelados,
            COUNT(*) AS total_agendamentos,
+           -- #4: vendas com link de pagamento ainda pendentes (valor + qtd).
+           COALESCE(SUM(COALESCE(a.price_snapshot, s.price)) FILTER (WHERE a.payment_status = 'pending'), 0) AS links_pendentes_total,
+           COUNT(*) FILTER (WHERE a.payment_status = 'pending') AS links_pendentes_count,
            -- #5: agendamentos feitos pelo bot (created_by IS NULL) e o valor —
            -- "clientes que você poderia perder". Exclui cancelados e vendas avulsas.
            COUNT(*) FILTER (WHERE a.created_by IS NULL AND a.source = 'appointment' AND a.status <> 'cancelled') AS agendamentos_bot,
@@ -137,6 +141,9 @@ export const financeiroRoutes: FastifyPluginAsync = async (app) => {
       // #5: agendamentos captados pelo bot no mês + valor.
       agendamentos_bot: Number(totals.agendamentos_bot),
       receita_bot: Number(totals.receita_bot),
+      // #4: total de vendas com link de pagamento pendentes.
+      links_pendentes_total: Number(totals.links_pendentes_total),
+      links_pendentes_count: Number(totals.links_pendentes_count),
       // SAL-8 — novos KPIs (campos aditivos; os existentes acima não mudam):
       ticket_medio: ticketMedio,
       agendamentos_cancelados: cancelados,
@@ -159,9 +166,11 @@ export const financeiroRoutes: FastifyPluginAsync = async (app) => {
     // SAL-11: staff não vê a lista de vendas do negócio
     if (!['owner', 'admin', 'root'].includes(role)) return reply.status(403).send({ error: 'Sem permissão' })
 
-    const { month, year, from, to, page = '1', limit = '50' } = request.query as {
-      month?: string; year?: string; from?: string; to?: string; page?: string; limit?: string
+    const { month, year, from, to, page = '1', limit = '50', pending } = request.query as {
+      month?: string; year?: string; from?: string; to?: string; page?: string; limit?: string; pending?: string
     }
+    // #6: pending=1 lista as vendas com link de pagamento PENDENTES (em vez das concluídas).
+    const statusFilter = pending === '1' ? "a.payment_status = 'pending'" : "a.status = 'completed'"
 
     // Range explícito (from/to) tem prioridade; senão usa o mês. `to` é inclusivo
     // (viramos para o dia seguinte para pegar o dia inteiro).
@@ -204,7 +213,7 @@ export const financeiroRoutes: FastifyPluginAsync = async (app) => {
          JOIN services     s ON s.id = a.service_id
          ${FEES_JOIN}
          LEFT JOIN professionals p ON p.id = a.professional_id -- vendas avulsas podem não ter profissional
-         WHERE a.tenant_id = $1 AND a.status = 'completed'
+         WHERE a.tenant_id = $1 AND ${statusFilter}
            AND a.starts_at >= ${SP_MONTH_START} AND a.starts_at < ${SP_MONTH_END}
          ORDER BY a.starts_at DESC
          LIMIT $4 OFFSET $5`,
@@ -214,7 +223,7 @@ export const financeiroRoutes: FastifyPluginAsync = async (app) => {
         `SELECT COUNT(*)::int AS total,
                 COALESCE(SUM(${NET_VALOR}), 0)::float AS total_valor
          FROM appointments a JOIN services s ON s.id = a.service_id ${FEES_JOIN}
-         WHERE a.tenant_id = $1 AND a.status = 'completed'
+         WHERE a.tenant_id = $1 AND ${statusFilter}
            AND a.starts_at >= ${SP_MONTH_START} AND a.starts_at < ${SP_MONTH_END}`,
         [tenant_id, start, end]
       ),
@@ -622,14 +631,20 @@ export const financeiroRoutes: FastifyPluginAsync = async (app) => {
       notes = notes ? `${b.custom_service} — ${notes}` : (b.custom_service ?? null)
     }
 
+    // Venda com "Link de pagamento" (#3): fica PENDENTE (não entra na receita)
+    // até o cliente pagar. Demais formas: concluída na hora, como antes.
+    const isLink = b.payment_method === 'payment_link'
+    const status = isLink ? 'pending' : 'completed'
+    const paymentStatus = isLink ? 'pending' : null
+
     // Instante da venda. ends_at = starts_at → intervalo vazio: não conflita com
     // a constraint de overlap e não ocupa slot na agenda (venda pontual).
     const startsAt = b.data ? new Date(`${b.data}T12:00:00-03:00`) : new Date()
     const { rows: [venda] } = await db.query(
       `INSERT INTO appointments
-         (tenant_id, customer_id, professional_id, service_id, starts_at, ends_at, status, notes, created_by, price_snapshot, payment_method, source)
-       VALUES ($1, $2, $3, $4, $5, $5, 'completed', $6, $7, $8, $9, 'quick_sale') RETURNING *`,
-      [tenant_id, b.customer_id, b.professional_id ?? null, serviceId, startsAt.toISOString(), notes, user_id, b.valor, b.payment_method]
+         (tenant_id, customer_id, professional_id, service_id, starts_at, ends_at, status, notes, created_by, price_snapshot, payment_method, source, payment_status)
+       VALUES ($1, $2, $3, $4, $5, $5, $10, $6, $7, $8, $9, 'quick_sale', $11) RETURNING *`,
+      [tenant_id, b.customer_id, b.professional_id ?? null, serviceId, startsAt.toISOString(), notes, user_id, b.valor, b.payment_method, status, paymentStatus]
     )
 
     // Só grava itens quando são 2+ serviços do catálogo. Rateia o valor TOTAL da
@@ -651,7 +666,45 @@ export const financeiroRoutes: FastifyPluginAsync = async (app) => {
         )
       }
     }
+
+    // Venda com link: gera a preferência no Mercado Pago do tenant e envia ao
+    // WhatsApp do cliente. Se o MP não estiver configurado, desfaz a venda.
+    if (isLink) {
+      const title = items.length ? items.map((it) => it.name).join(' + ') : (b.custom_service || 'Pagamento')
+      const pref = await createSalePreference(tenant_id!, { appointmentId: venda.id, title, amount: b.valor })
+      if (!pref.ok) {
+        await db.query('DELETE FROM appointments WHERE id = $1 AND tenant_id = $2', [venda.id, tenant_id])
+        const msg = pref.reason === 'mp_not_configured' || pref.reason === 'mp_token_invalid'
+          ? 'Configure o Mercado Pago em Config → Pagamentos para gerar links de pagamento.'
+          : 'Não foi possível gerar o link de pagamento agora. Tente novamente.'
+        return reply.status(400).send({ error: msg })
+      }
+      await db.query('UPDATE appointments SET mp_preference_id = $1, mp_payment_url = $2 WHERE id = $3', [pref.id, pref.url, venda.id])
+      const whatsappSent = await sendPaymentLinkWhatsApp(tenant_id!, b.customer_id, pref.url, title, b.valor)
+      return reply.status(201).send({ ...venda, mp_payment_url: pref.url, payment: { url: pref.url, whatsapp_sent: whatsappSent } })
+    }
+
     return reply.status(201).send(venda)
+  })
+
+  // #3 — Marcar manualmente uma venda-com-link como paga (rede de segurança caso
+  // o webhook do MP não dispare). Owner/admin. Move para 'completed' → entra na receita.
+  app.post<{ Params: { id: string } }>('/vendas/:id/mark-paid', async (request, reply) => {
+    const { tenant_id, role } = request.user
+    if (!isManager(role)) return reply.status(403).send({ error: 'Sem permissão' })
+    const { rows: [v] } = await db.query(
+      `SELECT id, payment_status FROM appointments WHERE id = $1 AND tenant_id = $2 AND source = 'quick_sale'`,
+      [request.params.id, tenant_id]
+    )
+    if (!v) return reply.status(404).send({ error: 'Venda não encontrada' })
+    await db.query(
+      `UPDATE appointments SET status = 'completed', payment_status = 'paid',
+         price_snapshot = COALESCE(price_snapshot, (SELECT s.price FROM services s WHERE s.id = appointments.service_id))
+       WHERE id = $1 AND tenant_id = $2`,
+      [request.params.id, tenant_id]
+    )
+    syncCommissionForAppointment(request.params.id).catch(() => {})
+    return reply.send({ ok: true })
   })
 
   // ── Histórico mensal (para o gráfico de evolução) ───────────────────────────

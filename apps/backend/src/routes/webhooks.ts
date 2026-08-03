@@ -15,6 +15,9 @@ import { getHandoffConfig } from '../lib/handoffConfig'
 import { SUPPORT_INSTANCE, updateSupportBotConfig } from '../lib/supportBotConfig'
 import { runSupportBot } from '../services/supportBot'
 import { notifyTenantManagers } from '../lib/notifications'
+import { decrypt } from '../lib/crypto'
+import { syncCommissionForAppointment } from '../lib/commissions'
+import { markSalePaid } from '../services/tenantPayments'
 
 // Validate the shared secret Evolution must send with every webhook.
 // Enabled only when a webhook secret is configured (Root Admin panel, with
@@ -526,6 +529,49 @@ export const webhookRoutes: FastifyPluginAsync = async (app) => {
       nextBillingDate: sub.next_payment_date?.slice(0, 10) ?? null,
     })
 
+    return reply.send({ ok: true })
+  })
+
+  // #3 — Webhook de pagamentos de CLIENTES por tenant (venda com link de
+  // pagamento). A preferência é criada com notification_url apontando pra cá. Ao
+  // receber um pagamento aprovado, marca a venda como paga (entra na receita).
+  // Autoridade: re-busca o pagamento na conta MP do tenant (não confia no corpo).
+  app.post<{ Params: { tenantId: string } }>('/mp-tenant/:tenantId', { config: { rateLimit: false } }, async (request, reply) => {
+    const tenantId = request.params.tenantId
+    const body = request.body as any
+    const type = body?.type ?? body?.topic
+    const paymentId = body?.data?.id ?? (request.query as any)?.id ?? (request.query as any)?.['data.id']
+    // Só tratamos eventos de pagamento; o resto respondemos 200 pra não reenviar.
+    if (type !== 'payment' || !paymentId) return reply.send({ ok: true })
+
+    const { rows: [t] } = await db.query('SELECT mp_access_token FROM tenants WHERE id = $1', [tenantId])
+    if (!t?.mp_access_token) return reply.send({ ok: true })
+    let token: string
+    try { token = decrypt(t.mp_access_token) } catch { return reply.send({ ok: true }) }
+
+    try {
+      const payRes = await fetch(`https://api.mercadopago.com/v1/payments/${paymentId}`, {
+        headers: { Authorization: `Bearer ${token}` },
+        signal: AbortSignal.timeout(15_000),
+      })
+      if (!payRes.ok) return reply.send({ ok: true })
+      const pay = await payRes.json() as any
+      const [kind, appointmentId] = String(pay.external_reference ?? '').split(':')
+      if (kind === 'venda' && appointmentId && pay.status === 'approved') {
+        const marked = await markSalePaid(tenantId, appointmentId)
+        if (marked) {
+          syncCommissionForAppointment(appointmentId).catch(() => {})
+          notifyTenantManagers(tenantId, {
+            type: 'confirmation',
+            title: 'Pagamento recebido 💰',
+            body: `Uma venda com link de pagamento foi paga (${Number(pay.transaction_amount || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}).`,
+            link: '/financeiro',
+          }).catch(() => {})
+        }
+      }
+    } catch (e) {
+      app.log.error({ e }, 'mp-tenant webhook falhou')
+    }
     return reply.send({ ok: true })
   })
 }

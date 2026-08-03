@@ -258,6 +258,8 @@ export interface FinanceiroResumo {
   agendamentos_abertos: number
   agendamentos_bot: number
   receita_bot: number
+  links_pendentes_total: number
+  links_pendentes_count: number
   // SAL-8 — novos KPIs
   ticket_medio: number
   agendamentos_cancelados: number
