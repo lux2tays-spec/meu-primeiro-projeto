@@ -49,6 +49,26 @@ import { ASSET_SLOTS } from './branding'
 import { PLAN_CAPABILITIES, resolveCapabilities, invalidateTenantCapabilities } from '../lib/planCapabilities'
 import { handoffUpdateSchema, invalidateHandoffConfig } from '../lib/handoffConfig'
 
+// #1 — normalização de estado (texto livre) para UF, para o mapa de tenants.
+const UF_NAMES: Record<string, string> = {
+  AC: 'Acre', AL: 'Alagoas', AP: 'Amapá', AM: 'Amazonas', BA: 'Bahia', CE: 'Ceará',
+  DF: 'Distrito Federal', ES: 'Espírito Santo', GO: 'Goiás', MA: 'Maranhão',
+  MT: 'Mato Grosso', MS: 'Mato Grosso do Sul', MG: 'Minas Gerais', PA: 'Pará',
+  PB: 'Paraíba', PR: 'Paraná', PE: 'Pernambuco', PI: 'Piauí', RJ: 'Rio de Janeiro',
+  RN: 'Rio Grande do Norte', RS: 'Rio Grande do Sul', RO: 'Rondônia', RR: 'Roraima',
+  SC: 'Santa Catarina', SP: 'São Paulo', SE: 'Sergipe', TO: 'Tocantins',
+}
+const stripAccents = (s: string) => s.normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+const NAME_TO_UF: Record<string, string> = Object.fromEntries(
+  Object.entries(UF_NAMES).map(([uf, name]) => [stripAccents(name).toLowerCase(), uf])
+)
+function normalizeUF(raw: string): string {
+  if (!raw) return ''
+  const t = stripAccents(String(raw).trim()).toLowerCase()
+  if (t.length === 2 && UF_NAMES[t.toUpperCase()]) return t.toUpperCase()
+  return NAME_TO_UF[t] ?? ''
+}
+
 export const rootRoutes: FastifyPluginAsync = async (app) => {
   app.addHook('preHandler', (app as any).requireRoot)
 
@@ -102,6 +122,54 @@ export const rootRoutes: FastifyPluginAsync = async (app) => {
       new_tenants_30d: Number(newThisMonth.rows[0].count),
       churn_30d: Number(churn30d.rows[0].count),
       top_affiliates: topAffiliates.rows,
+    })
+  })
+
+  // ── Relatórios: distribuição geográfica dos tenants (#1) ─────────────────────
+  app.get('/reports/tenant-locations', async (_request, reply) => {
+    const { rows } = await db.query(
+      `SELECT COALESCE(NULLIF(TRIM(ac.state), ''), '') AS state,
+              COALESCE(NULLIF(TRIM(ac.city), ''), '')  AS city,
+              COUNT(*)::int AS total,
+              COUNT(*) FILTER (WHERE t.status IN ('active','trial'))::int AS active
+       FROM tenants t
+       LEFT JOIN agent_config ac ON ac.tenant_id = t.id
+       GROUP BY 1, 2`
+    )
+
+    const byUF: Record<string, { uf: string; name: string; total: number; active: number }> = {}
+    const byCity: Record<string, { city: string; uf: string; total: number; active: number }> = {}
+    let noLocation = 0
+    let totalTenants = 0
+
+    for (const r of rows as any[]) {
+      totalTenants += r.total
+      const uf = normalizeUF(r.state) || (r.city ? normalizeUF(r.city) : '')
+      if (!uf && !r.city) { noLocation += r.total; continue }
+      if (uf) {
+        if (!byUF[uf]) byUF[uf] = { uf, name: UF_NAMES[uf], total: 0, active: 0 }
+        byUF[uf].total += r.total
+        byUF[uf].active += r.active
+      } else {
+        noLocation += r.total
+      }
+      if (r.city) {
+        const key = `${r.city.toLowerCase()}|${uf}`
+        if (!byCity[key]) byCity[key] = { city: r.city, uf, total: 0, active: 0 }
+        byCity[key].total += r.total
+        byCity[key].active += r.active
+      }
+    }
+
+    const states = Object.values(byUF).sort((a, b) => b.total - a.total)
+    const cities = Object.values(byCity).sort((a, b) => b.total - a.total).slice(0, 20)
+    return reply.send({
+      total_tenants: totalTenants,
+      with_location: totalTenants - noLocation,
+      no_location: noLocation,
+      states_count: states.length,
+      states,
+      cities,
     })
   })
 
