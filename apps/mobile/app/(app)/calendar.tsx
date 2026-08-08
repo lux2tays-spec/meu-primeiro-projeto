@@ -6,7 +6,7 @@ import {
 import { GestureDetector, Gesture } from 'react-native-gesture-handler'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { Ionicons } from '@expo/vector-icons'
-import { router } from 'expo-router'
+import { router, useLocalSearchParams } from 'expo-router'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { Button } from '@/components/ui/Button'
@@ -166,7 +166,19 @@ export default function CalendarScreen() {
   const [professionalFilter, setProfessionalFilter] = useState<any | null>(null)
   const [serviceFilter, setServiceFilter] = useState<any | null>(null)
   const [originFilter, setOriginFilter] = useState<'ia' | 'app' | null>(null)
+  const [statusFilter, setStatusFilter] = useState<'pending' | 'confirmed' | 'completed' | 'cancelled' | null>(null)
   const [pickerFor, setPickerFor] = useState<'professional' | 'service' | null>(null)
+
+  // Deep-link dos quadros do dashboard/financeiro: aplica filtros vindos por
+  // params (?status=&origin=) uma vez, ao montar.
+  const params = useLocalSearchParams<{ status?: string; origin?: string }>()
+  useEffect(() => {
+    const st = Array.isArray(params.status) ? params.status[0] : params.status
+    const og = Array.isArray(params.origin) ? params.origin[0] : params.origin
+    if (st && ['pending', 'confirmed', 'completed', 'cancelled'].includes(st)) setStatusFilter(st as any)
+    if (og === 'ia' || og === 'app') setOriginFilter(og)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [params.status, params.origin])
 
   useEffect(() => {
     const t = setTimeout(() => setDebouncedSearch(searchText.trim()), 400)
@@ -177,13 +189,14 @@ export default function CalendarScreen() {
   const todayStr = toISO(new Date())
 
   const { data: appointments, isLoading, isError, isRefetching, refetch } = useQuery({
-    queryKey: ['appointments', dateStr, debouncedSearch, professionalFilter?.id ?? null, serviceFilter?.id ?? null, originFilter],
+    queryKey: ['appointments', dateStr, debouncedSearch, professionalFilter?.id ?? null, serviceFilter?.id ?? null, originFilter, statusFilter],
     queryFn: () => appointmentsApi.search({
       date: dateStr,
       search: debouncedSearch || undefined,
       professional_id: professionalFilter?.id,
       service_id: serviceFilter?.id,
       origin: originFilter ?? undefined,
+      status: statusFilter ?? undefined,
     }) as Promise<Appt[]>,
   })
 
@@ -431,7 +444,7 @@ export default function CalendarScreen() {
 
   // ── Render ────────────────────────────────────────────────────────────────
   const monthLabel = `${MONTHS[selected.getMonth()]} ${selected.getFullYear()}`
-  const hasFilters = !!professionalFilter || !!serviceFilter || !!debouncedSearch || !!originFilter
+  const hasFilters = !!professionalFilter || !!serviceFilter || !!debouncedSearch || !!originFilter || !!statusFilter
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
@@ -558,6 +571,17 @@ export default function CalendarScreen() {
             )
           })}
         </View>
+        {/* filtro por status (usado pelos deep-links dos quadros resumo) */}
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.statusRow}>
+          {([['', 'Todos'], ['pending', 'Pendente'], ['confirmed', 'Confirmado'], ['completed', 'Realizado'], ['cancelled', 'Cancelado']] as const).map(([v, label]) => {
+            const active = (statusFilter ?? '') === v
+            return (
+              <TouchableOpacity key={label} style={[styles.statusChip, active && styles.originChipActive]} onPress={() => setStatusFilter((v || null) as any)}>
+                <Text style={[styles.originChipText, active && styles.originChipTextActive]}>{label}</Text>
+              </TouchableOpacity>
+            )
+          })}
+        </ScrollView>
       </View>
 
       {/* Appointments for selected day */}
@@ -1333,6 +1357,15 @@ const styles = StyleSheet.create({
   originChipActive: { borderColor: colors.primary, backgroundColor: colors.primaryLight },
   originChipText: { fontSize: 12, fontWeight: '600', color: colors.textSecondary },
   originChipTextActive: { color: colors.primary },
+  statusRow: { gap: spacing.sm, marginTop: spacing.sm, paddingRight: spacing.sm },
+  statusChip: {
+    paddingVertical: 6,
+    paddingHorizontal: spacing.md,
+    borderRadius: radius.full,
+    borderWidth: 1.5,
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
+  },
   list: { padding: spacing.lg, paddingTop: spacing.sm, gap: spacing.md },
   listTitle: { fontSize: font.md, fontWeight: '600', color: colors.text, textTransform: 'capitalize' },
   empty: { color: colors.textSecondary, textAlign: 'center', paddingVertical: spacing.xl, fontSize: font.md },

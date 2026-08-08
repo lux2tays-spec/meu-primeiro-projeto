@@ -58,8 +58,8 @@ export const appointmentRoutes: FastifyPluginAsync = async (app) => {
   // ── List ────────────────────────────────────────────────────────────────────
   app.get('/', async (request, reply) => {
     const { tenant_id, user_id, role } = request.user
-    const { date, from, to, search, professional_id, service_id, origin } =
-      request.query as { date?: string; from?: string; to?: string; search?: string; professional_id?: string; service_id?: string; origin?: string }
+    const { date, from, to, search, professional_id, service_id, origin, status } =
+      request.query as { date?: string; from?: string; to?: string; search?: string; professional_id?: string; service_id?: string; origin?: string; status?: string }
 
     let query = `
       SELECT a.*, c.name as customer_name, c.last_name as customer_last_name, c.phone as customer_phone,
@@ -110,6 +110,17 @@ export const appointmentRoutes: FastifyPluginAsync = async (app) => {
     if (service_id)      { query += ` AND a.service_id = $${paramIdx}`;      params.push(service_id);      paramIdx++ }
     // #1 — filtro por origem do lead (ia | app).
     if (origin === 'ia' || origin === 'app') { query += ` AND a.origin = $${paramIdx}`; params.push(origin); paramIdx++ }
+    // Filtro por status (deep-link dos quadros do dashboard/financeiro). Aceita
+    // uma lista separada por vírgula (ex.: status=confirmed,pending).
+    if (status) {
+      const wanted = status.split(',').map((v) => v.trim()).filter((v) => ['pending', 'confirmed', 'completed', 'cancelled'].includes(v))
+      if (wanted.length) {
+        const ph = wanted.map((_, i) => `$${paramIdx + i}`).join(', ')
+        query += ` AND a.status IN (${ph})`
+        params.push(...wanted)
+        paramIdx += wanted.length
+      }
+    }
 
     query += ` ORDER BY a.starts_at ASC`
 

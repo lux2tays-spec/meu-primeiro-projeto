@@ -234,7 +234,7 @@ export default function FinanceiroScreen() {
                 <Text style={s.kpiLabel} numberOfLines={1}>Vendas</Text>
                 <Text style={[s.kpiValue, { color: colors.primary }]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.6}>{resumo?.total_vendas ?? 0}</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={[s.kpi, { backgroundColor: '#FFF7ED' }]} activeOpacity={0.8} onPress={() => router.push('/(app)/calendar' as any)}>
+              <TouchableOpacity style={[s.kpi, { backgroundColor: '#FFF7ED' }]} activeOpacity={0.8} onPress={() => router.push('/(app)/calendar?status=pending' as any)}>
                 <Text style={s.kpiLabel} numberOfLines={1}>Em aberto</Text>
                 <Text style={[s.kpiValue, { color: colors.warning }]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.6}>{resumo?.agendamentos_abertos ?? 0}</Text>
               </TouchableOpacity>
@@ -246,7 +246,7 @@ export default function FinanceiroScreen() {
                 <Text style={s.kpiLabel} numberOfLines={1}>Ticket médio</Text>
                 <Text style={[s.kpiValue, { color: colors.info }]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.6}>{fmtBRL(resumo?.ticket_medio ?? 0)}</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={[s.kpi, { backgroundColor: '#FEF2F2' }]} activeOpacity={0.8} onPress={() => router.push('/(app)/calendar' as any)}>
+              <TouchableOpacity style={[s.kpi, { backgroundColor: '#FEF2F2' }]} activeOpacity={0.8} onPress={() => router.push('/(app)/calendar?status=cancelled' as any)}>
                 <Text style={s.kpiLabel} numberOfLines={1}>Cancelamentos</Text>
                 <Text style={[s.kpiValue, { color: colors.danger }]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.6}>
                   {Number(resumo?.taxa_cancelamento ?? 0).toLocaleString('pt-BR', { maximumFractionDigits: 1 })}%

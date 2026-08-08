@@ -135,6 +135,17 @@ export default function CalendarPage() {
   const [proFilter, setProFilter] = useState('')
   const [svcFilter, setSvcFilter] = useState('')
   const [originFilter, setOriginFilter] = useState<'' | 'ia' | 'app'>('')
+  const [statusFilter, setStatusFilter] = useState('') // '' | pending | confirmed | completed | cancelled
+
+  // Deep-link dos quadros do dashboard/financeiro: aplica os filtros vindos por
+  // querystring (?status=&origin=&view=) uma vez, ao montar.
+  useEffect(() => {
+    const sp = new URLSearchParams(window.location.search)
+    const st = sp.get('status'); const og = sp.get('origin'); const vw = sp.get('view')
+    if (st && ['pending', 'confirmed', 'completed', 'cancelled'].includes(st)) setStatusFilter(st)
+    if (og === 'ia' || og === 'app') setOriginFilter(og)
+    if (vw === 'day' || vw === 'week' || vw === 'month') setView(vw)
+  }, [])
 
   const [editing, setEditing] = useState<Appointment | null>(null)
   const [bulkOpen, setBulkOpen] = useState(false)
@@ -159,13 +170,14 @@ export default function CalendarPage() {
   }, [view, anchor])
 
   const { data: appointments = [], isLoading, isError } = useQuery({
-    queryKey: ['appointments', view, range.key, search, proFilter, svcFilter, originFilter],
+    queryKey: ['appointments', view, range.key, search, proFilter, svcFilter, originFilter, statusFilter],
     queryFn: () => appointmentsApi.list({
       ...range.params,
       ...(search ? { search } : {}),
       ...(proFilter ? { professional_id: proFilter } : {}),
       ...(svcFilter ? { service_id: svcFilter } : {}),
       ...(originFilter ? { origin: originFilter } : {}),
+      ...(statusFilter ? { status: statusFilter } : {}),
     }) as Promise<Appointment[]>,
   })
 
@@ -309,6 +321,14 @@ export default function CalendarPage() {
             <option value="">Todas as origens</option>
             <option value="ia">🤖 IA</option>
             <option value="app">📱 App</option>
+          </select>
+          {/* filtro por status (usado pelos deep-links dos quadros resumo) */}
+          <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className={selectCls} aria-label="Filtrar por status">
+            <option value="">Todos os status</option>
+            <option value="pending">Pendente</option>
+            <option value="confirmed">Confirmado</option>
+            <option value="completed">Realizado</option>
+            <option value="cancelled">Cancelado</option>
           </select>
         </div>
       </div>

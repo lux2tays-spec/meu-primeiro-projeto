@@ -119,14 +119,14 @@ export default function DashboardPage() {
         {/* UI-9: 1 coluna no mobile, 3 em telas maiores */}
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
           {[
-            { label: 'Agendamentos', value: appointments.length, color: 'text-primary', bg: 'bg-primary-light' },
-            { label: 'Confirmados',  value: confirmed,           color: 'text-green-600', bg: 'bg-green-50' },
-            { label: 'Pendentes',    value: pending,             color: 'text-yellow-600', bg: 'bg-yellow-50' },
+            { label: 'Agendamentos', value: appointments.length, color: 'text-primary', href: '/calendar?view=day' },
+            { label: 'Confirmados',  value: confirmed,           color: 'text-green-600', href: '/calendar?view=day&status=confirmed' },
+            { label: 'Pendentes',    value: pending,             color: 'text-yellow-600', href: '/calendar?view=day&status=pending' },
           ].map((s) => (
-            <div key={s.label} className="bg-white rounded-2xl p-5 shadow-sm border border-gray-100">
+            <Link key={s.label} href={s.href} className="block bg-white rounded-2xl p-5 shadow-sm border border-gray-100 hover:border-primary/40 hover:shadow transition">
               <p className="text-gray-500 text-sm mb-1">{s.label}</p>
               <p className={`text-3xl font-bold ${s.color}`}>{isLoading ? '—' : s.value}</p>
-            </div>
+            </Link>
           ))}
         </div>
       </div>
@@ -175,16 +175,17 @@ export default function DashboardPage() {
             </Link>
           )}
 
-          {/* #5 — agendamentos captados pelo bot ("clientes que você poderia perder") */}
+          {/* #5 — agendamentos captados pelo bot ("clientes que você poderia perder").
+              Abre a agenda filtrada por Origem=IA + Confirmados, no mês. */}
           <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wide mt-6 mb-3">Clientes que você poderia perder</h2>
-          <div className="bg-primary/5 border border-primary/20 rounded-2xl p-5 flex items-center gap-4">
+          <Link href="/calendar?origin=ia&status=confirmed&view=month" className="block bg-primary/5 border border-primary/20 rounded-2xl p-5 flex items-center gap-4 hover:border-primary/40 hover:shadow transition">
             <div className="w-12 h-12 rounded-xl bg-white flex items-center justify-center text-2xl shrink-0">✨</div>
             <div className="flex-1">
               <p className="text-2xl font-bold text-primary-dark">{resumo?.agendamentos_bot ?? 0} agendamento{(resumo?.agendamentos_bot ?? 0) === 1 ? '' : 's'}</p>
-              <p className="text-sm text-gray-600 mt-0.5">captados pelo assistente de IA neste mês — que poderiam ter ido embora sem resposta.</p>
+              <p className="text-sm text-gray-600 mt-0.5">captados pelo assistente de IA neste mês — que poderiam ter ido embora sem resposta. Toque para ver na agenda.</p>
             </div>
             <p className="text-2xl font-bold text-green-600 shrink-0">{fmtBRL(resumo?.receita_bot ?? 0)}</p>
-          </div>
+          </Link>
         </div>
       )}
 

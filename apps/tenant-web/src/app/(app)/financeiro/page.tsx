@@ -160,16 +160,16 @@ export default function FinanceiroPage() {
           <p className="text-xs text-gray-500 mb-1">Ticket médio</p>
           <p className="text-2xl font-bold text-gray-900">{fmtBRL(resumo?.ticket_medio ?? 0)}</p>
         </button>
-        <button onClick={() => router.push('/calendar')} className={`${cardCls} flex-1 min-w-[150px] text-left hover:border-primary/40 hover:shadow transition`}>
+        <button onClick={() => router.push('/calendar?status=pending&view=month')} className={`${cardCls} flex-1 min-w-[150px] text-left hover:border-primary/40 hover:shadow transition`}>
           <p className="text-xs text-gray-500 mb-1">Agendamentos abertos</p>
           <p className="text-2xl font-bold text-blue-600">{resumo?.agendamentos_abertos ?? 0}</p>
           <p className="text-[11px] text-primary mt-0.5">ver agenda →</p>
         </button>
-        <button onClick={() => router.push('/calendar')} className={`${cardCls} flex-1 min-w-[150px] text-left hover:border-primary/40 hover:shadow transition`}>
+        <button onClick={() => router.push('/calendar?status=cancelled&view=month')} className={`${cardCls} flex-1 min-w-[150px] text-left hover:border-primary/40 hover:shadow transition`}>
           <p className="text-xs text-gray-500 mb-1">Taxa de cancelamento</p>
           <p className="text-2xl font-bold text-red-500">{(resumo?.taxa_cancelamento ?? 0).toLocaleString('pt-BR')}%</p>
-          <p className="text-[11px] text-gray-400 mt-0.5">
-            {resumo?.agendamentos_cancelados ?? 0} de {resumo?.total_agendamentos ?? 0} agendamentos
+          <p className="text-[11px] text-primary mt-0.5">
+            {resumo?.agendamentos_cancelados ?? 0} de {resumo?.total_agendamentos ?? 0} · ver cancelados →
           </p>
         </button>
         <button onClick={() => setTab('despesas')} className={`${cardCls} flex-1 min-w-[150px] text-left hover:border-primary/40 hover:shadow transition`}>

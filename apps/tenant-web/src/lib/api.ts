@@ -381,6 +381,7 @@ export interface AppointmentListParams {
   professional_id?: string
   service_id?: string
   origin?: 'ia' | 'app' // origem do lead (assistente x app)
+  status?: string // pending|confirmed|completed|cancelled (lista separada por vírgula)
 }
 
 export const appointmentsApi = {
@@ -394,6 +395,7 @@ export const appointmentsApi = {
     if (p.professional_id) qs.set('professional_id', p.professional_id)
     if (p.service_id) qs.set('service_id', p.service_id)
     if (p.origin) qs.set('origin', p.origin)
+    if (p.status) qs.set('status', p.status)
     const q = qs.toString()
     return api.get<any[]>(`/appointments${q ? `?${q}` : ''}`)
   },

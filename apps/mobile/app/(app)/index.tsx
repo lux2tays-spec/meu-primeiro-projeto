@@ -132,10 +132,10 @@ export default function DashboardScreen() {
           <TouchableOpacity style={{ flex: 1 }} activeOpacity={0.8} onPress={() => router.push('/(app)/calendar' as any)}>
             <StatCard label="Agendamentos" value={total} icon="calendar-outline" color={colors.primary} />
           </TouchableOpacity>
-          <TouchableOpacity style={{ flex: 1 }} activeOpacity={0.8} onPress={() => router.push('/(app)/calendar' as any)}>
+          <TouchableOpacity style={{ flex: 1 }} activeOpacity={0.8} onPress={() => router.push('/(app)/calendar?status=confirmed' as any)}>
             <StatCard label="Confirmados" value={confirmed} icon="checkmark-circle-outline" color={colors.success} />
           </TouchableOpacity>
-          <TouchableOpacity style={{ flex: 1 }} activeOpacity={0.8} onPress={() => router.push('/(app)/calendar' as any)}>
+          <TouchableOpacity style={{ flex: 1 }} activeOpacity={0.8} onPress={() => router.push('/(app)/calendar?status=pending' as any)}>
             <StatCard label="Pendentes" value={pending} icon="time-outline" color={colors.warning} />
           </TouchableOpacity>
         </View>
@@ -175,16 +175,19 @@ export default function DashboardScreen() {
               </TouchableOpacity>
             )}
 
-            {/* #5 — agendamentos captados pelo bot ("clientes que você poderia perder") */}
+            {/* #5 — agendamentos captados pelo bot ("clientes que você poderia perder").
+                Abre a agenda filtrada por Origem=IA + Confirmados. */}
             <Text style={styles.sectionTitle}>Clientes que você poderia perder</Text>
-            <View style={styles.botCard}>
-              <View style={styles.botIcon}><Ionicons name="sparkles" size={22} color={colors.primary} /></View>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.botValue}>{resumo?.agendamentos_bot ?? 0} agendamento{(resumo?.agendamentos_bot ?? 0) === 1 ? '' : 's'}</Text>
-                <Text style={styles.botSub}>captados pelo assistente de IA neste mês — que poderiam ter ido embora sem resposta.</Text>
+            <TouchableOpacity activeOpacity={0.8} onPress={() => router.push('/(app)/calendar?origin=ia&status=confirmed' as any)}>
+              <View style={styles.botCard}>
+                <View style={styles.botIcon}><Ionicons name="sparkles" size={22} color={colors.primary} /></View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.botValue}>{resumo?.agendamentos_bot ?? 0} agendamento{(resumo?.agendamentos_bot ?? 0) === 1 ? '' : 's'}</Text>
+                  <Text style={styles.botSub}>captados pelo assistente de IA neste mês — que poderiam ter ido embora sem resposta. Toque para ver na agenda.</Text>
+                </View>
+                <Text style={styles.botMoney}>{fmtBRL(resumo?.receita_bot ?? 0)}</Text>
               </View>
-              <Text style={styles.botMoney}>{fmtBRL(resumo?.receita_bot ?? 0)}</Text>
-            </View>
+            </TouchableOpacity>
           </>
         )}
 
