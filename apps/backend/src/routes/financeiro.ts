@@ -70,10 +70,10 @@ export const financeiroRoutes: FastifyPluginAsync = async (app) => {
            -- #4: vendas com link de pagamento ainda pendentes (valor + qtd).
            COALESCE(SUM(COALESCE(a.price_snapshot, s.price)) FILTER (WHERE a.payment_status = 'pending'), 0) AS links_pendentes_total,
            COUNT(*) FILTER (WHERE a.payment_status = 'pending') AS links_pendentes_count,
-           -- #5: agendamentos feitos pelo bot (created_by IS NULL) e o valor —
-           -- "clientes que você poderia perder". Exclui cancelados e vendas avulsas.
-           COUNT(*) FILTER (WHERE a.created_by IS NULL AND a.source = 'appointment' AND a.status <> 'cancelled') AS agendamentos_bot,
-           COALESCE(SUM(COALESCE(a.price_snapshot, s.price)) FILTER (WHERE a.created_by IS NULL AND a.source = 'appointment' AND a.status <> 'cancelled'), 0) AS receita_bot
+           -- #5/#1: agendamentos originados pela IA (origin='ia') e o valor —
+           -- "clientes que você poderia perder"/leads da IA. Exclui cancelados e vendas avulsas.
+           COUNT(*) FILTER (WHERE a.origin = 'ia' AND a.source = 'appointment' AND a.status <> 'cancelled') AS agendamentos_bot,
+           COALESCE(SUM(COALESCE(a.price_snapshot, s.price)) FILTER (WHERE a.origin = 'ia' AND a.source = 'appointment' AND a.status <> 'cancelled'), 0) AS receita_bot
          FROM appointments a
          JOIN services s ON s.id = a.service_id
          ${FEES_JOIN}

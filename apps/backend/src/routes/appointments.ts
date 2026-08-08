@@ -58,8 +58,8 @@ export const appointmentRoutes: FastifyPluginAsync = async (app) => {
   // ── List ────────────────────────────────────────────────────────────────────
   app.get('/', async (request, reply) => {
     const { tenant_id, user_id, role } = request.user
-    const { date, from, to, search, professional_id, service_id } =
-      request.query as { date?: string; from?: string; to?: string; search?: string; professional_id?: string; service_id?: string }
+    const { date, from, to, search, professional_id, service_id, origin } =
+      request.query as { date?: string; from?: string; to?: string; search?: string; professional_id?: string; service_id?: string; origin?: string }
 
     let query = `
       SELECT a.*, c.name as customer_name, c.last_name as customer_last_name, c.phone as customer_phone,
@@ -108,6 +108,8 @@ export const appointmentRoutes: FastifyPluginAsync = async (app) => {
     // Filters by professional / service (#4).
     if (professional_id) { query += ` AND a.professional_id = $${paramIdx}`; params.push(professional_id); paramIdx++ }
     if (service_id)      { query += ` AND a.service_id = $${paramIdx}`;      params.push(service_id);      paramIdx++ }
+    // #1 — filtro por origem do lead (ia | app).
+    if (origin === 'ia' || origin === 'app') { query += ` AND a.origin = $${paramIdx}`; params.push(origin); paramIdx++ }
 
     query += ` ORDER BY a.starts_at ASC`
 
@@ -178,8 +180,10 @@ export const appointmentRoutes: FastifyPluginAsync = async (app) => {
     let appt: any
     try {
       const { rows } = await db.query(
-        `INSERT INTO appointments (tenant_id, customer_id, professional_id, service_id, starts_at, ends_at, notes, created_by)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
+        // Criado manualmente (App/Web) → origem 'app' e já nasce 'confirmed' (#1):
+        // o próprio dono/equipe criou, então está confirmado; 'pending' fica p/ a IA.
+        `INSERT INTO appointments (tenant_id, customer_id, professional_id, service_id, starts_at, ends_at, notes, created_by, origin, status)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'app', 'confirmed') RETURNING *`,
         [tenant_id, body.customer_id, body.professional_id, body.service_id,
          startsAt.toISOString(), endsAt.toISOString(), body.notes ?? null, user_id]
       )
@@ -195,6 +199,8 @@ export const appointmentRoutes: FastifyPluginAsync = async (app) => {
 
     // Sync to Google Calendar in background
     syncAppointmentToCalendar(appt.id).catch(console.error)
+    // #2 — já nasce confirmado: avisa o cliente no WhatsApp.
+    sendAppointmentConfirmation(tenant_id!, appt.id).catch(console.error)
 
     return reply.status(201).send(appt)
   })
@@ -208,6 +214,13 @@ export const appointmentRoutes: FastifyPluginAsync = async (app) => {
     if (!allowed) return reply.status(403).send({ error: 'Sem permissão para editar este agendamento' })
 
     const body = updateSchema.parse(request.body)
+
+    // #1 — remarcação via App: marca o selo 'rescheduled' quando o horário muda.
+    let markRescheduled = false
+    if (body.starts_at !== undefined) {
+      const { rows: [cur] } = await db.query('SELECT starts_at FROM appointments WHERE id = $1 AND tenant_id = $2', [appointmentId, tenant_id])
+      if (cur && new Date(cur.starts_at).getTime() !== new Date(body.starts_at).getTime()) markRescheduled = true
+    }
 
     // #2 — para enviar a confirmação só na TRANSIÇÃO para 'confirmed', guardamos
     // o status anterior.
@@ -280,6 +293,7 @@ export const appointmentRoutes: FastifyPluginAsync = async (app) => {
     if (body.professional_id !== undefined) { sets.push(`professional_id = $${i++}`); values.push(body.professional_id) }
     if (body.service_id !== undefined)      { serviceIdParamIdx = i; sets.push(`service_id = $${i++}`); values.push(body.service_id) }
     if (body.starts_at !== undefined)       { sets.push(`starts_at = $${i++}`); values.push(body.starts_at) }
+    if (markRescheduled)                    { sets.push(`rescheduled = TRUE`) }
     if (endsAt !== undefined)               { sets.push(`ends_at = $${i++}`); values.push(endsAt) }
     if (body.notes !== undefined)           { sets.push(`notes = $${i++}`); values.push(body.notes) }
     if (body.status !== undefined)          { sets.push(`status = $${i++}`); values.push(body.status) }

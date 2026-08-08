@@ -191,6 +191,7 @@ export const appointmentsApi = {
     search?: string
     professional_id?: string
     service_id?: string
+    origin?: 'ia' | 'app'
   }) => {
     const qs = new URLSearchParams()
     if (params.date) qs.set('date', params.date)
@@ -199,6 +200,7 @@ export const appointmentsApi = {
     if (params.search) qs.set('search', params.search)
     if (params.professional_id) qs.set('professional_id', params.professional_id)
     if (params.service_id) qs.set('service_id', params.service_id)
+    if (params.origin) qs.set('origin', params.origin)
     const q = qs.toString()
     return api.get<any[]>(`/appointments${q ? `?${q}` : ''}`)
   },

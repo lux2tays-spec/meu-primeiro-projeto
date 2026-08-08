@@ -36,6 +36,8 @@ interface Appt {
   customer_id: string
   notes?: string | null
   created_by?: string | null
+  origin?: 'ia' | 'app' | null
+  rescheduled?: boolean
 }
 
 const DAYS = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb']
@@ -163,6 +165,7 @@ export default function CalendarScreen() {
   const [debouncedSearch, setDebouncedSearch] = useState('')
   const [professionalFilter, setProfessionalFilter] = useState<any | null>(null)
   const [serviceFilter, setServiceFilter] = useState<any | null>(null)
+  const [originFilter, setOriginFilter] = useState<'ia' | 'app' | null>(null)
   const [pickerFor, setPickerFor] = useState<'professional' | 'service' | null>(null)
 
   useEffect(() => {
@@ -174,12 +177,13 @@ export default function CalendarScreen() {
   const todayStr = toISO(new Date())
 
   const { data: appointments, isLoading, isError, isRefetching, refetch } = useQuery({
-    queryKey: ['appointments', dateStr, debouncedSearch, professionalFilter?.id ?? null, serviceFilter?.id ?? null],
+    queryKey: ['appointments', dateStr, debouncedSearch, professionalFilter?.id ?? null, serviceFilter?.id ?? null, originFilter],
     queryFn: () => appointmentsApi.search({
       date: dateStr,
       search: debouncedSearch || undefined,
       professional_id: professionalFilter?.id,
       service_id: serviceFilter?.id,
+      origin: originFilter ?? undefined,
     }) as Promise<Appt[]>,
   })
 
@@ -427,7 +431,7 @@ export default function CalendarScreen() {
 
   // ── Render ────────────────────────────────────────────────────────────────
   const monthLabel = `${MONTHS[selected.getMonth()]} ${selected.getFullYear()}`
-  const hasFilters = !!professionalFilter || !!serviceFilter || !!debouncedSearch
+  const hasFilters = !!professionalFilter || !!serviceFilter || !!debouncedSearch || !!originFilter
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
@@ -542,6 +546,17 @@ export default function CalendarScreen() {
             </Text>
             <Ionicons name="chevron-down" size={13} color={serviceFilter ? colors.primary : colors.textSecondary} />
           </TouchableOpacity>
+        </View>
+        {/* #1 — filtro por origem do lead */}
+        <View style={styles.originRow}>
+          {([['', 'Todos'], ['ia', '🤖 IA'], ['app', '📱 App']] as const).map(([v, label]) => {
+            const active = (originFilter ?? '') === v
+            return (
+              <TouchableOpacity key={label} style={[styles.originChip, active && styles.originChipActive]} onPress={() => setOriginFilter((v || null) as 'ia' | 'app' | null)}>
+                <Text style={[styles.originChipText, active && styles.originChipTextActive]}>{label}</Text>
+              </TouchableOpacity>
+            )
+          })}
         </View>
       </View>
 
@@ -946,6 +961,22 @@ function AgendaRow({ appointment: a, onPress }: { appointment: Appt; onPress: ()
           <Text style={[rowStyles.service, isCancelled && rowStyles.struck]} numberOfLines={1}>
             {a.service_name}
           </Text>
+          {(a.origin || a.rescheduled) && (
+            <View style={rowStyles.tagsLine}>
+              {a.origin && (
+                <View style={[rowStyles.tag, a.origin === 'ia' ? rowStyles.tagIa : rowStyles.tagApp]}>
+                  <Text style={[rowStyles.tagText, { color: a.origin === 'ia' ? colors.primaryDark : colors.textSecondary }]}>
+                    {a.origin === 'ia' ? '🤖 IA' : '📱 App'}
+                  </Text>
+                </View>
+              )}
+              {a.rescheduled && (
+                <View style={[rowStyles.tag, rowStyles.tagResched]}>
+                  <Text style={[rowStyles.tagText, { color: colors.info }]}>↻ Remarcado</Text>
+                </View>
+              )}
+            </View>
+          )}
           <View style={rowStyles.bottomLine}>
             <View style={rowStyles.proWrap}>
               <Ionicons name="person-outline" size={12} color={colors.textSecondary} />
@@ -1106,6 +1137,12 @@ const rowStyles = StyleSheet.create({
   customer: { flex: 1, fontSize: font.md, fontWeight: '600', color: colors.text },
   statusChip: { paddingHorizontal: 8, paddingVertical: 2, borderRadius: radius.full },
   statusChipText: { fontSize: 11, fontWeight: '700' },
+  tagsLine: { flexDirection: 'row', gap: 6, marginTop: 4, flexWrap: 'wrap' },
+  tag: { paddingHorizontal: 7, paddingVertical: 2, borderRadius: radius.full },
+  tagIa: { backgroundColor: colors.primaryLight },
+  tagApp: { backgroundColor: colors.surfaceAlt },
+  tagResched: { backgroundColor: '#DBEAFE' },
+  tagText: { fontSize: 10, fontWeight: '700' },
   service: { fontSize: font.sm, color: colors.textSecondary },
   bottomLine: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing.sm },
   proWrap: { flexDirection: 'row', alignItems: 'center', gap: 4, flex: 1 },
@@ -1282,6 +1319,20 @@ const styles = StyleSheet.create({
   filterChipActive: { borderColor: colors.primary, backgroundColor: colors.primaryLight },
   filterChipText: { fontSize: font.sm, fontWeight: '600', color: colors.textSecondary, flexShrink: 1 },
   filterChipTextActive: { color: colors.primary },
+  originRow: { flexDirection: 'row', gap: spacing.sm, marginTop: spacing.sm },
+  originChip: {
+    flex: 1,
+    alignItems: 'center',
+    paddingVertical: 6,
+    paddingHorizontal: spacing.sm,
+    borderRadius: radius.full,
+    borderWidth: 1.5,
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
+  },
+  originChipActive: { borderColor: colors.primary, backgroundColor: colors.primaryLight },
+  originChipText: { fontSize: 12, fontWeight: '600', color: colors.textSecondary },
+  originChipTextActive: { color: colors.primary },
   list: { padding: spacing.lg, paddingTop: spacing.sm, gap: spacing.md },
   listTitle: { fontSize: font.md, fontWeight: '600', color: colors.text, textTransform: 'capitalize' },
   empty: { color: colors.textSecondary, textAlign: 'center', paddingVertical: spacing.xl, fontSize: font.md },

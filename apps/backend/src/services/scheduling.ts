@@ -322,7 +322,8 @@ export async function bookAppointment(params: {
       // garante status 'confirmed'. Sem INSERT novo, sem cancelar a antiga.
       const { rows: [appt] } = await db.query(
         `UPDATE appointments
-           SET professional_id = $1, service_id = $2, starts_at = $3, ends_at = $4, status = 'confirmed'
+           SET professional_id = $1, service_id = $2, starts_at = $3, ends_at = $4, status = 'confirmed',
+               rescheduled = TRUE
          WHERE id = $5 AND tenant_id = $6 RETURNING id`,
         [professionalId, serviceId, startsAt.toISOString(), endsAt.toISOString(), rescheduleId, tenantId]
       )
@@ -334,8 +335,8 @@ export async function bookAppointment(params: {
       console.log(`[scheduling] bookAppointment OK (remarcado in-place): appointment=${apptId} → ${date} ${time} customer=${customerId} professional=${professionalId} (tenant=${tenantId})`)
     } else {
       const { rows: [appt] } = await db.query(
-        `INSERT INTO appointments (tenant_id, customer_id, professional_id, service_id, starts_at, ends_at, status, created_by)
-         VALUES ($1, $2, $3, $4, $5, $6, 'confirmed', NULL) RETURNING id`,
+        `INSERT INTO appointments (tenant_id, customer_id, professional_id, service_id, starts_at, ends_at, status, created_by, origin)
+         VALUES ($1, $2, $3, $4, $5, $6, 'confirmed', NULL, 'ia') RETURNING id`,
         [tenantId, customerId, professionalId, serviceId, startsAt.toISOString(), endsAt.toISOString()]
       )
       apptId = appt.id

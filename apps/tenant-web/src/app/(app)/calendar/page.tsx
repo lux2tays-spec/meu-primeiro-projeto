@@ -28,6 +28,8 @@ interface Appointment {
   service_id: string
   customer_id: string
   notes: string | null
+  origin?: 'ia' | 'app' | null
+  rescheduled?: boolean
 }
 
 type ViewMode = 'day' | 'week' | 'month'
@@ -132,6 +134,7 @@ export default function CalendarPage() {
   }, [searchInput])
   const [proFilter, setProFilter] = useState('')
   const [svcFilter, setSvcFilter] = useState('')
+  const [originFilter, setOriginFilter] = useState<'' | 'ia' | 'app'>('')
 
   const [editing, setEditing] = useState<Appointment | null>(null)
   const [bulkOpen, setBulkOpen] = useState(false)
@@ -156,12 +159,13 @@ export default function CalendarPage() {
   }, [view, anchor])
 
   const { data: appointments = [], isLoading, isError } = useQuery({
-    queryKey: ['appointments', view, range.key, search, proFilter, svcFilter],
+    queryKey: ['appointments', view, range.key, search, proFilter, svcFilter, originFilter],
     queryFn: () => appointmentsApi.list({
       ...range.params,
       ...(search ? { search } : {}),
       ...(proFilter ? { professional_id: proFilter } : {}),
       ...(svcFilter ? { service_id: svcFilter } : {}),
+      ...(originFilter ? { origin: originFilter } : {}),
     }) as Promise<Appointment[]>,
   })
 
@@ -300,6 +304,12 @@ export default function CalendarPage() {
             <option value="">Todos os serviços</option>
             {(services as any[]).map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
           </select>
+          {/* #1 — filtro por origem do lead (IA x App), em qualquer fase */}
+          <select value={originFilter} onChange={(e) => setOriginFilter(e.target.value as '' | 'ia' | 'app')} className={selectCls} aria-label="Filtrar por origem">
+            <option value="">Todas as origens</option>
+            <option value="ia">🤖 IA</option>
+            <option value="app">📱 App</option>
+          </select>
         </div>
       </div>
 
@@ -365,9 +375,32 @@ function HoverCard({ a }: { a: Appointment }) {
         <p className="text-xs text-gray-300">
           Horário: <span className="text-white">{fmtTime(a.starts_at)} – {endsAt(a).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}</span>
         </p>
-        <p className="text-[11px] text-gray-400 pt-0.5">{STATUS_LABEL[a.status]} · clique para editar</p>
+        <div className="flex items-center gap-1.5 pt-0.5">
+          <OriginTag a={a} tone="dark" />
+        </div>
+        <p className="text-[11px] text-gray-400">{STATUS_LABEL[a.status]} · clique para editar</p>
       </div>
     </div>
+  )
+}
+
+// #1 — Selo de ORIGEM (IA x App) + REMARCADO. Persiste em qualquer fase do lead
+// (pendente/confirmado/remarcado/cancelado), para leitura e filtro.
+function OriginTag({ a, tone = 'light' }: { a: Appointment; tone?: 'light' | 'dark' }) {
+  if (!a.origin && !a.rescheduled) return null
+  const base = 'inline-flex items-center rounded-full px-1.5 py-0.5 text-[10px] font-semibold leading-none'
+  const iaCls = tone === 'dark' ? 'bg-primary/25 text-white' : 'bg-primary/10 text-primary'
+  const appCls = tone === 'dark' ? 'bg-white/15 text-gray-200' : 'bg-gray-100 text-gray-600'
+  const rsCls = tone === 'dark' ? 'bg-blue-400/25 text-blue-100' : 'bg-blue-50 text-blue-600'
+  return (
+    <>
+      {a.origin && (
+        <span className={`${base} ${a.origin === 'ia' ? iaCls : appCls}`}>
+          {a.origin === 'ia' ? '🤖 IA' : '📱 App'}
+        </span>
+      )}
+      {a.rescheduled && <span className={`${base} ${rsCls}`}>↻ Remarcado</span>}
+    </>
   )
 }
 
@@ -422,7 +455,7 @@ function MonthView({ anchor, byDay, onOpen, onOpenDay }: {
                       onClick={() => onOpen(a)}
                       className={`group relative w-full text-left rounded-md px-1.5 py-0.5 text-[11px] font-medium leading-tight truncate block ${CHIP_CLS[a.status]}`}
                     >
-                      {fmtTime(a.starts_at)} {a.customer_name}
+                      {a.origin === 'ia' ? '🤖 ' : ''}{a.rescheduled ? '↻ ' : ''}{fmtTime(a.starts_at)} {a.customer_name}
                       <HoverCard a={a} />
                     </button>
                   ))}
@@ -494,6 +527,11 @@ function DayColumn({ appts, onOpen, startHour, endHour }: {
               {fmtTime(a.starts_at)} · {a.customer_name}
             </p>
             <p className="text-[11px] text-gray-500 leading-tight truncate">{a.service_name}</p>
+            {(a.origin || a.rescheduled) && (
+              <div className="flex flex-wrap items-center gap-1 mt-0.5">
+                <OriginTag a={a} />
+              </div>
+            )}
             <HoverCard a={a} />
           </button>
         )
@@ -711,6 +749,11 @@ function EditModal({ appointment: a, services, professionals, readOnly = false, 
   return (
     <ModalShell title={readOnly ? 'Agendamento' : 'Editar agendamento'} onClose={onClose}>
       <div className="space-y-3.5">
+        {(a.origin || a.rescheduled) && (
+          <div className="flex flex-wrap items-center gap-1.5">
+            <OriginTag a={a} />
+          </div>
+        )}
         {readOnly && (
           <p className="text-xs text-gray-500 bg-gray-50 border border-gray-100 rounded-xl px-3.5 py-2.5">
             Você tem acesso somente de visualização. Fale com um administrador para alterar este agendamento.
