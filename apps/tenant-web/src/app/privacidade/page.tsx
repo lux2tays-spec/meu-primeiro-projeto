@@ -108,9 +108,10 @@ function StaticPrivacidade() {
           <p>
             Você pode solicitar acesso, correção, portabilidade, anonimização e eliminação dos seus dados,
             além de revogar consentimentos. Donos de negócio podem excluir a conta e todos os dados
-            diretamente no aplicativo (Configurações → Excluir conta). Para solicitações de clientes finais
-            ou outras requisições, escreva para <strong>contato.aiconfirma@gmail.com</strong> — responderemos
-            no prazo legal.
+            diretamente no aplicativo (Ajustes → Excluir minha conta) — veja o passo a passo em{' '}
+            <Link href="/excluir-conta" className="text-primary hover:underline">Excluir conta</Link>. Para
+            solicitações de clientes finais ou outras requisições, escreva para{' '}
+            <strong>contato.aiconfirma@gmail.com</strong> — responderemos no prazo legal.
           </p>
         </section>
 
