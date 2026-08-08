@@ -15,16 +15,16 @@ export default async function PrivacidadePage() {
   return <StaticPrivacidade />
 }
 
-// NOTA: preencha os campos entre colchetes com os dados reais da empresa
-// controladora ([RAZÃO SOCIAL], [CNPJ], e-mail do encarregado) antes de publicar.
-// Recomenda-se revisão jurídica. Última atualização: 11 de julho de 2026.
+// Controlador: Fabio Antonio Braga Padrão Gomes (pessoa física, Sumaré/SP).
+// CPF e endereço completo NÃO são publicados aqui (página pública) — ficam no
+// Google Play Console. Recomenda-se revisão jurídica. Última atualização: 8 ago 2026.
 
 function StaticPrivacidade() {
   return (
     <main className="mx-auto max-w-3xl px-6 py-12 text-gray-800">
       <Link href="/" className="text-sm text-primary hover:underline">← Voltar</Link>
       <h1 className="mt-4 text-3xl font-bold text-gray-900">Política de Privacidade</h1>
-      <p className="mt-2 text-sm text-gray-500">Última atualização: 11 de julho de 2026</p>
+      <p className="mt-2 text-sm text-gray-500">Última atualização: 8 de agosto de 2026</p>
 
       <div className="prose prose-sm mt-8 max-w-none space-y-6 leading-relaxed">
         <section>
@@ -32,8 +32,9 @@ function StaticPrivacidade() {
           <p>
             O AiConfirma é uma plataforma que oferece assistentes de atendimento por WhatsApp com
             inteligência artificial para pequenos negócios. O controlador dos dados tratados nesta
-            plataforma é <strong>[RAZÃO SOCIAL], CNPJ [CNPJ]</strong> (&quot;AiConfirma&quot;, &quot;nós&quot;).
-            Dúvidas sobre privacidade e exercício de direitos: <strong>[encarregado@aiconfirma.com.br]</strong>.
+            plataforma é <strong>Fabio Antonio Braga Padrão Gomes</strong> (pessoa física, Sumaré/SP)
+            (&quot;AiConfirma&quot;, &quot;nós&quot;).
+            Dúvidas sobre privacidade e exercício de direitos: <strong>contato.aiconfirma@gmail.com</strong>.
           </p>
         </section>
 
@@ -108,7 +109,7 @@ function StaticPrivacidade() {
             Você pode solicitar acesso, correção, portabilidade, anonimização e eliminação dos seus dados,
             além de revogar consentimentos. Donos de negócio podem excluir a conta e todos os dados
             diretamente no aplicativo (Configurações → Excluir conta). Para solicitações de clientes finais
-            ou outras requisições, escreva para <strong>[encarregado@aiconfirma.com.br]</strong> — responderemos
+            ou outras requisições, escreva para <strong>contato.aiconfirma@gmail.com</strong> — responderemos
             no prazo legal.
           </p>
         </section>
@@ -126,7 +127,7 @@ function StaticPrivacidade() {
           <h2 className="text-xl font-semibold">9. Alterações e contato</h2>
           <p>
             Podemos atualizar esta política; a data acima indica a última revisão. Encarregado de Proteção de
-            Dados (DPO): <strong>[Nome do Encarregado]</strong> — <strong>[encarregado@aiconfirma.com.br]</strong>.
+            Dados (DPO): <strong>Fabio Antonio Braga Padrão Gomes</strong> — <strong>contato.aiconfirma@gmail.com</strong>.
           </p>
           <p className="mt-4">
             Veja também nossos <Link href="/termos" className="text-primary hover:underline">Termos de Uso</Link>.

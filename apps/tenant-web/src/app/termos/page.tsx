@@ -15,22 +15,23 @@ export default async function TermosPage() {
   return <StaticTermos />
 }
 
-// NOTA: preencha [RAZÃO SOCIAL]/[CNPJ] e revise juridicamente antes de publicar.
-// Última atualização: 11 de julho de 2026.
+// Operador: Fabio Antonio Braga Padrão Gomes (pessoa física, Sumaré/SP).
+// CPF/endereço completo ficam no Google Play Console, não nesta página pública.
+// Recomenda-se revisão jurídica. Última atualização: 8 ago 2026.
 
 function StaticTermos() {
   return (
     <main className="mx-auto max-w-3xl px-6 py-12 text-gray-800">
       <Link href="/" className="text-sm text-primary hover:underline">← Voltar</Link>
       <h1 className="mt-4 text-3xl font-bold text-gray-900">Termos de Uso</h1>
-      <p className="mt-2 text-sm text-gray-500">Última atualização: 11 de julho de 2026</p>
+      <p className="mt-2 text-sm text-gray-500">Última atualização: 8 de agosto de 2026</p>
 
       <div className="prose prose-sm mt-8 max-w-none space-y-6 leading-relaxed">
         <section>
           <h2 className="text-xl font-semibold">1. Aceitação</h2>
           <p>
-            Ao criar uma conta ou usar o AiConfirma, operado por <strong>[RAZÃO SOCIAL], CNPJ [CNPJ]</strong>,
-            você concorda com estes Termos e com a{' '}
+            Ao criar uma conta ou usar o AiConfirma, operado por <strong>Fabio Antonio Braga Padrão Gomes</strong>
+            {' '}(pessoa física, Sumaré/SP), você concorda com estes Termos e com a{' '}
             <Link href="/privacidade" className="text-primary hover:underline">Política de Privacidade</Link>.
             Se não concordar, não utilize o serviço.
           </p>
@@ -96,8 +97,8 @@ function StaticTermos() {
           <h2 className="text-xl font-semibold">8. Alterações e foro</h2>
           <p>
             Podemos atualizar estes Termos; a data acima indica a última revisão. Fica eleito o foro da comarca
-            de <strong>[CIDADE/UF]</strong> para dirimir controvérsias. Contato:
-            <strong> [contato@aiconfirma.com.br]</strong>.
+            de <strong>Sumaré/SP</strong> para dirimir controvérsias. Contato:
+            <strong> contato.aiconfirma@gmail.com</strong>.
           </p>
         </section>
       </div>
