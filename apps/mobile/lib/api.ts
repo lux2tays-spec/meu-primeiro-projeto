@@ -114,6 +114,8 @@ export const authApi = {
   resendVerification: (email: string) =>
     api.post<{ message: string }>('/auth/resend-verification', { email }),
   deleteAccount: () => api.delete<{ deleted: boolean }>('/auth/account'),
+  // Handoff app → web: token de curta duração para abrir a web já autenticado.
+  webHandoff: () => api.post<{ token: string }>('/auth/web-handoff', {}),
   me: () =>
     api.get<{
       id: string

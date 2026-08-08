@@ -2,13 +2,14 @@ import { useState } from 'react'
 import {
   View, Text, StyleSheet, ScrollView, Alert, TouchableOpacity, Linking, ActivityIndicator,
 } from 'react-native'
+import * as WebBrowser from 'expo-web-browser'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { Ionicons } from '@expo/vector-icons'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Card } from '@/components/ui/Card'
 import { Badge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
-import { tenantApi, subscriptionApi } from '@/lib/api'
+import { tenantApi, subscriptionApi, authApi } from '@/lib/api'
 import { useToast } from '@/lib/toast'
 import { colors, font, spacing, radius } from '@/lib/theme'
 
@@ -17,7 +18,8 @@ import { colors, font, spacing, radius } from '@/lib/theme'
 // políticas de pagamento da Google Play e da Apple (assinatura de serviço digital
 // dentro do app exigiria a cobrança da loja). Ver a estratégia registrada.
 const WEB_URL = process.env.EXPO_PUBLIC_WEB_URL ?? 'https://aiconfirma.com.br'
-const MANAGE_URL = `${WEB_URL}/settings/subscription`
+const MANAGE_PATH = '/settings/subscription'
+const MANAGE_URL = `${WEB_URL}${MANAGE_PATH}`
 
 // PAY-7: os planos vêm SEMPRE do backend (/subscription/plans). Este fallback
 // só é usado se a query falhar (offline etc.), para a tela não ficar vazia.
@@ -48,6 +50,7 @@ export default function SubscriptionScreen() {
   } = useQuery({ queryKey: ['subscription-plans'], queryFn: subscriptionApi.plans })
 
   const [period, setPeriod] = useState<Period>('monthly')
+  const [opening, setOpening] = useState(false)
 
   // Assinatura atual (renovação/período) e histórico de cobranças.
   const { data: sub } = useQuery({ queryKey: ['subscription-me'], queryFn: subscriptionApi.me })
@@ -92,13 +95,32 @@ export default function SubscriptionScreen() {
     return { label: 'Assinar', icon: 'card-outline' }
   }
 
+  // Abre a web JÁ AUTENTICADO (handoff), num navegador in-app que volta pro app
+  // ao fechar — sem novo login, para reduzir o abandono. Se o handoff falhar,
+  // cai no fluxo normal (login manual no site).
   async function openManage() {
+    if (opening) return
+    setOpening(true)
     try {
-      const ok = await Linking.canOpenURL(MANAGE_URL)
-      if (ok) await Linking.openURL(MANAGE_URL)
-      else Alert.alert('Abra no navegador', `Acesse ${MANAGE_URL} para gerenciar sua assinatura.`)
+      let url = MANAGE_URL
+      try {
+        const { token } = await authApi.webHandoff()
+        url = `${WEB_URL}/entrar?token=${encodeURIComponent(token)}&next=${encodeURIComponent(MANAGE_PATH)}`
+      } catch {
+        // segue com a URL normal (usuário faz login no site)
+      }
+      await WebBrowser.openBrowserAsync(url, { dismissButtonStyle: 'close' })
+      // Ao voltar, atualiza o estado do plano (caso tenha assinado).
+      queryClient.invalidateQueries({ queryKey: ['tenant'] })
+      queryClient.invalidateQueries({ queryKey: ['subscription-me'] })
+      queryClient.invalidateQueries({ queryKey: ['subscription-payments'] })
+      queryClient.invalidateQueries({ queryKey: ['tenant-capabilities'] })
     } catch {
-      Alert.alert('Abra no navegador', `Acesse ${MANAGE_URL} para gerenciar sua assinatura.`)
+      try { await Linking.openURL(MANAGE_URL) } catch {
+        Alert.alert('Abra no navegador', `Acesse ${MANAGE_URL} para gerenciar sua assinatura.`)
+      }
+    } finally {
+      setOpening(false)
     }
   }
 
@@ -185,11 +207,12 @@ export default function SubscriptionScreen() {
         <Button
           label={tenant?.plan && tenant.plan !== 'free' && !isTrial ? 'Gerenciar assinatura' : 'Assinar um plano'}
           onPress={openManage}
+          loading={opening}
         />
         <View style={styles.webNote}>
-          <Ionicons name="globe-outline" size={14} color={colors.textSecondary} />
+          <Ionicons name="shield-checkmark-outline" size={14} color={colors.textSecondary} />
           <Text style={styles.webNoteText}>
-            A contratação e a renovação são feitas com segurança no site, no seu navegador. Você mantém o acompanhamento do plano aqui.
+            Você abre o pagamento seguro sem sair da sua sessão — não precisa fazer login de novo. O acompanhamento do plano fica aqui no app.
           </Text>
         </View>
 
@@ -255,11 +278,11 @@ export default function SubscriptionScreen() {
                     <Text style={[styles.featureText, isCurrent && styles.featureTextActive]}>{plan.users} usuário{plan.users > 1 ? 's' : ''}</Text>
                   </View>
                 </View>
-                {/* PAY-6: deixa claro se é upgrade ou downgrade — leva à web */}
+                {/* PAY-6: deixa claro se é upgrade ou downgrade — abre pagamento seguro */}
                 {!isCurrent && (
                   <View style={styles.subscribeRow}>
                     <Ionicons name={action.icon} size={16} color={colors.primary} />
-                    <Text style={styles.subscribeText}>{action.label} na web</Text>
+                    <Text style={styles.subscribeText}>{action.label}</Text>
                   </View>
                 )}
               </Card>

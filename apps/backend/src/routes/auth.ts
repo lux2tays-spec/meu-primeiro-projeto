@@ -519,6 +519,22 @@ export const authRoutes: FastifyPluginAsync = async (app) => {
     })
   })
 
+  // ── Handoff app → web ────────────────────────────────────────────────────────
+  // Emite um token de CURTA duração (5 min) para o app abrir a web já autenticado
+  // — ex.: concluir/gerenciar a assinatura no navegador sem novo login (reduz o
+  // abandono). Reusa as claims do usuário já autenticado; TTL curto limita o risco
+  // de o token vazar pela URL. A web consome em /entrar e limpa a URL na hora.
+  app.post('/web-handoff', {
+    preHandler: [(app as any).authenticate],
+  }, async (request, reply) => {
+    const { user_id, tenant_id, role, tv } = request.user as any
+    const token = app.jwt.sign(
+      { user_id, tenant_id, role, tv: tv ?? 0 },
+      { expiresIn: '5m' }
+    )
+    return reply.send({ token })
+  })
+
   // ── Update own profile (name/phone only — e-mail has its own verified flow) ──
   app.patch('/me', {
     preHandler: [(app as any).authenticate],
