@@ -58,9 +58,10 @@ function StaticTermos() {
           <h2 className="text-xl font-semibold">4. Planos, teste e pagamento</h2>
           <p>
             Oferecemos um período de teste gratuito e planos pagos com cobrança recorrente via Mercado Pago.
-            Os valores e limites de cada plano são exibidos no aplicativo. A falta de pagamento pode suspender
-            o acesso às funcionalidades. Você pode cancelar a assinatura a qualquer momento; o cancelamento
-            interrompe renovações futuras.
+            A contratação e a renovação da assinatura são feitas pelo site (aplicativo móvel exibe os planos e
+            o status, mas a compra é concluída no navegador). Os valores e limites de cada plano são exibidos
+            no aplicativo e no site. A falta de pagamento pode suspender o acesso às funcionalidades. Você pode
+            cancelar a assinatura a qualquer momento; o cancelamento interrompe renovações futuras.
           </p>
         </section>
 
