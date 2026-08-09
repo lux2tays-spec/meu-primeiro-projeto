@@ -305,8 +305,8 @@ function NewAppointmentContent() {
             <p className="text-sm font-semibold text-amber-800">Nenhum profissional cadastrado</p>
             <p className="text-xs text-amber-700 mt-0.5">
               Vá em{' '}
-              <a href="/settings/staff" className="underline font-medium">Configurações → Colaboradores</a>{' '}
-              e habilite alguém para prestar serviços.
+              <a href="/settings/staff" className="underline font-medium">Configurações → Equipe</a>{' '}
+              e adicione um membro à equipe.
             </p>
           </div>
         </div>

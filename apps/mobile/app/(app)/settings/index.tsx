@@ -138,7 +138,7 @@ export default function SettingsScreen() {
           )}
           <SettingsRow icon="cut-outline" label="Serviços" subtitle="Gerenciar serviços e preços" onPress={() => router.push('/(app)/settings/services')} />
           <View style={styles.divider} />
-          <SettingsRow icon="people-outline" label="Colaboradores" subtitle="Permissões e prestadores de serviço" onPress={() => router.push('/(app)/settings/staff')} />
+          <SettingsRow icon="people-outline" label="Equipe" subtitle="Membros, acesso e profissionais da agenda" onPress={() => router.push('/(app)/settings/staff')} />
           <View style={styles.divider} />
           <SettingsRow icon="time-outline" label="Horários de Funcionamento" subtitle="Dias e horas de atendimento" onPress={() => router.push('/(app)/settings/hours')} />
         </Card>

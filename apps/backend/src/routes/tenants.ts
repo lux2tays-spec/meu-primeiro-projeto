@@ -464,6 +464,17 @@ export const tenantRoutes: FastifyPluginAsync = async (app) => {
       [userId, tenant_id, body.role]
     )
 
+    // Equipe = Profissionais: todo membro é agendável. Cria o profissional
+    // vinculado (se ainda não houver), para aparecer na agenda/serviços.
+    await db.query(
+      `INSERT INTO professionals (tenant_id, name, user_id)
+       SELECT $1, $2, $3
+       WHERE NOT EXISTS (
+         SELECT 1 FROM professionals WHERE user_id = $3 AND tenant_id = $1 AND active = TRUE
+       )`,
+      [tenant_id, body.name, userId]
+    )
+
     return reply.status(201).send({ id: userId, name: body.name, email: body.email, role: body.role })
   })
 
@@ -529,6 +540,22 @@ export const tenantRoutes: FastifyPluginAsync = async (app) => {
         await client.query(`UPDATE users SET ${sets.join(', ')} WHERE id = $${i}`, values)
       }
 
+      // Equipe = Profissionais: mantém o nome do profissional em sincronia com o
+      // do membro (senão a agenda/serviços continuam mostrando o nome antigo).
+      // Se o membro ainda não for profissional, cria (todo membro é agendável).
+      if (body.name !== undefined) {
+        const upd = await client.query(
+          'UPDATE professionals SET name = $1 WHERE user_id = $2 AND tenant_id = $3 AND active = TRUE',
+          [body.name, targetId, tenant_id]
+        )
+        if (upd.rowCount === 0) {
+          await client.query(
+            'INSERT INTO professionals (tenant_id, name, user_id) VALUES ($1, $2, $3)',
+            [tenant_id, body.name, targetId]
+          )
+        }
+      }
+
       const roleChanged = body.role !== undefined && body.role !== target.role
       if (roleChanged) {
         await client.query(
@@ -580,6 +607,12 @@ export const tenantRoutes: FastifyPluginAsync = async (app) => {
 
     await db.query(
       'DELETE FROM user_roles WHERE user_id = $1 AND tenant_id = $2',
+      [request.params.id, tenant_id]
+    )
+    // Equipe = Profissionais: ao remover o membro, desativa o profissional
+    // vinculado (some da agenda/serviços; histórico de agendamentos é preservado).
+    await db.query(
+      'UPDATE professionals SET active = FALSE WHERE user_id = $1 AND tenant_id = $2',
       [request.params.id, tenant_id]
     )
     // Revoke existing sessions: the removed collaborator loses access immediately

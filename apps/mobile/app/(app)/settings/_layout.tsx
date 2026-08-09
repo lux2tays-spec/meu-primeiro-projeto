@@ -19,7 +19,7 @@ export default function SettingsLayout() {
       <Stack.Screen name="perfil" options={{ title: 'Meu Perfil' }} />
       <Stack.Screen name="notifications" options={{ title: 'Notificações' }} />
       <Stack.Screen name="services" options={{ title: 'Serviços' }} />
-      <Stack.Screen name="staff" options={{ title: 'Colaboradores' }} />
+      <Stack.Screen name="staff" options={{ title: 'Equipe' }} />
       <Stack.Screen name="hours" options={{ title: 'Horários de Funcionamento' }} />
       <Stack.Screen name="whatsapp" options={{ title: 'WhatsApp' }} />
       <Stack.Screen name="subscription" options={{ title: 'Assinatura' }} />

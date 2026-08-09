@@ -134,7 +134,7 @@ function FormFields({ form, setForm, professionals }: {
         {professionals.length === 0 ? (
           <p className="text-xs text-gray-400 italic">
             Nenhum profissional cadastrado ainda. Vá em{' '}
-            <a href="/settings/staff" className="text-primary underline">Colaboradores</a> e habilite alguém para prestar serviços.
+            <a href="/settings/staff" className="text-primary underline">Equipe</a> e adicione um membro.
           </p>
         ) : (
           <>
