@@ -528,7 +528,7 @@ async function runTool(name: string, input: any, ctx: ExecCtx): Promise<any> {
         type: 'confirmation',
         title: 'Novo agendamento confirmado',
         body: `${service.name} com ${prof.professional.name} em ${input.date} às ${input.time}.`,
-        link: '/calendar',
+        link: `/appointments/${res.appointmentId}`,
         data: { appointment_id: res.appointmentId },
       }).catch((e) => console.error('[notifications] confirmation falhou:', e))
       return { ok: true, agendado: { service: service.name, professional: prof.professional.name, date: input.date, time: input.time } }
@@ -609,7 +609,7 @@ async function runTool(name: string, input: any, ctx: ExecCtx): Promise<any> {
         type: 'reschedule',
         title: 'Agendamento remarcado',
         body: `${serviceName} foi remarcado de ${current.when} para ${input.date} às ${input.time}.`,
-        link: '/calendar',
+        link: `/appointments/${res.appointmentId}`,
         data: { appointment_id: res.appointmentId },
       }).catch((e) => console.error('[notifications] reschedule falhou:', e))
       return { ok: true, remarcado: { de: current.when, para: { date: input.date, time: input.time }, service: serviceName } }

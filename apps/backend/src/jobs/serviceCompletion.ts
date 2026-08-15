@@ -47,7 +47,8 @@ export async function runServiceCompletionNotices(): Promise<void> {
 
     const title = 'Finalizar serviço'
     const body = `O horário de ${a.service_name} (${a.customer_name}) às ${a.when_fmt} já passou. Marque como realizado.`
-    const payload = { type: 'service_completion' as const, title, body, link: '/calendar', data: { appointment_id: a.id } }
+    // Link direto para o agendamento (abre exatamente aquele, não a agenda toda).
+    const payload = { type: 'service_completion' as const, title, body, link: `/appointments/${a.id}`, data: { appointment_id: a.id } }
 
     try {
       if (a.professional_user_id) {

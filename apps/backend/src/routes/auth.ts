@@ -563,6 +563,16 @@ export const authRoutes: FastifyPluginAsync = async (app) => {
     )
     if (!user) return reply.status(404).send({ error: 'Usuário não encontrado' })
 
+    // Equipe = Profissionais: se mudou o nome, mantém o profissional vinculado em
+    // sincronia (senão a agenda/serviços seguem com o nome antigo — ex.: renomeou
+    // no Perfil e o profissional continuava "Jack fpadrao").
+    if (body.name !== undefined) {
+      await db.query(
+        'UPDATE professionals SET name = $1 WHERE user_id = $2 AND active = TRUE',
+        [body.name.trim(), request.user.user_id]
+      ).catch((e) => console.error('[auth/me] falha ao sincronizar nome do profissional:', e))
+    }
+
     return reply.send({ id: user.id, name: user.name, email: user.email, phone: user.phone })
   })
 

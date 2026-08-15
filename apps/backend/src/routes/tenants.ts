@@ -16,6 +16,8 @@ const serviceSchema = z.object({
   // existia, mas só o DELETE a usava). false = pausado: some do bot e das
   // listagens padrão, mas o histórico/vínculos ficam intactos.
   active: z.boolean().optional(),
+  // Serviço OCULTO (avulso criado no agendamento) — não aparece no catálogo.
+  hidden: z.boolean().optional(),
   // Legacy shape (no commission): just the professional ids.
   professional_ids: z.array(z.string().uuid()).optional(),
   // Rich shape (#3): per-professional commission for this service.
@@ -159,7 +161,7 @@ export const tenantRoutes: FastifyPluginAsync = async (app) => {
        FROM services s
        LEFT JOIN service_professionals sp ON sp.service_id = s.id
        LEFT JOIN professionals p ON p.id = sp.professional_id AND p.active = TRUE
-       WHERE s.tenant_id = $1 ${includeInactive ? '' : 'AND s.active = TRUE'}
+       WHERE s.tenant_id = $1 AND s.hidden = FALSE ${includeInactive ? '' : 'AND s.active = TRUE'}
        GROUP BY s.id
        ORDER BY s.active DESC, s.name`,
       [tenant_id]
@@ -205,9 +207,9 @@ export const tenantRoutes: FastifyPluginAsync = async (app) => {
     try {
       await client.query('BEGIN')
       const { rows: [service] } = await client.query(
-        `INSERT INTO services (tenant_id, name, description, duration_minutes, price, reminder_days, active)
-         VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *`,
-        [tenant_id, body.name, body.description ?? null, body.duration_minutes, body.price, body.reminder_days ?? null, body.active ?? true]
+        `INSERT INTO services (tenant_id, name, description, duration_minutes, price, reminder_days, active, hidden)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
+        [tenant_id, body.name, body.description ?? null, body.duration_minutes, body.price, body.reminder_days ?? null, body.active ?? true, body.hidden ?? false]
       )
       const pros = normalizePros(body)
       if (pros?.length) {

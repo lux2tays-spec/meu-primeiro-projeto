@@ -68,6 +68,11 @@ export default function NewAppointmentScreen() {
   // voltar (seta) ainda permite trocar o cliente.
   const [skipCustomerStep, setSkipCustomerStep] = useState(!!prefillCustomerId)
 
+  const [serviceSearch, setServiceSearch] = useState('')
+  // Serviço personalizado (avulso) — não fica no catálogo.
+  const [isCustomService, setIsCustomService] = useState(false)
+  const [customSvc, setCustomSvc] = useState({ name: '', duration: '', price: '' })
+  const [customSvcSaving, setCustomSvcSaving] = useState(false)
   const [customerSearch, setCustomerSearch] = useState('')
   const [debouncedCustomerSearch, setDebouncedCustomerSearch] = useState('')
   const [newCustomerName, setNewCustomerName] = useState('')
@@ -143,6 +148,36 @@ export default function NewAppointmentScreen() {
     else router.back()
   }
 
+  // Cria um serviço PERSONALIZADO (avulso). Ele é gravado como serviço "oculto"
+  // (não aparece no catálogo), mas com id real — assim horários, comissão e
+  // relatórios funcionam normalmente. Fica vinculado ao profissional escolhido.
+  async function useCustomService() {
+    const name = customSvc.name.trim()
+    const duration = parseInt(customSvc.duration, 10)
+    const price = Number(customSvc.price.replace(/\./g, '').replace(',', '.'))
+    if (!name) { toast.show('Informe o nome do serviço', 'warning'); return }
+    if (!duration || duration <= 0) { toast.show('Informe a duração em minutos', 'warning'); return }
+    if (isNaN(price) || price < 0) { toast.show('Informe um valor válido', 'warning'); return }
+    setCustomSvcSaving(true)
+    try {
+      const created = await tenantApi.createService({
+        name,
+        duration_minutes: duration,
+        price,
+        hidden: true,
+        professional_ids: selected.professional ? [selected.professional.id] : undefined,
+      })
+      setSelected((s) => ({ ...s, service: created }))
+      setIsCustomService(false)
+      setCustomSvc({ name: '', duration: '', price: '' })
+      nextStep()
+    } catch (err: any) {
+      toast.show(err?.message ?? 'Não foi possível criar o serviço.', 'error')
+    } finally {
+      setCustomSvcSaving(false)
+    }
+  }
+
   function nextStep() {
     const idx = STEPS.indexOf(step)
     if (idx >= STEPS.length - 1) return
@@ -184,13 +219,13 @@ export default function NewAppointmentScreen() {
                 <Ionicons name="people-outline" size={48} color={colors.textDisabled} />
                 <Text style={styles.emptyStateTitle}>Nenhum profissional cadastrado</Text>
                 <Text style={styles.emptyStateSub}>
-                  Vá em Configurações → Colaboradores e habilite alguém para prestar serviços.
+                  Vá em Configurações → Equipe e adicione um membro.
                 </Text>
                 <TouchableOpacity
                   style={styles.emptyStateBtn}
                   onPress={() => router.replace('/(app)/settings/staff')}
                 >
-                  <Text style={styles.emptyStateBtnText}>Ir para Colaboradores</Text>
+                  <Text style={styles.emptyStateBtnText}>Ir para Equipe</Text>
                 </TouchableOpacity>
               </View>
             ) : (
@@ -216,11 +251,13 @@ export default function NewAppointmentScreen() {
           // Serviço com profissionais vinculados só aparece se incluir o
           // escolhido (agendar fora do vínculo não gera comissão). Serviço sem
           // vínculo nenhum aparece para todos, com aviso.
-          const availableServices = (services ?? []).filter(
+          const q = serviceSearch.trim().toLowerCase()
+          const proServices = (services ?? []).filter(
             (s: any) =>
               !s.professionals?.length ||
               s.professionals.some((p: any) => p.id === selected.professional?.id)
           )
+          const availableServices = proServices.filter((s: any) => !q || s.name.toLowerCase().includes(q))
           return (
             <View style={styles.step}>
               <Text style={styles.stepTitle}>Qual serviço?</Text>
@@ -229,7 +266,49 @@ export default function NewAppointmentScreen() {
                   Mostrando os serviços que {selected.professional.name} realiza.
                 </Text>
               )}
-              {availableServices.length === 0 ? (
+              {isCustomService ? (
+                <Card style={styles.newCustomerForm}>
+                  <Input
+                    label="Nome do serviço"
+                    value={customSvc.name}
+                    onChangeText={(v) => setCustomSvc((c) => ({ ...c, name: v }))}
+                    placeholder="Ex.: Corte + hidratação"
+                  />
+                  <View style={{ flexDirection: 'row', gap: spacing.md }}>
+                    <View style={{ flex: 1 }}>
+                      <Input
+                        label="Duração (min)"
+                        value={customSvc.duration}
+                        onChangeText={(v) => setCustomSvc((c) => ({ ...c, duration: v.replace(/[^0-9]/g, '') }))}
+                        placeholder="60"
+                        keyboardType="number-pad"
+                      />
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Input
+                        label="Valor (R$)"
+                        value={customSvc.price}
+                        onChangeText={(v) => setCustomSvc((c) => ({ ...c, price: v.replace(/[^0-9.,]/g, '') }))}
+                        placeholder="150,00"
+                        keyboardType="decimal-pad"
+                      />
+                    </View>
+                  </View>
+                  <Button label="Usar este serviço" onPress={useCustomService} loading={customSvcSaving} />
+                  <TouchableOpacity
+                    onPress={() => { setIsCustomService(false); setCustomSvc({ name: '', duration: '', price: '' }) }}
+                    style={{ alignSelf: 'center', padding: spacing.sm }}
+                  >
+                    <Text style={{ color: colors.textSecondary, fontWeight: '600' }}>Cancelar</Text>
+                  </TouchableOpacity>
+                </Card>
+              ) : (
+                <>
+                <TouchableOpacity style={styles.optionCard} onPress={() => setIsCustomService(true)}>
+                  <Ionicons name="create-outline" size={20} color={colors.primary} />
+                  <Text style={[styles.optionLabel, { color: colors.primary }]}>+ Serviço personalizado</Text>
+                </TouchableOpacity>
+                {proServices.length === 0 ? (
                 <View style={styles.emptyState}>
                   <Ionicons name="cut-outline" size={48} color={colors.textDisabled} />
                   <Text style={styles.emptyStateTitle}>Nenhum serviço para este profissional</Text>
@@ -245,7 +324,28 @@ export default function NewAppointmentScreen() {
                   </TouchableOpacity>
                 </View>
               ) : (
-                availableServices.map((s: any) => (
+                <>
+                  {/* Busca de serviço (aparece quando há vários) */}
+                  {proServices.length > 4 && (
+                    <View style={styles.searchBox}>
+                      <Ionicons name="search-outline" size={16} color={colors.textSecondary} />
+                      <TextInput
+                        style={styles.searchInput}
+                        placeholder="Buscar serviço..."
+                        placeholderTextColor={colors.textDisabled}
+                        value={serviceSearch}
+                        onChangeText={setServiceSearch}
+                      />
+                      {serviceSearch.length > 0 && (
+                        <TouchableOpacity onPress={() => setServiceSearch('')} hitSlop={8}>
+                          <Ionicons name="close-circle" size={16} color={colors.textDisabled} />
+                        </TouchableOpacity>
+                      )}
+                    </View>
+                  )}
+                  {availableServices.length === 0 ? (
+                    <Text style={styles.noSlots}>Nenhum serviço encontrado.</Text>
+                  ) : availableServices.map((s: any) => (
                   <TouchableOpacity
                     key={s.id}
                     style={[styles.optionCard, selected.service?.id === s.id && styles.optionCardActive]}
@@ -262,7 +362,10 @@ export default function NewAppointmentScreen() {
                     </View>
                     <Ionicons name="chevron-forward" size={18} color={colors.textDisabled} />
                   </TouchableOpacity>
-                ))
+                  ))}
+                </>
+              )}
+                </>
               )}
             </View>
           )

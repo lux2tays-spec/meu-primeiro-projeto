@@ -16,6 +16,14 @@ import { useToast } from '@/lib/toast'
 import { colors, font, spacing, radius } from '@/lib/theme'
 import { useTheme } from '@/lib/theme-context'
 
+// Opções dos filtros de origem/status (usadas nos dropdowns da agenda).
+const ORIGIN_OPTS: Array<['ia' | 'app', string]> = [['ia', '🤖 IA'], ['app', '📱 App']]
+const STATUS_OPTS: Array<['pending' | 'confirmed' | 'completed' | 'cancelled', string]> = [
+  ['pending', 'Pendente'], ['confirmed', 'Confirmado'], ['completed', 'Realizado'], ['cancelled', 'Cancelado'],
+]
+const ORIGIN_LABEL: Record<string, string> = { ia: '🤖 IA', app: '📱 App' }
+const STATUS_LABEL: Record<string, string> = { pending: 'Pendente', confirmed: 'Confirmado', completed: 'Realizado', cancelled: 'Cancelado' }
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Types + helpers
 // ─────────────────────────────────────────────────────────────────────────────
@@ -167,7 +175,7 @@ export default function CalendarScreen() {
   const [serviceFilter, setServiceFilter] = useState<any | null>(null)
   const [originFilter, setOriginFilter] = useState<'ia' | 'app' | null>(null)
   const [statusFilter, setStatusFilter] = useState<'pending' | 'confirmed' | 'completed' | 'cancelled' | null>(null)
-  const [pickerFor, setPickerFor] = useState<'professional' | 'service' | null>(null)
+  const [pickerFor, setPickerFor] = useState<'professional' | 'service' | 'origin' | 'status' | null>(null)
 
   // Deep-link dos quadros do dashboard/financeiro: aplica filtros vindos por
   // params (?status=&origin=) uma vez, ao montar.
@@ -538,6 +546,7 @@ export default function CalendarScreen() {
             </TouchableOpacity>
           )}
         </View>
+        {/* Filtros como dropdowns compactos (2 por linha) — tela mais limpa. */}
         <View style={styles.filterRow}>
           <TouchableOpacity
             style={[styles.filterChip, professionalFilter && styles.filterChipActive]}
@@ -559,29 +568,27 @@ export default function CalendarScreen() {
             </Text>
             <Ionicons name="chevron-down" size={13} color={serviceFilter ? colors.primary : colors.textSecondary} />
           </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.filterChip, originFilter && styles.filterChipActive]}
+            onPress={() => setPickerFor('origin')}
+          >
+            <Ionicons name="sparkles-outline" size={14} color={originFilter ? colors.primary : colors.textSecondary} />
+            <Text style={[styles.filterChipText, originFilter && styles.filterChipTextActive]} numberOfLines={1}>
+              {originFilter ? ORIGIN_LABEL[originFilter] : 'Origem'}
+            </Text>
+            <Ionicons name="chevron-down" size={13} color={originFilter ? colors.primary : colors.textSecondary} />
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.filterChip, statusFilter && styles.filterChipActive]}
+            onPress={() => setPickerFor('status')}
+          >
+            <Ionicons name="flag-outline" size={14} color={statusFilter ? colors.primary : colors.textSecondary} />
+            <Text style={[styles.filterChipText, statusFilter && styles.filterChipTextActive]} numberOfLines={1}>
+              {statusFilter ? STATUS_LABEL[statusFilter] : 'Status'}
+            </Text>
+            <Ionicons name="chevron-down" size={13} color={statusFilter ? colors.primary : colors.textSecondary} />
+          </TouchableOpacity>
         </View>
-        {/* #1 — filtro por origem do lead */}
-        <View style={styles.originRow}>
-          {([['', 'Todos'], ['ia', '🤖 IA'], ['app', '📱 App']] as const).map(([v, label]) => {
-            const active = (originFilter ?? '') === v
-            return (
-              <TouchableOpacity key={label} style={[styles.originChip, active && styles.originChipActive]} onPress={() => setOriginFilter((v || null) as 'ia' | 'app' | null)}>
-                <Text style={[styles.originChipText, active && styles.originChipTextActive]}>{label}</Text>
-              </TouchableOpacity>
-            )
-          })}
-        </View>
-        {/* filtro por status (usado pelos deep-links dos quadros resumo) */}
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.statusRow}>
-          {([['', 'Todos'], ['pending', 'Pendente'], ['confirmed', 'Confirmado'], ['completed', 'Realizado'], ['cancelled', 'Cancelado']] as const).map(([v, label]) => {
-            const active = (statusFilter ?? '') === v
-            return (
-              <TouchableOpacity key={label} style={[styles.statusChip, active && styles.originChipActive]} onPress={() => setStatusFilter((v || null) as any)}>
-                <Text style={[styles.originChipText, active && styles.originChipTextActive]}>{label}</Text>
-              </TouchableOpacity>
-            )
-          })}
-        </ScrollView>
       </View>
 
       {/* Appointments for selected day */}
@@ -617,17 +624,7 @@ export default function CalendarScreen() {
             />
           ))
         )}
-
-        {/* FAB */}
-        <TouchableOpacity
-          style={styles.fab}
-          onPress={() => router.push({ pathname: '/(app)/appointments/new', params: { prefillDate: dateStr } })}
-          activeOpacity={0.85}
-          accessibilityRole="button"
-          accessibilityLabel="Novo agendamento"
-        >
-          <Ionicons name="add" size={28} color="#fff" />
-        </TouchableOpacity>
+        {/* Sem FAB aqui: o botão "+" central da barra inferior já cria agendamento. */}
       </ScrollView>
       </View>
       </GestureDetector>
@@ -637,29 +634,57 @@ export default function CalendarScreen() {
         <TouchableOpacity style={styles.overlay} activeOpacity={1} onPress={() => setPickerFor(null)}>
           <TouchableOpacity activeOpacity={1} style={styles.sheet}>
             <Text style={styles.sheetTitle}>
-              {pickerFor === 'professional' ? 'Filtrar por profissional' : 'Filtrar por serviço'}
+              {pickerFor === 'professional' ? 'Filtrar por profissional'
+                : pickerFor === 'service' ? 'Filtrar por serviço'
+                : pickerFor === 'origin' ? 'Filtrar por origem'
+                : 'Filtrar por status'}
             </Text>
             <ScrollView style={{ maxHeight: 380 }}>
               <PickerOption
                 label="Todos"
-                selected={pickerFor === 'professional' ? !professionalFilter : !serviceFilter}
+                selected={
+                  pickerFor === 'professional' ? !professionalFilter
+                    : pickerFor === 'service' ? !serviceFilter
+                    : pickerFor === 'origin' ? !originFilter
+                    : !statusFilter
+                }
                 onPress={() => {
                   if (pickerFor === 'professional') setProfessionalFilter(null)
-                  else setServiceFilter(null)
+                  else if (pickerFor === 'service') setServiceFilter(null)
+                  else if (pickerFor === 'origin') setOriginFilter(null)
+                  else setStatusFilter(null)
                   setPickerFor(null)
                 }}
               />
-              {(pickerFor === 'professional' ? professionals : services)?.map((opt: any) => (
+              {/* Profissional / Serviço vêm da API; Origem / Status são fixos. */}
+              {(pickerFor === 'professional' || pickerFor === 'service') &&
+                (pickerFor === 'professional' ? professionals : services)?.map((opt: any) => (
+                  <PickerOption
+                    key={opt.id}
+                    label={opt.name}
+                    sub={pickerFor === 'service' ? formatBRL(opt.price) : undefined}
+                    selected={pickerFor === 'professional' ? professionalFilter?.id === opt.id : serviceFilter?.id === opt.id}
+                    onPress={() => {
+                      if (pickerFor === 'professional') setProfessionalFilter(opt)
+                      else setServiceFilter(opt)
+                      setPickerFor(null)
+                    }}
+                  />
+                ))}
+              {pickerFor === 'origin' && ORIGIN_OPTS.map(([v, label]) => (
                 <PickerOption
-                  key={opt.id}
-                  label={opt.name}
-                  sub={pickerFor === 'service' ? formatBRL(opt.price) : undefined}
-                  selected={pickerFor === 'professional' ? professionalFilter?.id === opt.id : serviceFilter?.id === opt.id}
-                  onPress={() => {
-                    if (pickerFor === 'professional') setProfessionalFilter(opt)
-                    else setServiceFilter(opt)
-                    setPickerFor(null)
-                  }}
+                  key={v}
+                  label={label}
+                  selected={originFilter === v}
+                  onPress={() => { setOriginFilter(v); setPickerFor(null) }}
+                />
+              ))}
+              {pickerFor === 'status' && STATUS_OPTS.map(([v, label]) => (
+                <PickerOption
+                  key={v}
+                  label={label}
+                  selected={statusFilter === v}
+                  onPress={() => { setStatusFilter(v); setPickerFor(null) }}
                 />
               ))}
             </ScrollView>
@@ -1326,9 +1351,10 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
   },
   searchInput: { flex: 1, fontSize: font.md, color: colors.text },
-  filterRow: { flexDirection: 'row', gap: spacing.sm },
+  filterRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
   filterChip: {
-    flex: 1,
+    flexGrow: 1,
+    flexBasis: '46%',
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
@@ -1343,49 +1369,11 @@ const styles = StyleSheet.create({
   filterChipActive: { borderColor: colors.primary, backgroundColor: colors.primaryLight },
   filterChipText: { fontSize: font.sm, fontWeight: '600', color: colors.textSecondary, flexShrink: 1 },
   filterChipTextActive: { color: colors.primary },
-  originRow: { flexDirection: 'row', gap: spacing.sm, marginTop: spacing.sm },
-  originChip: {
-    flex: 1,
-    alignItems: 'center',
-    paddingVertical: 6,
-    paddingHorizontal: spacing.sm,
-    borderRadius: radius.full,
-    borderWidth: 1.5,
-    borderColor: colors.border,
-    backgroundColor: colors.surface,
-  },
-  originChipActive: { borderColor: colors.primary, backgroundColor: colors.primaryLight },
-  originChipText: { fontSize: 12, fontWeight: '600', color: colors.textSecondary },
-  originChipTextActive: { color: colors.primary },
-  statusRow: { gap: spacing.sm, marginTop: spacing.sm, paddingRight: spacing.sm },
-  statusChip: {
-    paddingVertical: 6,
-    paddingHorizontal: spacing.md,
-    borderRadius: radius.full,
-    borderWidth: 1.5,
-    borderColor: colors.border,
-    backgroundColor: colors.surface,
-  },
   list: { padding: spacing.lg, paddingTop: spacing.sm, gap: spacing.md },
   listTitle: { fontSize: font.md, fontWeight: '600', color: colors.text, textTransform: 'capitalize' },
   empty: { color: colors.textSecondary, textAlign: 'center', paddingVertical: spacing.xl, fontSize: font.md },
   errorBox: { alignItems: 'center', gap: spacing.md, paddingVertical: spacing.xl },
   errorText: { color: colors.textSecondary, fontSize: font.md, textAlign: 'center' },
-  fab: {
-    alignSelf: 'flex-end',
-    marginTop: spacing.lg,
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    backgroundColor: colors.primary,
-    alignItems: 'center',
-    justifyContent: 'center',
-    shadowColor: colors.primary,
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.4,
-    shadowRadius: 8,
-    elevation: 6,
-  },
   // Modals
   overlay: {
     flex: 1,
