@@ -41,17 +41,17 @@ export default function SettingsScreen() {
   function handleDeleteAccount() {
     const isOwner = role === 'owner' || role === 'root'
     const message = isOwner
-      ? 'Isso apaga permanentemente sua conta e TODOS os dados do negócio (clientes, agendamentos, conversas, configurações). Esta ação não pode ser desfeita.'
-      : 'Isso remove permanentemente seu acesso e sua conta. Esta ação não pode ser desfeita.'
+      ? 'Sua conta e todos os dados do negócio (clientes, agendamentos, conversas, configurações) serão agendados para exclusão. Você tem 30 dias para mudar de ideia: é só fazer login de novo nesse período para reativar. Depois disso, tudo é apagado em definitivo.'
+      : 'Isso remove seu acesso e sua conta. Você pode reativar fazendo login novamente em até 30 dias; depois disso é definitivo.'
     Alert.alert('Excluir conta', message, [
       { text: 'Cancelar', style: 'cancel' },
       {
         text: 'Excluir',
         style: 'destructive',
         onPress: () =>
-          Alert.alert('Tem certeza?', 'Confirme para excluir definitivamente.', [
+          Alert.alert('Tem certeza?', 'Sua conta será agendada para exclusão (reativável em 30 dias).', [
             { text: 'Cancelar', style: 'cancel' },
-            { text: 'Excluir definitivamente', style: 'destructive', onPress: performDelete },
+            { text: 'Excluir minha conta', style: 'destructive', onPress: performDelete },
           ]),
       },
     ])

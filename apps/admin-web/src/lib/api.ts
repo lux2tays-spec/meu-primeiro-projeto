@@ -205,10 +205,13 @@ export const rootApi = {
   exportUsers: () => downloadFile('/root/export/users', 'usuarios.csv'),
   exportAiUsage: () => downloadFile('/root/export/ai-usage', 'uso-ia.csv'),
 
-  // Comunicados / broadcasts
-  sendBroadcast: (data: { title: string; body: string; link?: string; target: 'owners' | 'all'; channels: Array<'inapp' | 'push' | 'email' | 'whatsapp'> }) =>
+  // Comunicados / broadcasts (owners/all + segmentos de win-back)
+  sendBroadcast: (data: { title: string; body: string; link?: string; target: 'owners' | 'all' | 'trial_expired' | 'free' | 'cancelled'; channels: Array<'inapp' | 'push' | 'email' | 'whatsapp'> }) =>
     api.post<{ ok: boolean; recipients: number; id: string | null }>('/root/broadcasts', data),
   broadcasts: () => api.get<any[]>('/root/broadcasts'),
+  // Win-back / prospecção
+  prospects: (segment?: string) =>
+    api.get<{ counts: { trial_expired: number; free: number; cancelled: number }; segment: string | null; list: Array<{ id: string; name: string; plan: string; status: string; created_at: string; last_seen_at: string | null; trial_ends_at: string | null; owner_name: string; owner_email: string; owner_phone: string | null }> }>(`/root/reports/prospects${segment ? `?segment=${segment}` : ''}`),
 
   // Subtipos de despesa (parâmetros financeiros da plataforma)
   expenseSubtypes: () => api.get<any[]>('/root/expense-subtypes'),

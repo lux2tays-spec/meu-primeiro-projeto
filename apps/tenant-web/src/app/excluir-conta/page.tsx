@@ -25,7 +25,7 @@ export default function ExcluirContaPage() {
             <li>Abra o aplicativo <strong>AiConfirma</strong> e faça login.</li>
             <li>Vá em <strong>Ajustes</strong> (menu de configurações).</li>
             <li>Toque em <strong>“Excluir minha conta”</strong> (no rodapé da tela).</li>
-            <li>Confirme. A exclusão é <strong>permanente e imediata</strong>.</li>
+            <li>Confirme. Sua conta é <strong>agendada para exclusão</strong> e o acesso é encerrado. Você tem <strong>30 dias</strong> para reativar (basta fazer login de novo); passado esse prazo, os dados são <strong>apagados em definitivo</strong>.</li>
           </ol>
         </section>
 

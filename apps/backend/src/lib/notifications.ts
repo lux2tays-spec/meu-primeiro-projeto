@@ -197,20 +197,29 @@ export async function notifyAppointmentParties(
  *
  * tenantId é nulo (aviso de plataforma) → o WhatsApp sai da instância de suporte.
  */
+export type BroadcastTarget = 'owners' | 'all' | 'trial_expired' | 'free' | 'cancelled'
+
 export async function sendBroadcast(params: {
   title: string
   body: string
   link?: string | null
-  target: 'owners' | 'all'
+  target: BroadcastTarget
   channels: NotificationChannel[]
   createdBy?: string | null
 }): Promise<{ recipients: number; broadcastId: string | null }> {
   const { title, body, link = null, target, channels, createdBy = null } = params
 
-  // Destinatários: proprietários, ou todos os usuários com algum papel (tenant users).
-  const recipientQuery = target === 'owners'
-    ? `SELECT DISTINCT user_id FROM user_roles WHERE role = 'owner'`
-    : `SELECT DISTINCT user_id FROM user_roles`
+  // Destinatários. Além de owners/all, há SEGMENTOS de win-back (donos de tenants
+  // por situação comercial) — sempre excluindo quem pediu exclusão de conta.
+  const ownersOfTenants = (cond: string) =>
+    `SELECT DISTINCT ur.user_id FROM user_roles ur JOIN tenants t ON t.id = ur.tenant_id
+      WHERE ur.role = 'owner' AND t.deletion_requested_at IS NULL AND ${cond}`
+  const recipientQuery =
+    target === 'owners' ? `SELECT DISTINCT user_id FROM user_roles WHERE role = 'owner'`
+    : target === 'all' ? `SELECT DISTINCT user_id FROM user_roles`
+    : target === 'trial_expired' ? ownersOfTenants(`t.status = 'trial' AND t.trial_ends_at < NOW()`)
+    : target === 'free' ? ownersOfTenants(`t.plan = 'free' AND t.status = 'active'`)
+    : /* cancelled */ ownersOfTenants(`t.status IN ('cancelled', 'suspended')`)
   const { rows } = await db.query(recipientQuery)
 
   // Canais forçados incluem sempre in-app (o comunicado fica na caixa de avisos).

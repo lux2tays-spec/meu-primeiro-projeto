@@ -1732,6 +1732,46 @@ export const rootRoutes: FastifyPluginAsync = async (app) => {
     return sendCsv(reply, 'uso-ia', csv)
   })
 
+  // ── Win-back / Prospecção ───────────────────────────────────────────────────
+  // Base RETIDA (não excluíram a conta) para reativação/venda: trial expirado,
+  // free sem upgrade e cancelados. Retorna contadores e, com ?segment=, a lista
+  // com contato do dono (para campanha via broadcast segmentado ou WhatsApp 1:1).
+  const SEGMENT_COND: Record<string, string> = {
+    trial_expired: `t.status = 'trial' AND t.trial_ends_at < NOW()`,
+    free: `t.plan = 'free' AND t.status = 'active'`,
+    cancelled: `t.status IN ('cancelled', 'suspended')`,
+  }
+  app.get('/reports/prospects', async (request, reply) => {
+    const { segment } = request.query as { segment?: string }
+
+    // Contadores por segmento (sempre excluindo quem pediu exclusão).
+    const counts = await db.query(
+      `SELECT
+         COUNT(*) FILTER (WHERE t.status = 'trial' AND t.trial_ends_at < NOW())      AS trial_expired,
+         COUNT(*) FILTER (WHERE t.plan = 'free' AND t.status = 'active')             AS free,
+         COUNT(*) FILTER (WHERE t.status IN ('cancelled', 'suspended'))              AS cancelled
+       FROM tenants t
+       WHERE t.deletion_requested_at IS NULL`
+    )
+
+    let list: any[] = []
+    if (segment && SEGMENT_COND[segment]) {
+      const { rows } = await db.query(
+        `SELECT t.id, t.name, t.plan, t.status, t.created_at, t.last_seen_at, t.trial_ends_at,
+                u.name AS owner_name, u.email AS owner_email, u.phone AS owner_phone
+           FROM tenants t
+           JOIN user_roles ur ON ur.tenant_id = t.id AND ur.role = 'owner'
+           JOIN users u ON u.id = ur.user_id
+          WHERE t.deletion_requested_at IS NULL AND ${SEGMENT_COND[segment]}
+          ORDER BY t.last_seen_at DESC NULLS LAST
+          LIMIT 200`
+      )
+      list = rows
+    }
+
+    return reply.send({ counts: counts.rows[0], segment: segment ?? null, list })
+  })
+
   // ── Comunicados (broadcasts) ────────────────────────────────────────────────
   // Envia um aviso a todos os proprietários ou a todos os usuários, pelos canais
   // escolhidos (aviso no sistema, e-mail e/ou WhatsApp).
@@ -1739,7 +1779,8 @@ export const rootRoutes: FastifyPluginAsync = async (app) => {
     title: z.string().min(1).max(140),
     body: z.string().min(1).max(2000),
     link: z.string().max(500).optional(),
-    target: z.enum(['owners', 'all']),
+    // Além de owners/all, segmentos de win-back (donos por situação comercial).
+    target: z.enum(['owners', 'all', 'trial_expired', 'free', 'cancelled']),
     channels: z.array(z.enum(['inapp', 'push', 'email', 'whatsapp'])).min(1),
   })
 

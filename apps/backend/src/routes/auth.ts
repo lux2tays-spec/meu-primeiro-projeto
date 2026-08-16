@@ -313,9 +313,13 @@ export const authRoutes: FastifyPluginAsync = async (app) => {
       [user.id]
     )
 
-    // #11: registra o último login do tenant (fire-and-forget).
+    // #11: registra o último login do tenant + REATIVA se estava em exclusão
+    // pendente (soft-delete). Logar dentro da janela de 30 dias cancela a exclusão.
+    let reactivated = false
     if (userRole?.tenant_id) {
-      db.query('UPDATE tenants SET last_login_at = NOW(), last_seen_at = NOW() WHERE id = $1', [userRole.tenant_id])
+      const { rows: [t] } = await db.query('SELECT deletion_requested_at FROM tenants WHERE id = $1', [userRole.tenant_id])
+      reactivated = !!t?.deletion_requested_at
+      db.query('UPDATE tenants SET last_login_at = NOW(), last_seen_at = NOW(), deletion_requested_at = NULL WHERE id = $1', [userRole.tenant_id])
         .catch(() => { /* best-effort */ })
     }
 
@@ -324,7 +328,7 @@ export const authRoutes: FastifyPluginAsync = async (app) => {
       { expiresIn: '7d' }
     )
 
-    return reply.send({ token })
+    return reply.send({ token, ...(reactivated ? { reactivated: true } : {}) })
   })
 
   // ── Password reset: request ──────────────────────────────────────────────────
@@ -761,19 +765,25 @@ export const authRoutes: FastifyPluginAsync = async (app) => {
       await client.query('BEGIN')
 
       if ((role === 'owner' || role === 'root') && tenant_id) {
-        // Deleting the tenant cascades all tenant-scoped data via FK ON DELETE CASCADE
-        await client.query('DELETE FROM tenants WHERE id = $1', [tenant_id])
+        // SOFT-DELETE: marca a exclusão em vez de apagar. Os dados ficam por 30
+        // dias (job tenantPurge apaga em definitivo depois — LGPD). Nesse período
+        // o dono REATIVA só logando de novo (o /login limpa deletion_requested_at).
+        // status='cancelled' + plan='free' cortam o acesso pago e o subscription
+        // Enforcer desliga o WhatsApp; o histórico do negócio é preservado.
+        await client.query(
+          `UPDATE tenants SET deletion_requested_at = NOW(), status = 'cancelled', plan = 'free' WHERE id = $1`,
+          [tenant_id]
+        )
       } else {
         // Non-owner: just remove this user's membership in the tenant
         await client.query('DELETE FROM user_roles WHERE user_id = $1 AND tenant_id = $2', [user_id, tenant_id])
-      }
-
-      // Remove the user account itself if it no longer belongs to any tenant
-      const { rows: remaining } = await client.query(
-        'SELECT 1 FROM user_roles WHERE user_id = $1 LIMIT 1', [user_id]
-      )
-      if (remaining.length === 0) {
-        await client.query('DELETE FROM users WHERE id = $1', [user_id])
+        // Remove the user account itself if it no longer belongs to any tenant
+        const { rows: remaining } = await client.query(
+          'SELECT 1 FROM user_roles WHERE user_id = $1 LIMIT 1', [user_id]
+        )
+        if (remaining.length === 0) {
+          await client.query('DELETE FROM users WHERE id = $1', [user_id])
+        }
       }
 
       await client.query('COMMIT')

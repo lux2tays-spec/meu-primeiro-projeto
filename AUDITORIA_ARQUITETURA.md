@@ -34,7 +34,10 @@ Produto ainda **pré-produção** (vai entrar em teste fechado da Play). Isso é
 - [ ] **(A/M)** Tela de assinatura "somente status" nos builds de loja: sem preços/toggle/"Assinar"; botão → "Gerenciar conta" abrindo o dashboard (não o checkout).
 - [ ] **(A/P)** Cancelar assinatura MP no `DELETE /auth/account` (com job de retry) — hoje cobra pós-exclusão.
 - [ ] **(M/P)** Varredura anti-steering: trocar "assinar/pagamento/R$" por "gerenciar plano/conta" no app e nos pushes de trial.
-- [ ] **(M/P)** Exclusão de conta com carência (soft-delete 7 dias) + exigir senha.
+- [x] **(M/P)** Exclusão de conta com carência (soft-delete, janela de reativação de **30 dias**) — migration 056, reativa no login, job `tenantPurge` apaga depois; textos do app e da página `/excluir-conta` atualizados. *(exigir senha: follow-up)*
+
+### A5 · Win-back / Prospecção (novo — pedido do dono)
+- [x] **(A/M)** Base retida (trial expirado / free sem upgrade / cancelado) prospectável: endpoint `/root/reports/prospects` (contadores + lista com contato do dono), broadcast segmentado (`trial_expired`/`free`/`cancelled`) e tela **Win-back** no Root Admin (segmentos + WhatsApp 1:1 + comunicado). Quem excluiu a conta NÃO aparece (LGPD).
 
 ### A3 · Custo de IA
 - [x] **(A/P)** Cache incremental: `cache_control` no último bloco das `messages` a cada chamada (2º breakpoint).

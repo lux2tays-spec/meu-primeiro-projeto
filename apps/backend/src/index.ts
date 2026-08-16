@@ -35,6 +35,7 @@ import { startServiceCompletionNotifier } from './jobs/serviceCompletion'
 import { startBirthdayReminderJob } from './jobs/birthdayReminders'
 import { startMessageLimitWarner } from './jobs/messageLimitWarner'
 import { startMpCancellationRetry } from './jobs/mpCancellationRetry'
+import { startTenantPurge } from './jobs/tenantPurge'
 
 // Validate required environment variables at boot — fail fast before binding to port
 const REQUIRED_ENVS = ['JWT_SECRET', 'DATABASE_URL', 'REDIS_URL', 'ANTHROPIC_API_KEY'] as const
@@ -231,6 +232,7 @@ async function start() {
   startBirthdayReminderJob()
   startMessageLimitWarner()
   startMpCancellationRetry()
+  startTenantPurge()
 }
 
 // Graceful shutdown — drain in-flight requests before exiting
