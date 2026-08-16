@@ -18,15 +18,28 @@ export type AiConfig = {
   transcription_api_key: string  // key for the transcription provider
 }
 
+// Teto de gasto MENSAL de IA por plano (USD). Floor de segurança: mesmo sem
+// nenhuma configuração no Root Admin, nenhum tenant fica com gasto ilimitado
+// (evita fatura aberta por abuso). O Root Admin pode sobrescrever por plano.
+// 0 = ilimitado (só se explicitamente definido assim no painel).
+const DEFAULT_CAPS: Record<string, number> = {
+  free: 1,
+  basico: 3,
+  premium: 8,
+  profissional: 20,
+}
+
 const DEFAULTS: AiConfig = {
   provider: 'anthropic',
   api_key: '',
   base_url: '',
   model: 'claude-sonnet-5',
   model_simple: 'claude-haiku-4-5',
-  mode: 'single',
+  // Híbrido por padrão: turnos simples no modelo barato, promovendo ao forte no
+  // 1º sinal de venda/ferramenta e mantendo (sticky) — ver resolução no bot.ts.
+  mode: 'hybrid',
   usd_brl_rate: 6,
-  caps: {},
+  caps: DEFAULT_CAPS,
   transcription_provider: '',
   transcription_api_key: '',
 }
@@ -106,7 +119,10 @@ export async function getAiConfig(): Promise<AiConfig> {
   merged.api_key = decrypt(merged.api_key)
   merged.transcription_api_key = decrypt(merged.transcription_api_key)
   // Back-compat: an old config may have `model: claude-haiku-4-5` and no mode
-  if (!merged.mode) merged.mode = 'single'
+  if (!merged.mode) merged.mode = 'hybrid'
+  // Floor de caps: planos sem cap explícito herdam o default (nunca ilimitado por
+  // omissão). Um cap 0 explícito no painel continua valendo como "ilimitado".
+  merged.caps = { ...DEFAULT_CAPS, ...(merged.caps ?? {}) }
   await redis.setex(CACHE_KEY, 60, JSON.stringify(merged))
   return merged
 }
@@ -127,6 +143,11 @@ function salesSignalRegex(pattern?: string): RegExp {
   } catch {
     return SALES_SIGNAL_FALLBACK
   }
+}
+
+// Exposto para a resolução "sticky" de modelo no bot.ts.
+export function matchesSalesSignal(message: string, pattern?: string): boolean {
+  return salesSignalRegex(pattern).test(message || '')
 }
 
 /**

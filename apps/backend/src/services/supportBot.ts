@@ -1,6 +1,7 @@
 import Anthropic from '@anthropic-ai/sdk'
 import { getAiConfig } from '../lib/botConfig'
 import { getSupportBotConfig } from '../lib/supportBotConfig'
+import { recordUsage } from '../lib/aiUsage'
 import { redis } from '../lib/redis'
 
 // The support bot has no DB tables of its own; it keeps a short rolling memory
@@ -42,12 +43,16 @@ export async function runSupportBot(phone: string, message: string): Promise<str
   const createParams: any = {
     model,
     max_tokens: 700,
-    system,
+    // system estável → cacheado (prefixo idêntico entre visitantes/turnos).
+    system: [{ type: 'text', text: system, cache_control: { type: 'ephemeral' } }],
     messages: [...history, { role: 'user', content: message }],
   }
   if (!model.startsWith('claude-haiku')) createParams.thinking = { type: 'disabled' }
 
   const resp: any = await anthropic.messages.create(createParams)
+  // Registra o uso (custo antes invisível — não caía em ai_usage). tenant null =
+  // uso da plataforma (número de suporte), não de um tenant.
+  recordUsage(null, model, resp.usage).catch(() => {})
   const text: string =
     resp.content.filter((b: any) => b.type === 'text').map((b: any) => b.text).join('\n').trim() ||
     'Desculpe, pode repetir? 😊'

@@ -8,7 +8,7 @@ import {
   bookAppointment, cancelAppointmentById,
   listUpcomingAppointments, type UpcomingAppointment,
 } from './scheduling'
-import { getAiConfig, resolveModel, getBotConfig, type BotConfig } from '../lib/botConfig'
+import { getAiConfig, resolveModel, matchesSalesSignal, getBotConfig, type BotConfig } from '../lib/botConfig'
 import { recordUsage, monthlySpend } from '../lib/aiUsage'
 import { sendInviteForAppointment, sendInvitesForCustomerUpcoming } from './appointmentInvite'
 import { notifyAppointmentParties } from '../lib/notifications'
@@ -668,7 +668,25 @@ export async function runBot(params: {
     apiKey: aiConfig.api_key || process.env.ANTHROPIC_API_KEY,
     ...(aiConfig.base_url ? { baseURL: aiConfig.base_url } : {}),
   })
-  let model = resolveModel(aiConfig, customerMessage, botCfg.hybrid_sales_signal)
+  // Modelo por conversa (STICKY no híbrido): protege a 1ª impressão (conversa
+  // nova → modelo forte) e, uma vez promovida a forte (sinal de venda OU uso de
+  // ferramenta em qualquer mensagem anterior), mantém forte por 30min — evita
+  // alternar de modelo no meio da conversa, o que fragmentaria o cache.
+  const stickyKey = `bot:model:${conversationId}`
+  let model = aiConfig.model
+  if (aiConfig.mode === 'hybrid') {
+    const alreadyStrong = await redis.get(stickyKey)
+    const firstImpression = history.length === 0
+    const salesSignal = matchesSalesSignal(customerMessage, botCfg.hybrid_sales_signal)
+    if (alreadyStrong || firstImpression || salesSignal) {
+      model = aiConfig.model
+      await redis.set(stickyKey, '1', 'EX', 30 * 60).catch(() => {})
+    } else {
+      model = aiConfig.model_simple
+    }
+  } else {
+    model = resolveModel(aiConfig, customerMessage, botCfg.hybrid_sales_signal)
+  }
   // Monthly cost cap per plan (0 = unlimited): downgrade to the cheapest model
   // when over the cap, and HARD-STOP (no model call at all) at 1.5× the cap so
   // a runaway/abused tenant can never generate unbounded spend.
@@ -718,9 +736,34 @@ export async function runBot(params: {
 
   const execCtx: ExecCtx = { tenantId, customerId, conversationId }
 
+  // Cache incremental da CONVERSA: além do prefixo estável (1º breakpoint), marca
+  // um 2º breakpoint no último bloco das mensagens antes de cada chamada. Assim,
+  // no loop de ferramentas e a cada nova mensagem do cliente, todo o histórico +
+  // tool results já vistos é lido do cache (~0.1x) em vez de reprocessado a preço
+  // cheio. Move o marcador a cada chamada (só 2 breakpoints ativos, limite é 4).
+  const applyMessageCache = () => {
+    for (const m of messages) {
+      if (Array.isArray(m.content)) {
+        for (const b of m.content as any[]) {
+          if (b && typeof b === 'object' && b.cache_control) delete b.cache_control
+        }
+      }
+    }
+    const last: any = messages[messages.length - 1]
+    if (!last) return
+    if (typeof last.content === 'string') {
+      // normaliza para blocos para poder anexar cache_control
+      last.content = [{ type: 'text', text: last.content, cache_control: { type: 'ephemeral' } }]
+    } else if (Array.isArray(last.content) && last.content.length > 0) {
+      const lb = last.content[last.content.length - 1]
+      if (lb && typeof lb === 'object') lb.cache_control = { type: 'ephemeral' }
+    }
+  }
+
   // Single place to call the model — preserves model-config, prompt caching,
   // thinking-disabled and usage-recording behavior for every request in the loop.
   const callModel = async (toolChoice: any): Promise<any> => {
+    applyMessageCache()
     const createParams: any = { model, max_tokens: botCfg.max_tokens, system, tools: TOOLS, tool_choice: toolChoice, messages }
     if (thinkingOff) createParams.thinking = { type: 'disabled' }
     const response: any = await anthropic.messages.create(createParams)
@@ -739,6 +782,9 @@ export async function runBot(params: {
     // text turn and the customer got the generic "Desculpe, pode repetir?".
     const toolUses = response.content.filter((b: any) => b.type === 'tool_use')
     if (toolUses.length > 0) {
+      // Usou ferramenta = conversa "quente" (agenda/venda): fixa o modelo forte
+      // para as próximas mensagens desta conversa (sticky, ver resolução acima).
+      if (aiConfig.mode === 'hybrid') redis.set(stickyKey, '1', 'EX', 30 * 60).catch(() => {})
       const toolResults: Anthropic.ToolResultBlockParam[] = []
       for (const block of toolUses) {
         const result = await executeTool(block.name, block.input, execCtx)
