@@ -17,6 +17,11 @@ jobs:
           script: |
             cd /opt/agendabot
             git pull origin main
-            docker exec agendabot-backend-1 npm run migrate
+            # Migrate "pré-swap" roda no container ANTIGO (imagem só tem as
+            # migrations baked até a última build) — é REDUNDANTE: a migration
+            # real roda no boot do container novo (CMD do Dockerfile). Mantido
+            # como aquecimento best-effort, mas NÃO pode derrubar o deploy se
+            # der hiccup (DB ocupado / container reiniciando) → || true.
+            docker exec agendabot-backend-1 npm run migrate || true
             docker compose -f docker-compose.vps.yml build backend
             docker compose -f docker-compose.vps.yml up -d --no-deps backend
