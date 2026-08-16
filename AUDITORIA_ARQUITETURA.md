@@ -98,6 +98,13 @@ Produto ainda **pré-produção** (vai entrar em teste fechado da Play). Isso é
 
 <!-- Novas entradas no topo. -->
 
+### 2026-08-16 — Bloco B implementado e DEPLOYADO (v1.22.0)
+- B1 (persona do bot): persona nomeada + prompt anti-robô + few-shot + entrega humana (bolhas/digitando) + lembretes humanos.
+- B2 (UX anti-suporte): avisos proativos (WhatsApp caiu/handoff/suspensão), health strip (app+web), número de suporte real, validação MP no save.
+- Deploy automático consertado (migrate pré-swap `|| true`). Push → deploy verde. Migration 057 aplicada. OTA publicado.
+- Follow-ups B1/B2: systemVoice nas mensagens fixas, playground "testar bot", FAQ, convite de equipe.
+- Próximo: Bloco C (observabilidade: Sentry, logger único, alertas, funil IA; locks nos jobs).
+
 ### 2026-08-16 — Bloco A implementado (código)
 - **A2 conformidade:** assinatura "somente status" em build de loja (EXPO_PUBLIC_STORE_BUILD), botão → dashboard, textos neutros; promptUpgrade neutro; cancelamento MP na exclusão de conta + fila de retry (migration 055 + job mpCancellationRetry). ✅ commit
 - **A3 custo de IA:** cache incremental nas messages, híbrido sticky por conversa (default), caps default por plano, supportBot com recordUsage+cache. ✅ commit
