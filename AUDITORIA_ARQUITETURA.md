@@ -62,13 +62,13 @@ Produto ainda **pré-produção** (vai entrar em teste fechado da Play). Isso é
 - [x] **(M/P)** Roteamento híbrido que protege a 1ª impressão (feito no A3 sticky).
 
 ### B2 · UX / redução de suporte
-- [ ] **(A/P)** Notificar toda transição crítica: WhatsApp caiu, handoff humano, suspensão por cobrança (reusa push).
-- [ ] **(A/P)** Health strip no dashboard (app + web): status WhatsApp + assinatura sempre visíveis.
-- [ ] **(A/P)** Número de suporte real (branding.support_whatsapp) no lugar do placeholder.
-- [ ] **(A/P)** Validar credenciais MP no save (GET /users/me).
-- [ ] **(A/M)** Playground "Testar meu bot" (dry-run com cap diário).
-- [ ] **(M/M)** FAQ estática na tenant-web + linkar do app; esconder "em breve".
-- [ ] **(M/P)** Fluxo de convite de equipe (aceite por e-mail) em vez de vincular direto.
+- [x] **(A/P)** Notificar toda transição crítica: WhatsApp caiu (whatsappReconciler), handoff humano (webhooks), suspensão por cobrança (subscriptionState) — push/in-app (+e-mail na suspensão). Novos tipos: whatsapp_down/handoff/subscription (sempre passam).
+- [x] **(A/P)** Health strip no dashboard (app + web): banner vermelho quando WhatsApp caiu ou assinatura suspensa/cancelada.
+- [x] **(A/P)** Número de suporte real (branding.support_whatsapp) no app (esconde se vazio).
+- [x] **(A/P)** Validar credenciais MP no save (GET /users/me) — erro acionável na config, não na frente do cliente.
+- [ ] **(A/M)** Playground "Testar meu bot" (dry-run com cap diário). *(follow-up)*
+- [ ] **(M/M)** FAQ estática na tenant-web + linkar do app; esconder "em breve". *(follow-up)*
+- [ ] **(M/P)** Fluxo de convite de equipe (aceite por e-mail). *(follow-up; já listado em Governança)*
 
 ---
 

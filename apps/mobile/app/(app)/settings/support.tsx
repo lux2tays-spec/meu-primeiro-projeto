@@ -6,10 +6,17 @@ import { SettingsRow } from '@/components/ui/SettingsRow'
 import { colors, font, spacing } from '@/lib/theme'
 import { useBrandingStore } from '@/lib/branding'
 
-const WHATSAPP_SUPPORT = 'https://wa.me/5511999999999?text=Oi!%20Preciso%20de%20suporte%20no%20AiConfirma.'
+// Número de suporte vem do branding (Root Admin). Fallback só como último recurso.
+function buildSupportWa(phone: string, appName: string) {
+  const digits = (phone || '').replace(/\D/g, '')
+  const msg = encodeURIComponent(`Oi! Preciso de suporte no ${appName}.`)
+  return digits ? `https://wa.me/${digits}?text=${msg}` : ''
+}
 
 export default function SupportScreen() {
   const appName = useBrandingStore((s) => s.appName)
+  const supportWhatsapp = useBrandingStore((s) => s.supportWhatsapp)
+  const supportWaUrl = buildSupportWa(supportWhatsapp, appName)
   return (
     <SafeAreaView style={styles.container} edges={[]}>
       <ScrollView contentContainerStyle={styles.content}>
@@ -39,14 +46,18 @@ export default function SupportScreen() {
 
         <Text style={styles.section}>Fale conosco</Text>
         <Card style={styles.group}>
-          <SettingsRow
-            icon="logo-whatsapp"
-            iconColor={colors.whatsapp}
-            label="WhatsApp"
-            subtitle="Resposta em até 2 horas"
-            onPress={() => Linking.openURL(WHATSAPP_SUPPORT)}
-          />
-          <View style={styles.divider} />
+          {supportWaUrl ? (
+            <>
+              <SettingsRow
+                icon="logo-whatsapp"
+                iconColor={colors.whatsapp}
+                label="WhatsApp"
+                subtitle="Resposta em até 2 horas"
+                onPress={() => Linking.openURL(supportWaUrl)}
+              />
+              <View style={styles.divider} />
+            </>
+          ) : null}
           <SettingsRow
             icon="mail-outline"
             label="E-mail"

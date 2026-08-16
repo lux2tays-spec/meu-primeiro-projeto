@@ -18,6 +18,7 @@ export interface BrandingAssets {
 interface BrandingState {
   appName: string
   tagline: string
+  supportWhatsapp: string
   colors: BrandingColors
   assets: BrandingAssets
   loaded: boolean
@@ -38,6 +39,7 @@ export function resolveAssetUrl(path?: string | null): string | undefined {
 export const useBrandingStore = create<BrandingState>((set) => ({
   appName: DEFAULT_APP_NAME,
   tagline: DEFAULT_TAGLINE,
+  supportWhatsapp: '',
   colors: {},
   assets: {},
   loaded: false,
@@ -50,6 +52,7 @@ export const useBrandingStore = create<BrandingState>((set) => ({
       set({
         appName: (b?.app_name ?? '').trim() || DEFAULT_APP_NAME,
         tagline: (b?.tagline ?? '').trim() || DEFAULT_TAGLINE,
+        supportWhatsapp: (b?.support_whatsapp ?? '').trim(),
         colors: b?.colors ?? {},
         assets: {
           logo: b?.assets?.logo ?? undefined,

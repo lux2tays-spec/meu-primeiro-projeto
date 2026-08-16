@@ -7,7 +7,7 @@ import { StatCard } from '@/components/StatCard'
 import { AppointmentCard } from '@/components/AppointmentCard'
 import { Badge } from '@/components/ui/Badge'
 import { NotificationBell } from '@/components/NotificationBell'
-import { tenantApi, appointmentsApi, financeiroApi } from '@/lib/api'
+import { tenantApi, appointmentsApi, financeiroApi, whatsappApi } from '@/lib/api'
 import { useAuthStore } from '@/lib/store'
 import { colors, font, spacing, radius } from '@/lib/theme'
 
@@ -56,6 +56,16 @@ export default function DashboardScreen() {
     queryFn: () => financeiroApi.resumo(now.getMonth() + 1, now.getFullYear()),
     enabled: isManager,
   })
+
+  // Health strip: status do WhatsApp (o bot está atendendo?) — sempre visível.
+  const { data: waStatus } = useQuery({
+    queryKey: ['whatsapp-status'],
+    queryFn: whatsappApi.getStatus,
+    enabled: isManager,
+    refetchInterval: 60_000,
+  })
+  const waDown = isManager && waStatus && waStatus.status !== 'connected' && waStatus.status !== 'qr_pending'
+  const subProblem = tenant?.status === 'suspended' || tenant?.status === 'cancelled'
 
   const planVariant: Record<string, any> = {
     free: 'warning',
@@ -113,6 +123,28 @@ export default function DashboardScreen() {
             <View style={styles.onboardingCta}>
               <Text style={styles.onboardingCtaText}>Continuar configuração</Text>
               <Ionicons name="chevron-forward" size={15} color={colors.primary} />
+            </View>
+          </TouchableOpacity>
+        )}
+
+        {/* Health strip — WhatsApp caiu: o bot parou de atender. Sempre visível. */}
+        {waDown && (
+          <TouchableOpacity activeOpacity={0.85} onPress={() => router.push('/(app)/settings/whatsapp' as any)}>
+            <View style={styles.alertBanner}>
+              <Ionicons name="warning-outline" size={18} color="#fff" />
+              <Text style={styles.alertText}>Assistente fora do ar — WhatsApp desconectado. Toque para reconectar.</Text>
+            </View>
+          </TouchableOpacity>
+        )}
+
+        {/* Assinatura suspensa/cancelada por cobrança */}
+        {subProblem && (
+          <TouchableOpacity activeOpacity={0.85} onPress={() => router.push('/(app)/settings/subscription' as any)}>
+            <View style={styles.alertBanner}>
+              <Ionicons name="card-outline" size={18} color="#fff" />
+              <Text style={styles.alertText}>
+                {tenant?.status === 'suspended' ? 'Assinatura suspensa — regularize o pagamento para o bot voltar.' : 'Assinatura cancelada — reative para continuar usando.'}
+              </Text>
             </View>
           </TouchableOpacity>
         )}
@@ -256,6 +288,11 @@ const styles = StyleSheet.create({
     borderLeftColor: colors.warning,
   },
   trialText: { color: colors.warning, fontSize: font.sm, fontWeight: '500' },
+  alertBanner: {
+    flexDirection: 'row', alignItems: 'center', gap: spacing.sm,
+    backgroundColor: colors.danger, borderRadius: 12, padding: spacing.md,
+  },
+  alertText: { color: '#fff', fontSize: font.sm, fontWeight: '600', flex: 1 },
   sectionTitle: { fontSize: font.lg, fontWeight: '700', color: colors.text },
   rowBetween: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   seeAll: { fontSize: font.sm, fontWeight: '700', color: colors.primary },

@@ -1,6 +1,7 @@
 import { db } from '../lib/db'
 import { redis } from '../lib/redis'
 import { evolutionConnectionState } from '../services/evolution'
+import { notifyTenantManagers } from '../lib/notifications'
 
 // Reconciles our DB WhatsApp status with Evolution's REAL connection state.
 // This is the production-safe way to finalize a connection when the owner
@@ -47,6 +48,18 @@ export async function reconcileWhatsappConnections(): Promise<void> {
       )
       await redis.del(`whatsapp:qr:${inst.tenant_id}`)
       console.log(`[whatsapp] ${inst.instance_name}: conexão finalizada automaticamente (${reason})`)
+      // Avisa o dono NA HORA (o bot parou de responder) — antes ele só descobria
+      // quando um cliente reclamava. Só notifica se ESTAVA conectado (não no meio
+      // de um QR que expirou). Best-effort.
+      if (inst.status === 'connected') {
+        notifyTenantManagers(inst.tenant_id, {
+          type: 'whatsapp_down',
+          title: 'WhatsApp desconectado',
+          body: 'Seu WhatsApp caiu e o assistente parou de responder os clientes. Toque para reconectar o número.',
+          link: '/settings/whatsapp',
+          channelsOverride: ['inapp', 'push'],
+        }).catch((e) => console.error('[whatsapp] falha ao notificar desconexão:', e))
+      }
     }
   }
 }

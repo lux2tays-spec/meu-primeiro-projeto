@@ -331,16 +331,21 @@ export const webhookRoutes: FastifyPluginAsync = async (app) => {
           'INSERT INTO messages (tenant_id, conversation_id, role, content) VALUES ($1,$2,$3,$4)',
           [tenantId, conversationId, 'user', textContent || handoff.button_label]
         )
-        // O ack diz "já avisei a equipe" — então AVISE de fato: registra o evento
-        // (visível ao tenant/Root Admin via bot_errors) além da mensagem do
-        // cliente que já fica no WhatsApp do dono.
-        // TODO: enviar push (mobile) / e-mail ao dono quando houver mecanismo de
-        // notificação ativa — hoje o registro abaixo é o aviso persistido.
+        // O ack diz "já avisei a equipe" — então AVISE de fato: push/in-app ao
+        // dono NA HORA (senão o cliente fica esperando e a venda se perde) + o
+        // registro persistido para o Root Admin.
         await logBotError(
           tenantId, 'handoff_solicitado',
           `Cliente ${customerPhone} pediu atendimento humano — bot pausado até ${until.toISOString()}. Um humano precisa assumir esta conversa.`,
           conversationId
         )
+        notifyTenantManagers(tenantId, {
+          type: 'handoff',
+          title: 'Cliente pedindo atendimento humano',
+          body: `${customerPhone} pediu para falar com uma pessoa. O assistente pausou — responda no WhatsApp.`,
+          link: '/(app)/notifications',
+          channelsOverride: ['inapp', 'push'],
+        }).catch((e) => console.error('[handoff] falha ao notificar:', e))
         await db.query(
           'INSERT INTO messages (tenant_id, conversation_id, role, content) VALUES ($1,$2,$3,$4)',
           [tenantId, conversationId, 'assistant', handoff.ack_message]

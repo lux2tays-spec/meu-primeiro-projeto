@@ -409,14 +409,40 @@ export const tenantRoutes: FastifyPluginAsync = async (app) => {
     const sets: string[] = []
     const values: unknown[] = []
     let i = 1
-    // Encrypt the access token at rest (mp_public_key is public by design)
-    if (mp_access_token !== undefined) { sets.push(`mp_access_token = $${i++}`); values.push(mp_access_token ? encrypt(mp_access_token) : null) }
-    if (mp_public_key  !== undefined) { sets.push(`mp_public_key = $${i++}`);  values.push(mp_public_key  || null) }
+    let mpAccount: string | null = null
+
+    // Access token: '****' = valor mascarado (não alterado) → não sobrescreve.
+    // Token real novo → VALIDA no Mercado Pago antes de salvar, para o erro
+    // aparecer AGORA (na config) e não depois, na frente do cliente pagando.
+    if (mp_access_token !== undefined && !mp_access_token.includes('****')) {
+      if (mp_access_token) {
+        try {
+          const res = await fetch('https://api.mercadopago.com/users/me', {
+            headers: { Authorization: `Bearer ${mp_access_token}` },
+            signal: AbortSignal.timeout(10_000),
+          })
+          if (res.status === 401) {
+            return reply.status(400).send({ error: 'Access Token inválido — confira se copiou o token de PRODUÇÃO completo do Mercado Pago.' })
+          }
+          if (!res.ok) {
+            return reply.status(400).send({ error: 'Não foi possível validar o token no Mercado Pago agora. Tente novamente em instantes.' })
+          }
+          const data: any = await res.json().catch(() => ({}))
+          mpAccount = data?.nickname || data?.email || null
+        } catch {
+          return reply.status(400).send({ error: 'Não foi possível conectar ao Mercado Pago para validar o token. Verifique sua conexão e tente de novo.' })
+        }
+      }
+      sets.push(`mp_access_token = $${i++}`); values.push(mp_access_token ? encrypt(mp_access_token) : null)
+    }
+    if (mp_public_key !== undefined && !mp_public_key.includes('****')) {
+      sets.push(`mp_public_key = $${i++}`); values.push(mp_public_key || null)
+    }
 
     if (sets.length === 0) return reply.status(400).send({ error: 'Nenhum campo' })
     values.push(tenant_id)
     await db.query(`UPDATE tenants SET ${sets.join(', ')} WHERE id = $${i}`, values)
-    return reply.send({ saved: true })
+    return reply.send({ saved: true, mp_account: mpAccount })
   })
 
   // ── Staff / Users ─────────────────────────────────────────────────────────

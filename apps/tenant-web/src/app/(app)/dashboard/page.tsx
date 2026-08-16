@@ -1,7 +1,7 @@
 'use client'
 import { useQuery } from '@tanstack/react-query'
 import Link from 'next/link'
-import { tenantApi, appointmentsApi, financeiroApi, getToken } from '@/lib/api'
+import { tenantApi, appointmentsApi, financeiroApi, whatsappApi, getToken } from '@/lib/api'
 import { getTokenPayload } from '@/lib/auth'
 import Loading from '@/components/ui/Loading'
 import { Rocket, ArrowRight } from 'lucide-react'
@@ -85,6 +85,16 @@ export default function DashboardPage() {
     enabled: isManager,
   })
 
+  // Health strip: status do WhatsApp (o assistente está atendendo?).
+  const { data: waStatus } = useQuery({
+    queryKey: ['whatsapp-status'],
+    queryFn: whatsappApi.getStatus,
+    enabled: isManager,
+    refetchInterval: 60_000,
+  })
+  const waDown = isManager && waStatus && waStatus.status !== 'connected' && waStatus.status !== 'qr_pending'
+  const subProblem = tenant?.status === 'suspended' || tenant?.status === 'cancelled'
+
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -103,6 +113,22 @@ export default function DashboardPage() {
 
       {/* Onboarding progress */}
       <OnboardingProgressCard />
+
+      {/* Health strip — WhatsApp caiu (o assistente parou de atender) */}
+      {waDown && (
+        <Link href="/settings/whatsapp" className="block bg-red-600 rounded-xl p-4 hover:bg-red-700 transition">
+          <p className="text-white text-sm font-semibold">⚠️ Assistente fora do ar — WhatsApp desconectado. Clique para reconectar.</p>
+        </Link>
+      )}
+
+      {/* Assinatura suspensa/cancelada */}
+      {subProblem && (
+        <Link href="/settings/subscription" className="block bg-red-600 rounded-xl p-4 hover:bg-red-700 transition">
+          <p className="text-white text-sm font-semibold">
+            {tenant?.status === 'suspended' ? '💳 Assinatura suspensa — regularize o pagamento para o assistente voltar.' : '💳 Assinatura cancelada — reative para continuar usando.'}
+          </p>
+        </Link>
+      )}
 
       {/* Trial banner */}
       {tenant?.status === 'trial' && (

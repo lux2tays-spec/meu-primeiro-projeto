@@ -1,4 +1,5 @@
 import { db } from './db'
+import { notifyTenantManagers } from './notifications'
 
 // Single source of truth for turning a Mercado Pago preapproval status into our
 // subscriptions row + tenant plan/status. Used by BOTH the transparent checkout
@@ -33,8 +34,24 @@ export async function applyPreapproval(params: {
     [params.tenantId, params.mpSubscriptionId, params.plan, subStatus, params.nextBillingDate ?? null, params.billingPeriod ?? null]
   )
 
+  // Estado anterior para detectar TRANSIÇÃO (evita avisar de novo a cada webhook).
+  const { rows: [prev] } = await db.query('SELECT status FROM tenants WHERE id = $1', [params.tenantId])
+
   await db.query(
     `UPDATE tenants SET plan = $1, status = $2 WHERE id = $3`,
     [subStatus === 'authorized' ? params.plan : 'free', tenantStatus, params.tenantId]
   )
+
+  // Suspensão por falha de cobrança (MP "paused") NÃO foi o dono que pediu — avisa
+  // NA HORA (push/in-app/e-mail) para ele atualizar o pagamento antes de o
+  // assistente parar. Cancelamento em geral é ação do próprio dono → não notifica.
+  if (tenantStatus === 'suspended' && prev?.status !== 'suspended') {
+    notifyTenantManagers(params.tenantId, {
+      type: 'subscription',
+      title: 'Pagamento não aprovado',
+      body: 'Não conseguimos renovar sua assinatura e o serviço será suspenso em breve. Atualize seu pagamento para manter o assistente ativo.',
+      link: '/settings/subscription',
+      channelsOverride: ['inapp', 'push', 'email'],
+    }).catch((e) => console.error('[subscription] falha ao notificar suspensão:', e))
+  }
 }

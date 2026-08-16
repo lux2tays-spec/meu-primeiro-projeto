@@ -27,6 +27,10 @@ export type NotificationType =
   | 'broadcast'
   | 'trial_ending'
   | 'plan_limit'
+  // Alertas críticos de estado (sem opt-out por-evento → sempre passam):
+  | 'whatsapp_down'
+  | 'handoff'
+  | 'subscription'
 
 export type NotificationChannel = 'inapp' | 'push' | 'email' | 'whatsapp'
 
