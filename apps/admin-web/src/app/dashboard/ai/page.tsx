@@ -190,6 +190,10 @@ function ModelConfig() {
   const [baseUrl, setBaseUrl] = useState('')
   const [transcriptionProvider, setTranscriptionProvider] = useState('')
   const [transcriptionApiKey, setTranscriptionApiKey] = useState('')
+  const [fallbackApiKey, setFallbackApiKey] = useState('')
+  const [fallbackBaseUrl, setFallbackBaseUrl] = useState('')
+  const [fallbackModel, setFallbackModel] = useState('')
+  const [fallbackModelSimple, setFallbackModelSimple] = useState('')
 
   useEffect(() => {
     const cfg = settings?.ai_config
@@ -203,12 +207,21 @@ function ModelConfig() {
     setBaseUrl(cfg.base_url || '')
     setTranscriptionProvider(cfg.transcription_provider || '')
     setTranscriptionApiKey(cfg.transcription_api_key || '')
+    setFallbackApiKey(cfg.fallback_api_key || '')
+    setFallbackBaseUrl(cfg.fallback_base_url || '')
+    setFallbackModel(cfg.fallback_model || '')
+    setFallbackModelSimple(cfg.fallback_model_simple || '')
   }, [settings])
 
   const mutation = useMutation({
     mutationFn: () => {
       const base = settings?.ai_config ?? {}
-      const common = { provider, api_key: apiKey, base_url: baseUrl, usd_brl_rate: rate, caps, transcription_provider: transcriptionProvider, transcription_api_key: transcriptionApiKey }
+      const common = {
+        provider, api_key: apiKey, base_url: baseUrl, usd_brl_rate: rate, caps,
+        transcription_provider: transcriptionProvider, transcription_api_key: transcriptionApiKey,
+        fallback_api_key: fallbackApiKey, fallback_base_url: fallbackBaseUrl,
+        fallback_model: fallbackModel, fallback_model_simple: fallbackModelSimple,
+      }
       const value = sel === 'hybrid'
         ? { ...base, ...common, mode: 'hybrid', model: closing, model_simple: simple }
         : { ...base, ...common, mode: 'single', model: sel }
@@ -305,6 +318,39 @@ function ModelConfig() {
             <input type="password" value={transcriptionApiKey} onChange={(e) => setTranscriptionApiKey(e.target.value)} placeholder="sk-... / gsk_..."
               className="w-full h-10 px-3 rounded-xl border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary" />
             <p className="text-xs text-gray-400 mt-1">Chave da OpenAI (whisper-1) ou Groq (whisper-large-v3). Necessária para transcrever áudios recebidos.</p>
+          </div>
+        </div>
+      </div>
+
+      <div className="border-t border-gray-100 pt-5 space-y-4">
+        <div>
+          <h3 className="font-semibold text-gray-900 text-sm">Fallback de IA (redundância)</h3>
+          <p className="text-xs text-gray-500 mt-1">
+            Se a chamada ao provedor principal falhar (Claude fora do ar ou instável), o bot usa automaticamente
+            este provedor de reserva — o cliente no WhatsApp nunca fica sem resposta. Deixe em branco para desativar.
+            Use uma 2ª conta/chave Anthropic, ou um endpoint compatível com a API Anthropic (proxy, OpenRouter, Bedrock/Vertex).
+          </p>
+        </div>
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">Chave da API de fallback</label>
+          <input type="password" value={fallbackApiKey} onChange={(e) => setFallbackApiKey(e.target.value)} placeholder="sk-ant-... (2ª conta) ou chave do endpoint compatível"
+            className="w-full h-10 px-3 rounded-xl border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary" />
+        </div>
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">URL base do fallback (opcional)</label>
+          <input value={fallbackBaseUrl} onChange={(e) => setFallbackBaseUrl(e.target.value)} placeholder="https://endpoint-compativel.exemplo.com (vazio = API oficial da Anthropic)"
+            className="w-full h-10 px-3 rounded-xl border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary" />
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Modelo forte do fallback</label>
+            <input value={fallbackModel} onChange={(e) => setFallbackModel(e.target.value)} placeholder="ex.: claude-sonnet-5 (vazio = mesmo do principal)"
+              className="w-full h-10 px-3 rounded-xl border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary" />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Modelo simples do fallback</label>
+            <input value={fallbackModelSimple} onChange={(e) => setFallbackModelSimple(e.target.value)} placeholder="ex.: claude-haiku-4-5 (vazio = usa o modelo forte)"
+              className="w-full h-10 px-3 rounded-xl border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary" />
           </div>
         </div>
       </div>

@@ -23,12 +23,12 @@ Produto ainda **pré-produção** (vai entrar em teste fechado da Play). Isso é
 ## BLOCO A — Blindagem, conformidade e custo de IA
 
 ### A1 · Segurança / configuração
-- [ ] **(A/P)** `ENCRYPTION_KEY` dedicada: suporte já existe (crypto.ts usa `ENCRYPTION_KEY || JWT_SECRET`). Adicionar ao `.env.example`, aviso no boot se ausente/igual ao JWT, e script one-shot de re-encrypt dos segredos legados. *(setar a env no servidor é ação do dono)*
-- [ ] **(A/P)** Webhook do WhatsApp **fail-closed** em produção: exigir secret válido; rejeitar POST sem assinatura; rate limit por instância (hoje `rateLimit:false`).
-- [ ] **(A/P)** `POSTGRES_PASSWORD`: remover fallback fraco `agendabot_prod_pass` do compose (`${POSTGRES_PASSWORD:?}`).
-- [ ] **(A/P)** `ALLOWED_ORIGINS`: promover warn → erro de boot em produção (hoje reflete qualquer origem).
-- [ ] **(M/P)** Hash nos tokens de verificação/troca de e-mail (hoje em claro).
-- [ ] **(A/P)** Backup offsite (R2/B2) + backup do volume `uploads` + alerta se backup > 36h. *(bucket/env = ação do dono; script e alerta = código)*
+- [~] **(A/P)** `ENCRYPTION_KEY` dedicada: feito o `.env.example` + aviso no boot (não-fatal) se ausente/igual ao JWT. *Pendente: script de re-encrypt + setar a env no servidor (ação do dono).*
+- [x] **(A/P)** Webhook do WhatsApp **fail-closed** quando há secret configurado (rejeita sem token). *Rate limit por instância: follow-up (rateLimit:false tem motivo — Evolution manda tudo de 1 IP).* **Ação do dono:** definir EVOLUTION_WEBHOOK_SECRET + reconectar instâncias.
+- [ ] **(A/P)** `POSTGRES_PASSWORD`: **ação do dono** (trocar a senha no VPS + DATABASE_URL) — não altero remoto para não travar o DB atual.
+- [~] **(A/P)** `ALLOWED_ORIGINS`: adicionado ao `.env.example` + aviso de boot mantido. **Ação do dono:** definir a env em produção.
+- [ ] **(M/P)** Hash nos tokens de verificação/troca de e-mail (hoje em claro). *(follow-up)*
+- [ ] **(A/P)** Backup offsite (R2/B2) + backup do volume `uploads` + alerta se backup > 36h. *(script/alerta = código pendente; bucket/env = ação do dono)*
 
 ### A2 · Conformidade Apple/Google
 - [ ] **(A/M)** Tela de assinatura "somente status" nos builds de loja: sem preços/toggle/"Assinar"; botão → "Gerenciar conta" abrindo o dashboard (não o checkout).
@@ -37,10 +37,13 @@ Produto ainda **pré-produção** (vai entrar em teste fechado da Play). Isso é
 - [ ] **(M/P)** Exclusão de conta com carência (soft-delete 7 dias) + exigir senha.
 
 ### A3 · Custo de IA
-- [ ] **(A/P)** Cache incremental: `cache_control` no último bloco das `messages` a cada chamada (2º breakpoint).
-- [ ] **(A/P)** Híbrido "sticky" por conversa como default: começa no Haiku, promove ao modelo forte no 1º sinal/tool e mantém (Redis, TTL 30min); nunca rebaixa no meio; proteger a 1ª impressão (conversa nova → modelo forte).
-- [ ] **(A/P)** Caps de custo default por plano (free 1 / básico 3 / premium 8 / prof. 20 USD/mês) + rate limit de execuções por tenant/hora.
-- [ ] **(M/P)** Registrar uso do `supportBot` (recordUsage) + cache no system.
+- [x] **(A/P)** Cache incremental: `cache_control` no último bloco das `messages` a cada chamada (2º breakpoint).
+- [x] **(A/P)** Híbrido "sticky" por conversa como default: começa no Haiku, promove ao modelo forte no 1º sinal/tool e mantém (Redis, TTL 30min); nunca rebaixa no meio; proteger a 1ª impressão (conversa nova → modelo forte).
+- [x] **(A/P)** Caps de custo default por plano (free 1 / básico 3 / premium 8 / prof. 20 USD/mês). *(rate limit por tenant/hora: pendente, follow-up)*
+- [x] **(M/P)** Registrar uso do `supportBot` (recordUsage) + cache no system.
+
+### A4 · Resiliência de IA (novo — pedido do dono)
+- [x] **(A/M)** Fallback de IA no Root Admin: se a chamada principal falhar (Claude fora/instável), o bot usa automaticamente um 2º provedor/rota compatível com a API Anthropic (2ª conta, proxy, OpenRouter, Bedrock/Vertex). Campos `fallback_api_key`/`base_url`/`model`/`model_simple` (chave cifrada), failover no `bot.ts` (só em erro de disponibilidade: 5xx/429/529/rede), log `ai_failover`. Cliente no WhatsApp nunca fica sem resposta.
 
 ---
 
@@ -92,6 +95,13 @@ Produto ainda **pré-produção** (vai entrar em teste fechado da Play). Isso é
 
 <!-- Novas entradas no topo. -->
 
+### 2026-08-16 — Bloco A implementado (código)
+- **A2 conformidade:** assinatura "somente status" em build de loja (EXPO_PUBLIC_STORE_BUILD), botão → dashboard, textos neutros; promptUpgrade neutro; cancelamento MP na exclusão de conta + fila de retry (migration 055 + job mpCancellationRetry). ✅ commit
+- **A3 custo de IA:** cache incremental nas messages, híbrido sticky por conversa (default), caps default por plano, supportBot com recordUsage+cache. ✅ commit
+- **A4 (novo) fallback de IA:** campo no Root Admin + failover no bot.ts. ✅
+- **A1 segurança (parcial):** webhook fail-closed com secret; ENCRYPTION_KEY/ALLOWED_ORIGINS no .env.example + avisos de boot. Itens de OPS (senha do Postgres, backup offsite bucket, setar envs, reconectar instâncias) ficam como **ação do dono** — listados acima.
+- Typecheck backend + mobile + admin-web limpos. **Ainda não deployado** (aguardando ok do dono).
+- Próximo: Bloco B (persona do bot + UX anti-suporte) e Bloco C (observabilidade + locks).
+
 ### 2026-08-16 — Início
 - Auditoria concluída (7 agentes Fable, 713k tokens). Documento e plano criados.
-- Próximo: implementar Bloco A em sub-lotes verificados (A2 conformidade → A3 custo → A1 segurança).

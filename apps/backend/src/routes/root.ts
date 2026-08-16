@@ -29,7 +29,7 @@ import { invalidatePushConfig } from '../lib/pushConfig'
 // never returned in full to the admin panel.
 const SECRET_FIELDS: Record<string, string[]> = {
   payment_config: ['mp_access_token', 'mp_webhook_secret'],
-  ai_config: ['api_key', 'transcription_api_key'],
+  ai_config: ['api_key', 'transcription_api_key', 'fallback_api_key'],
   evolution_config: ['key', 'webhook_secret'],
   smtp_config: ['pass'],
   email_config: ['resend_api_key'],

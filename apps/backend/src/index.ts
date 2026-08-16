@@ -109,6 +109,12 @@ function friendlyValidationMessage(issue: ZodIssue | undefined): string {
 if (isProd && !process.env.ALLOWED_ORIGINS) {
   console.warn('[SECURITY] ALLOWED_ORIGINS not set in production — CORS is reflecting any origin. Set it to a comma-separated allowlist.')
 }
+// Segredos de integração são cifrados com ENCRYPTION_KEY; sem ela, deriva-se do
+// JWT_SECRET (acopla rotação/comprometimento do JWT a TODOS os segredos). Aviso
+// não-fatal para não quebrar deploy existente — ver AUDITORIA_ARQUITETURA.md (A1).
+if (isProd && (!process.env.ENCRYPTION_KEY || process.env.ENCRYPTION_KEY === process.env.JWT_SECRET)) {
+  console.warn('[SECURITY] ENCRYPTION_KEY ausente (ou igual ao JWT_SECRET) — segredos cifrados com chave derivada do JWT. Defina ENCRYPTION_KEY (openssl rand -hex 32) e rode o re-encrypt para desacoplar.')
+}
 
 // trustProxy so per-IP rate limiting and HTTPS detection work behind the proxy.
 // Logger redaction: secrets and PII must never reach the logs (pino redact).

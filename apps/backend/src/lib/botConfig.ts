@@ -16,6 +16,14 @@ export type AiConfig = {
   caps: Record<string, number> // monthly USD cap per plan slug (0 = unlimited)
   transcription_provider: string // 'openai' | 'groq' | '' — for audio transcription
   transcription_api_key: string  // key for the transcription provider
+  // Fallback de IA: se a chamada principal falhar (Claude fora/instável), o bot
+  // tenta este provedor/rota compatível com a API Anthropic (2ª conta, proxy,
+  // OpenRouter, Bedrock/Vertex etc.) para NÃO deixar o cliente sem resposta.
+  // Vazio = sem fallback. Editável no Root Admin.
+  fallback_api_key: string
+  fallback_base_url: string
+  fallback_model: string         // modelo forte do fallback (vazio = usa o principal)
+  fallback_model_simple: string  // modelo barato do fallback (vazio = usa fallback_model)
 }
 
 // Teto de gasto MENSAL de IA por plano (USD). Floor de segurança: mesmo sem
@@ -42,6 +50,10 @@ const DEFAULTS: AiConfig = {
   caps: DEFAULT_CAPS,
   transcription_provider: '',
   transcription_api_key: '',
+  fallback_api_key: '',
+  fallback_base_url: '',
+  fallback_model: '',
+  fallback_model_simple: '',
 }
 
 const CACHE_KEY = 'ai:config'
@@ -118,6 +130,7 @@ export async function getAiConfig(): Promise<AiConfig> {
   // Secrets are stored encrypted at rest (decrypt tolerates legacy plaintext).
   merged.api_key = decrypt(merged.api_key)
   merged.transcription_api_key = decrypt(merged.transcription_api_key)
+  merged.fallback_api_key = decrypt(merged.fallback_api_key)
   // Back-compat: an old config may have `model: claude-haiku-4-5` and no mode
   if (!merged.mode) merged.mode = 'hybrid'
   // Floor de caps: planos sem cap explícito herdam o default (nunca ilimitado por

@@ -668,6 +668,15 @@ export async function runBot(params: {
     apiKey: aiConfig.api_key || process.env.ANTHROPIC_API_KEY,
     ...(aiConfig.base_url ? { baseURL: aiConfig.base_url } : {}),
   })
+  // Fallback de IA (Root Admin): 2ª rota/provedor compatível com a API Anthropic,
+  // usado só se a chamada principal falhar (Claude fora/instável) — o cliente no
+  // WhatsApp nunca fica sem resposta. Vazio = sem fallback.
+  const fallbackClient = aiConfig.fallback_api_key
+    ? new Anthropic({
+        apiKey: aiConfig.fallback_api_key,
+        ...(aiConfig.fallback_base_url ? { baseURL: aiConfig.fallback_base_url } : {}),
+      })
+    : null
   // Modelo por conversa (STICKY no híbrido): protege a 1ª impressão (conversa
   // nova → modelo forte) e, uma vez promovida a forte (sinal de venda OU uso de
   // ferramenta em qualquer mensagem anterior), mantém forte por 30min — evita
@@ -760,15 +769,47 @@ export async function runBot(params: {
     }
   }
 
+  // Um erro é "de disponibilidade" (vale acionar o fallback) quando é 5xx, 429,
+  // 529 (overloaded) ou falha de conexão/timeout — o SDK já tentou de novo antes
+  // de lançar. Erros 4xx de request (400/401/404) NÃO acionam fallback (seria o
+  // mesmo erro nos dois). 401 no fallback também não adianta (chave inválida).
+  const isAvailabilityError = (err: any): boolean => {
+    const s = err?.status ?? err?.statusCode
+    if (typeof s === 'number') return s >= 500 || s === 429 || s === 529
+    // sem status = erro de rede/timeout do SDK
+    return true
+  }
+  // Modelo equivalente no fallback (forte x barato), caindo para o principal se
+  // o Root Admin não tiver especificado um modelo de fallback.
+  const fallbackModelFor = (m: string): string =>
+    m === aiConfig.model_simple
+      ? (aiConfig.fallback_model_simple || aiConfig.fallback_model || m)
+      : (aiConfig.fallback_model || m)
+
   // Single place to call the model — preserves model-config, prompt caching,
   // thinking-disabled and usage-recording behavior for every request in the loop.
+  // Com FAILOVER: se a chamada principal falhar por indisponibilidade, tenta o
+  // provedor de fallback (se configurado) antes de desistir.
   const callModel = async (toolChoice: any): Promise<any> => {
     applyMessageCache()
     const createParams: any = { model, max_tokens: botCfg.max_tokens, system, tools: TOOLS, tool_choice: toolChoice, messages }
     if (thinkingOff) createParams.thinking = { type: 'disabled' }
-    const response: any = await anthropic.messages.create(createParams)
-    recordUsage(tenantId, model, response.usage).catch(() => {})
-    return response
+    try {
+      const response: any = await anthropic.messages.create(createParams)
+      recordUsage(tenantId, model, response.usage).catch(() => {})
+      return response
+    } catch (err: any) {
+      if (!fallbackClient || !isAvailabilityError(err)) throw err
+      const fbModel = fallbackModelFor(model)
+      console.warn(`[bot] IA principal falhou (${err?.status ?? err?.name ?? 'erro'}) — acionando fallback (${fbModel}) tenant=${tenantId}`)
+      logBotError(tenantId, 'ai_failover', `principal indisponível (${err?.status ?? err?.name ?? 'erro'}) — usando fallback ${fbModel}`, conversationId).catch(() => {})
+      const fbParams = { ...createParams, model: fbModel }
+      if (!fbModel.startsWith('claude-haiku')) fbParams.thinking = { type: 'disabled' }
+      else delete fbParams.thinking
+      const response: any = await fallbackClient.messages.create(fbParams)
+      recordUsage(tenantId, fbModel, response.usage).catch(() => {})
+      return response
+    }
   }
 
   const extractText = (response: any): string =>
