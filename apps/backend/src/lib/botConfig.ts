@@ -102,9 +102,9 @@ export const BOT_DEFAULTS: BotConfig = {
   allow_price_list_default: false,
   collect_last_name_default: true,
   reminder_return_template:
-    'Olá, {cliente}! 😊\n\nTudo bem? Notamos que já faz {dias} desde o seu último *{servico}* aqui na *{negocio}*.\n\nQue tal agendar um novo atendimento? Estamos à disposição! 📅\n\nResponda esta mensagem para marcar seu horário. 😊',
+    'Oi {cliente}, tudo bem? 😊 Faz um tempinho desde o seu último {servico} aqui na {negocio}. Quer que eu veja um horário pra você nos próximos dias?',
   reminder_appointment_template:
-    'Oi {cliente}! 😊 Passando pra confirmar seu *{servico}* {quando} às *{hora}* na {negocio}. Está confirmado? Responde *SIM* pra confirmar 👍 ou me chama se precisar remarcar.',
+    'Oi {cliente}! Passando pra confirmar seu {servico} {quando} às {hora}. Tá de pé? Responde *SIM* que já deixo certinho — ou me chama se precisar remarcar. 😊',
 }
 
 const BOT_CACHE_KEY = 'bot:config'

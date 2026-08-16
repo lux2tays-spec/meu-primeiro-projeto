@@ -1,7 +1,7 @@
 import { db } from '../lib/db'
 import { redis } from '../lib/redis'
 import { runBot, logBotError } from './bot'
-import { evolutionSend, evolutionSendSpecialistOffer } from './evolution'
+import { evolutionSend, evolutionSendHuman, evolutionSendSpecialistOffer } from './evolution'
 import { getHandoffConfig } from '../lib/handoffConfig'
 import { getBotConfig } from '../lib/botConfig'
 
@@ -337,6 +337,7 @@ async function flush(conversationId: string): Promise<void> {
   if (cfg && offerHandoff) {
     await evolutionSendSpecialistOffer(ctx.instanceId, ctx.customerPhone, cfg.offer_message, cfg.button_label)
   } else {
-    await evolutionSend(ctx.instanceId, ctx.customerPhone, outgoing)
+    // Entrega humana: quebra em bolhas + "digitando…" + pausa proporcional.
+    await evolutionSendHuman(ctx.instanceId, ctx.customerPhone, outgoing)
   }
 }

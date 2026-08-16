@@ -53,13 +53,13 @@ Produto ainda **pré-produção** (vai entrar em teste fechado da Play). Isso é
 ## BLOCO B — Persona do bot + UX anti-suporte
 
 ### B1 · Conversa do bot (diferencial)
-- [ ] **(A/P)** Reescrever os 7 `template_system_prompt` (migration 010) removendo "atendente virtual".
-- [ ] **(A/M)** Persona nomeada por tenant (`agent_config.persona_name`/`persona_style`) + bloco "QUEM É VOCÊ"; sugerir nome no onboarding.
-- [ ] **(A/P)** Anti-formulaicidade: remover frases-script e 😊 do prompt; banir tells ("Como posso ajudá-lo", "Fico à disposição"); variar aberturas.
-- [ ] **(A/M)** Entrega humana: `evolutionSendHuman` com "digitando" (presence) + quebra em bolhas + delay proporcional.
-- [ ] **(A/M)** Few-shot (4-6 mini-diálogos) no prefixo estável cacheado.
-- [ ] **(A/M)** Uma só voz: helper `systemVoice` para lembretes/fallbacks/confirmações respeitarem persona+tom+emoji; reescrever templates de lembrete.
-- [ ] **(M/P)** Roteamento híbrido que protege a 1ª impressão (config sinais + histórico).
+- [x] **(A/P)** Reescrever os 7 `template_system_prompt` (migration 057) removendo "atendente virtual".
+- [x] **(A/M)** Persona nomeada por tenant (`agent_config.persona_name`/`persona_style`) + bloco "QUEM É VOCÊ"; campo no app e na web. *(sugerir nome no onboarding: follow-up)*
+- [x] **(A/P)** Anti-formulaicidade: removidas frases-script e 😊 do prompt; tells banidos; variar aberturas.
+- [x] **(A/M)** Entrega humana: `evolutionSendHuman` com "digitando" (presence) + quebra em bolhas + pausa proporcional (falha parcial segura).
+- [x] **(A/M)** Few-shot (5 mini-diálogos) no prefixo estável cacheado.
+- [~] **(A/M)** Voz dos lembretes reescrita (menos emoji, humana). *(helper `systemVoice` para fallbacks/confirmações fixas: follow-up)*
+- [x] **(M/P)** Roteamento híbrido que protege a 1ª impressão (feito no A3 sticky).
 
 ### B2 · UX / redução de suporte
 - [ ] **(A/P)** Notificar toda transição crítica: WhatsApp caiu, handoff humano, suspensão por cobrança (reusa push).

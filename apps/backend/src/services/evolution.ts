@@ -132,6 +132,52 @@ export async function evolutionSend(instanceName: string, to: string, text: stri
   return res
 }
 
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
+
+// Presence "digitando…" (best-effort — nem todo build/Baileys suporta; se falhar,
+// seguimos com a pausa local, que já dá a sensação humana).
+async function evolutionPresence(instanceName: string, to: string, ms: number) {
+  try {
+    await evolutionRequest(`/chat/sendPresence/${instanceName}`, { number: to, presence: 'composing', delay: ms })
+  } catch { /* ignore */ }
+}
+
+// Quebra a resposta em bolhas (por parágrafo/linha em branco), no máx. 3 — nunca
+// no meio de uma lista de horários (blocos sem linha em branco ficam juntos).
+function splitBubbles(text: string): string[] {
+  const parts = text.split(/\n{2,}/).map((s) => s.trim()).filter(Boolean)
+  if (parts.length === 0) return [text.trim()]
+  if (parts.length <= 3) return parts
+  return [parts[0], parts[1], parts.slice(2).join('\n\n')]
+}
+
+// Envia a resposta do bot como um HUMANO: em 1-3 bolhas, com "digitando…" e uma
+// pausa proporcional ao tamanho antes de cada bolha (o maior "tell" de robô é a
+// resposta longa instantânea em bloco único, a qualquer hora). Falha parcial é
+// segura: se uma bolha falhar, paramos (não reenvia fora de ordem).
+export async function evolutionSendHuman(instanceName: string, to: string, text: string) {
+  const clean = (text || '').trim()
+  if (!clean) return null
+  const bubbles = splitBubbles(clean)
+  let last: any = null
+  for (let i = 0; i < bubbles.length; i++) {
+    const b = bubbles[i]
+    // ~30ms/char, entre 0,6s e 2,2s por bolha (total ≤ ~7s no pior caso).
+    const typingMs = Math.min(2200, Math.max(600, b.length * 30))
+    await evolutionPresence(instanceName, to, typingMs)
+    await sleep(typingMs)
+    try {
+      last = await evolutionRequest(`/message/sendText/${instanceName}`, { number: to, text: b })
+      await rememberSentMessage(last)
+    } catch (err) {
+      console.error(`[evolution] falha ao enviar bolha ${i + 1}/${bubbles.length}:`, err)
+      break // não reenvia fora de ordem
+    }
+    if (i < bubbles.length - 1) await sleep(280)
+  }
+  return last
+}
+
 // Offers a human handoff. Tries an interactive WhatsApp button; if the Evolution
 // build / device doesn't support buttons (common with Baileys/QR connections),
 // falls back to a plain-text prompt whose reply text is the SAME label, so the
