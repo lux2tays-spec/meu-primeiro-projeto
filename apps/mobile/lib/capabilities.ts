@@ -20,14 +20,18 @@ export function useCapabilities() {
   }
 }
 
-// Alerta padrão de "recurso do plano" com atalho para a tela de assinatura.
+// Alerta padrão de "recurso do plano". Em build de loja, a linguagem é neutra
+// (anti-steering): não fala de preço/compra, apenas leva à área da conta/plano.
+const STORE_BUILD = process.env.EXPO_PUBLIC_STORE_BUILD === '1'
 export function promptUpgrade(featureLabel: string) {
   Alert.alert(
     `${featureLabel} não está no seu plano`,
-    'Faça upgrade do seu plano para desbloquear este recurso.',
+    STORE_BUILD
+      ? 'Este recurso faz parte de outro plano. Veja os detalhes na área da sua conta.'
+      : 'Faça upgrade do seu plano para desbloquear este recurso.',
     [
       { text: 'Agora não', style: 'cancel' },
-      { text: 'Ver planos', onPress: () => router.push('/(app)/settings/subscription') },
+      { text: STORE_BUILD ? 'Ver meu plano' : 'Ver planos', onPress: () => router.push('/(app)/settings/subscription') },
     ]
   )
 }

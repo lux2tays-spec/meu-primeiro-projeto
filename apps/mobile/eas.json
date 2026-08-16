@@ -29,7 +29,8 @@
       "channel": "production",
       "env": {
         "APP_ENV": "production",
-        "EXPO_PUBLIC_API_URL": "https://api.aiconfirma.com.br"
+        "EXPO_PUBLIC_API_URL": "https://api.aiconfirma.com.br",
+        "EXPO_PUBLIC_STORE_BUILD": "1"
       }
     }
   },

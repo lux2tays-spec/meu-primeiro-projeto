@@ -18,7 +18,14 @@ import { colors, font, spacing, radius } from '@/lib/theme'
 // políticas de pagamento da Google Play e da Apple (assinatura de serviço digital
 // dentro do app exigiria a cobrança da loja). Ver a estratégia registrada.
 const WEB_URL = process.env.EXPO_PUBLIC_WEB_URL ?? 'https://aiconfirma.com.br'
-const MANAGE_PATH = '/settings/subscription'
+
+// Conformidade Apple/Google (anti-steering): nos BUILDS DE LOJA, o app não pode
+// exibir preços nem conduzir à compra externa. Nesse modo a tela fica "somente
+// status" (plano atual, renovação, histórico, cancelar) e o botão leva à área da
+// conta no site — a pessoa contrata/gerencia lá, sem o app "vender". Fora do build
+// de loja (dev/preview interno) segue a experiência completa para nós testarmos.
+const STORE_BUILD = process.env.EXPO_PUBLIC_STORE_BUILD === '1'
+const MANAGE_PATH = STORE_BUILD ? '/dashboard' : '/settings/subscription'
 const MANAGE_URL = `${WEB_URL}${MANAGE_PATH}`
 
 // PAY-7: os planos vêm SEMPRE do backend (/subscription/plans). Este fallback
@@ -195,28 +202,34 @@ export default function SubscriptionScreen() {
               />
               <Text style={[styles.trialText, trialExpired && styles.trialTextExpired]}>
                 {trialExpired
-                  ? `Seu período de teste terminou em ${trialEndsAt!.toLocaleDateString('pt-BR')}. Assine um plano para continuar usando.`
+                  ? `Seu período de teste terminou em ${trialEndsAt!.toLocaleDateString('pt-BR')}. ${STORE_BUILD ? 'Gerencie sua conta para continuar usando.' : 'Assine um plano para continuar usando.'}`
                   : `Trial expira em ${trialEndsAt ? trialEndsAt.toLocaleDateString('pt-BR') : '—'}`}
               </Text>
             </View>
           )}
         </Card>
 
-        {/* Gerenciar assinatura na web — a compra/renovação acontece no site,
-            com pagamento seguro. Aqui no app fica o acompanhamento. */}
+        {/* Botão para a área da conta no site. Em build de loja é neutro
+            ("Gerenciar conta" → dashboard); fora dele, leva ao gerenciamento. */}
         <Button
-          label={tenant?.plan && tenant.plan !== 'free' && !isTrial ? 'Gerenciar assinatura' : 'Assinar um plano'}
+          label={STORE_BUILD
+            ? 'Gerenciar conta'
+            : (tenant?.plan && tenant.plan !== 'free' && !isTrial ? 'Gerenciar assinatura' : 'Assinar um plano')}
           onPress={openManage}
           loading={opening}
         />
         <View style={styles.webNote}>
-          <Ionicons name="shield-checkmark-outline" size={14} color={colors.textSecondary} />
+          <Ionicons name="globe-outline" size={14} color={colors.textSecondary} />
           <Text style={styles.webNoteText}>
-            Você abre o pagamento seguro sem sair da sua sessão — não precisa fazer login de novo. O acompanhamento do plano fica aqui no app.
+            {STORE_BUILD
+              ? 'Gerencie sua conta e seu plano pelo site, com segurança. O acompanhamento fica aqui no app.'
+              : 'Você abre o pagamento seguro sem sair da sua sessão — não precisa fazer login de novo. O acompanhamento do plano fica aqui no app.'}
           </Text>
         </View>
 
-        {/* Plans comparison (informativo) */}
+        {/* Comparação de planos com PREÇOS — só fora do build de loja
+            (anti-steering: a loja não pode exibir preço nem conduzir à compra). */}
+        {!STORE_BUILD && (<>
         <Text style={styles.sectionTitle}>Planos disponíveis</Text>
 
         {/* Toggle mensal / anual */}
@@ -289,6 +302,7 @@ export default function SubscriptionScreen() {
             </TouchableOpacity>
           )
         })}
+        </>)}
 
         {/* Cancelar — só aparece com assinatura paga ativa. Cancelamento não é
             compra, então segue no app (backend cancela no Mercado Pago). */}

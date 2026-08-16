@@ -4,6 +4,8 @@ import { db } from '../lib/db'
 import { sendEmailChangeEmail, sendPasswordResetEmail, sendVerificationEmail } from '../lib/email'
 import { hashPassword, verifyPassword } from '../lib/password'
 import { bumpTokenVersion } from '../lib/tokenVersion'
+import { getPaymentConfig } from '../lib/paymentConfig'
+import { cancelPreapproval } from '../services/mercadopago'
 import crypto from 'node:crypto'
 
 const registerSchema = z.object({
@@ -742,6 +744,18 @@ export const authRoutes: FastifyPluginAsync = async (app) => {
   }, async (request, reply) => {
     const { user_id, tenant_id, role } = request.user
 
+    // Antes de apagar (cascade), captura a assinatura MP ativa do tenant para
+    // cancelar a cobrança — senão o ex-cliente continua sendo cobrado.
+    let mpSubscriptionId: string | null = null
+    if ((role === 'owner' || role === 'root') && tenant_id) {
+      const { rows: [sub] } = await db.query(
+        `SELECT mp_subscription_id FROM subscriptions
+          WHERE tenant_id = $1 AND status <> 'cancelled' AND mp_subscription_id IS NOT NULL`,
+        [tenant_id]
+      )
+      mpSubscriptionId = sub?.mp_subscription_id ?? null
+    }
+
     const client = await db.connect()
     try {
       await client.query('BEGIN')
@@ -770,8 +784,23 @@ export const authRoutes: FastifyPluginAsync = async (app) => {
       client.release()
     }
 
-    // NOTE: any active Mercado Pago subscription must be cancelled out-of-band
-    // (MP has no auto-cancel on our side). Tracked as a follow-up.
+    // Cancela a assinatura no Mercado Pago (best-effort). Nunca bloqueia a
+    // exclusão: se o MP falhar, enfileira para um job reprocessar com retry.
+    if (mpSubscriptionId) {
+      try {
+        const cfg = await getPaymentConfig()
+        const result = await cancelPreapproval(cfg, mpSubscriptionId)
+        if (!result.ok) throw new Error(result.reason || 'mp_cancel_failed')
+      } catch (err: any) {
+        request.log.error({ mpSubscriptionId, err: err?.message }, 'MP cancel on account deletion failed — enqueued for retry')
+        await db.query(
+          `INSERT INTO pending_mp_cancellations (mp_subscription_id, reason, last_error)
+           VALUES ($1, 'account_deletion', $2)`,
+          [mpSubscriptionId, String(err?.message ?? 'unknown').slice(0, 500)]
+        ).catch((e) => request.log.error({ e: e?.message }, 'failed to enqueue pending_mp_cancellation'))
+      }
+    }
+
     return reply.send({ deleted: true })
   })
 }
