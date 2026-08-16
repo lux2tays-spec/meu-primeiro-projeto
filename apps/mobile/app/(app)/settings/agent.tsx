@@ -31,6 +31,7 @@ const FALLBACK_BUSINESS_TYPES = [
 ]
 
 const BLANK = {
+  persona_name: '', persona_style: '',
   business_info: '', business_type: '', address: '', neighborhood: '',
   city: '', state: '', instagram_url: '', google_maps_url: '',
   website_url: '', whatsapp_number: '', tone: 'friendly',
@@ -96,6 +97,8 @@ export default function AgentScreen() {
   useEffect(() => {
     if (!config) return
     setForm({
+      persona_name:         config.persona_name ?? '',
+      persona_style:        config.persona_style ?? '',
       business_info:        config.business_info ?? '',
       business_type:        config.business_type ?? '',
       address:              config.address ?? '',
@@ -257,6 +260,26 @@ export default function AgentScreen() {
                 ))}
               </View>
             </ScrollView>
+
+            <Label hint="Dê um nome de pessoa ao seu atendimento (ex.: Ana, Lu, Rafa). O bot se apresenta com esse nome e soa mais humano — sem parecer robô.">
+              Nome do atendente (persona)
+            </Label>
+            <Input
+              value={form.persona_name}
+              onChangeText={(v) => set('persona_name', v)}
+              placeholder="Ex.: Ana"
+              maxLength={40}
+            />
+
+            <Label hint="Opcional: como essa pessoa escreve (ex.: 'informal e leve', 'formal e cordial').">
+              Jeito de escrever (opcional)
+            </Label>
+            <Input
+              value={form.persona_style}
+              onChangeText={(v) => set('persona_style', v)}
+              placeholder="Ex.: informal e leve"
+              maxLength={200}
+            />
 
             <Label hint="O bot usará isso para responder perguntas gerais dos clientes">
               Descrição do negócio

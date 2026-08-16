@@ -12,6 +12,8 @@ const UPLOADS_DIR = path.join(process.cwd(), 'uploads', 'catalogs')
 
 const updateSchema = z.object({
   system_prompt:        z.string().optional(),
+  persona_name:         z.string().max(40).optional(),
+  persona_style:        z.string().max(200).optional(),
   tone:                 z.string().max(60).optional(),
   language:             z.string().optional(),
   business_info:        z.string().optional(),

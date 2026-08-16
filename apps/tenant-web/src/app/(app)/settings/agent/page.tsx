@@ -15,6 +15,7 @@ const TABS = ['Identidade', 'Comportamento', 'Catálogos'] as const
 type Tab = typeof TABS[number]
 
 const BLANK = {
+  persona_name: '', persona_style: '',
   business_info: '', business_type: '', address: '', neighborhood: '', city: '', state: '',
   instagram_url: '', google_maps_url: '', website_url: '', whatsapp_number: '',
   tone: 'friendly', custom_instructions: '', system_prompt: '',
@@ -64,6 +65,8 @@ export default function AgentPage() {
   useEffect(() => {
     if (!config) return
     setForm({
+      persona_name:         config.persona_name ?? '',
+      persona_style:        config.persona_style ?? '',
       business_info:        config.business_info ?? '',
       business_type:        config.business_type ?? '',
       address:              config.address ?? '',
@@ -183,6 +186,27 @@ export default function AgentPage() {
         {/* ── IDENTIDADE ── */}
         {tab === 'Identidade' && (
           <>
+            <div className="grid grid-cols-2 gap-4">
+              <Field label="Nome do atendente (persona)" hint="Dê um nome de pessoa (ex.: Ana, Lu, Rafa). O bot se apresenta assim e soa mais humano.">
+                <input
+                  value={form.persona_name}
+                  onChange={(e) => set('persona_name', e.target.value)}
+                  maxLength={40}
+                  placeholder="Ex.: Ana"
+                  className="w-full h-10 px-3 rounded-xl border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+                />
+              </Field>
+              <Field label="Jeito de escrever (opcional)" hint="Como essa pessoa escreve (ex.: informal e leve, formal e cordial).">
+                <input
+                  value={form.persona_style}
+                  onChange={(e) => set('persona_style', e.target.value)}
+                  maxLength={200}
+                  placeholder="Ex.: informal e leve"
+                  className="w-full h-10 px-3 rounded-xl border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+                />
+              </Field>
+            </div>
+
             <Field label="Tipo de negócio">
               <select
                 value={form.business_type}
