@@ -41,18 +41,17 @@ async function webhookAuthorized(request: any): Promise<boolean> {
     request.headers['apikey']
 
   if (!secret) {
-    // Sem segredo configurado ainda: processa (não derruba a mensagem do cliente),
-    // mas avisa alto. Assim que o segredo for configurado, a autenticação passa a
-    // ser EXIGIDA automaticamente (fail-closed) — ver abaixo.
-    warnWebhookOnce('[webhook] SEM segredo configurado — processando sem autenticação. Defina EVOLUTION_WEBHOOK_SECRET e reconecte a(s) instância(s) para ativar a proteção (fail-closed).')
+    warnWebhookOnce('[webhook] sem segredo configurado — processando mensagens sem autenticação (defina EVOLUTION_WEBHOOK_SECRET p/ endurecer).')
     return true
   }
   if (!provided) {
-    // Fail-CLOSED: existe segredo, mas a requisição veio sem token → rejeita
-    // (instância legítima registrada com o segredo SEMPRE envia o token). Uma
-    // instância antiga sem token deve ser reconectada para voltar a funcionar.
-    console.warn('[webhook] requisição sem token com segredo configurado — rejeitada. Reconecte a instância para reativar a autenticação.')
-    return false
+    // IMPORTANTE: instâncias registradas ANTES do segredo não enviam token na URL.
+    // Rejeitar aqui (fail-closed) DERRUBA o bot dessas instâncias — foi o que
+    // aconteceu. Então processamos mesmo assim (não perder a mensagem do cliente)
+    // e avisamos: para endurecer de verdade, é preciso RECONECTAR a instância com
+    // o token e só então bloquear tokenless (feito num passo de ops coordenado).
+    warnWebhookOnce('[webhook] requisição sem token — processando mesmo assim; reconecte a instância para incluir o token na URL do webhook.')
+    return true
   }
   // A token WAS sent → it must match. Only an active mismatch (likely forged) is rejected.
   const a = Buffer.from(String(provided))
