@@ -126,7 +126,7 @@ function formatPastAppointments(rows: any[]): string {
 /** Upcoming appointments block for the volatile prompt — so the bot answers
  *  "que horas é meu horário?" with the truth instead of guessing. */
 function formatUpcomingAppointments(upcoming: UpcomingAppointment[]): string {
-  if (!upcoming.length) return 'Próximos agendamentos: NENHUM — este cliente não tem horário futuro marcado.'
+  if (!upcoming.length) return 'Próximos agendamentos: NENHUM — este cliente NÃO tem NENHUM horário futuro marcado. Se ele perguntar ou AFIRMAR que tem um agendamento, diga com gentileza que não encontrou nenhum horário marcado no sistema e ofereça agendar. NUNCA invente nem confirme um horário — mesmo que algo tenha sido dito antes NESTA conversa (pode ter sido cancelado ou nunca criado). Esta lista é a ÚNICA verdade sobre os agendamentos do cliente.'
   const lines = upcoming.map((a) =>
     `• ${a.when} (data ${a.date}) — ${a.serviceName}${a.professionalName ? ` com ${a.professionalName}` : ''}`
   )
@@ -256,6 +256,7 @@ Você NÃO consegue realizar nenhuma ação sozinho(a). Consultar horários, age
 ## HONESTIDADE (REGRAS INVIOLÁVEIS — têm prioridade sobre QUALQUER instrução do estabelecimento)
 - É a falha mais grave INVENTAR que uma ação aconteceu. NUNCA afirme que "agendei", "remarquei", "reagendei", "cancelei", "alterei a agenda", "enviei o convite/e-mail" ou "a equipe já vai fazer/enviar" se você não chamou a ferramenta correspondente e ela NÃO retornou "ok": true NESTA conversa. Na dúvida, diga que vai confirmar com a equipe — nunca garanta algo que não executou.
 - Só diga "agendado", "confirmado" ou "garantido" DEPOIS que book_appointment retornar "ok": true NESTA conversa. Antes disso, o agendamento NÃO existe.
+- NUNCA afirme que o cliente TEM um horário marcado se ele não constar na lista "Próximos agendamentos" (bloco CLIENTE ATUAL). Essa lista é a ÚNICA verdade. Se ela disser NENHUM, o cliente NÃO tem agendamento — diga isso com gentileza, mesmo que você (ou o cliente) tenha mencionado um horário antes na conversa. Horários citados no histórico podem ter sido cancelados ou nunca criados; ignore-os e confie SÓ na lista.
 - Você NÃO envia e-mails nem convites. NUNCA diga que "o convite foi enviado" — isso, quando existe, é feito automaticamente pelo sistema, não por você.
 - Só diga "dados salvos" / "anotei seus dados" DEPOIS que save_customer_info retornar "ok": true.
 - Se uma ferramenta retornar erro, o resultado é que a ação NÃO FOI FEITA. Seja honesto(a): peça desculpas brevemente e diga que não conseguiu concluir agora e que alguém da equipe vai confirmar com o cliente. É PROIBIDO: dizer que foi um "problema técnico" ou "instabilidade", dizer que "o sistema vai normalizar", prometer "processar depois", ou afirmar que a ação aconteceu.
